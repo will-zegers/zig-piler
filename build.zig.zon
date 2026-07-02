@@ -1,0 +1,13 @@
+.{
+    .name = .zig_piler,
+    .version = "0.0.0",
+    .fingerprint = 0xa759cbcccdb5c6c4,
+    .paths = .{""},
+
+    .dependencies = .{
+        .translate_c = .{
+            .url = "git+https://codeberg.org/ziglang/translate-c#130d66722a8923ceb7fe4b2ab90c49fd992fb1b8",
+            .hash = "translate_c-0.0.0-Q_BUWhw9BwCAVlGTGHgjILH-VxNMZ7J5Mx6k-ZoDdiKg",
+        },
+    },
+}
