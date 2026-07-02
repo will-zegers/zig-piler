@@ -20,12 +20,18 @@ pub fn build(b: *std.Build) !void {
 
     trans_libregex.linkLibrary(libregex);
 
+    // zig fmt: off
     const main_mod = b.createModule(.{
         .root_source_file = b.path("src/main.zig"),
         .target = target,
         .optimize = optimize,
+        .imports = &.{
+            .{
+                .name = "regex",
+                .module = trans_libregex.mod,
+            },
+        }
     });
-    main_mod.addImport("regex", trans_libregex.mod);
     const main = b.addExecutable(.{
         .name = "zig-piler",
         .root_module = main_mod,
@@ -36,7 +42,6 @@ pub fn build(b: *std.Build) !void {
     const run_step = b.step("run", "Build and run the executable");
     const run_cmd = b.addRunArtifact(main);
     run_step.dependOn(&run_cmd.step);
-
     run_cmd.addPassthruArgs();
 }
 

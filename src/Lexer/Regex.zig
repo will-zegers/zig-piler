@@ -1,16 +1,11 @@
 const std = @import("std");
 const re = @import("regex");
 
-const PatternMatch = struct {
-    start: usize,
-    end: usize,
-};
-
-const Self = @This();
+const Regex = @This();
 
 inner: *re.regex_t,
 
-pub fn init(pattern: [:0]const u8) !Self {
+pub fn init(pattern: [:0]const u8) !Regex {
     const inner = re.alloc_regex_t().?;
     if (0 != re.regcomp(inner, pattern, re.REG_EXTENDED)) {
         return error.compile;
@@ -21,11 +16,11 @@ pub fn init(pattern: [:0]const u8) !Self {
     };
 }
 
-pub fn deinit(self: Self) void {
+pub fn deinit(self: Regex) void {
     re.free_regex_t(self.inner);
 }
 
-pub fn exec(self: Self, input: [:0]const u8) ?[]const u8 {
+pub fn exec(self: Regex, input: [:0]const u8) ?[]const u8 {
     const match_size = 1;
     var pmatch: [match_size]re.regmatch_t = undefined;
 

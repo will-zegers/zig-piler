@@ -1,17 +1,45 @@
 const std = @import("std");
-const Allocator = std.mem.Allocator;
+const mem = std.mem;
+const Allocator = mem.Allocator;
 const ArrayList = std.ArrayList;
 const Regex = @import("Lexer/Regex.zig");
+const StringHashMap = std.StringHashMap;
 
-const Self = @This();
+pub const TokenType = enum {
+    Identifier,
+    Constant,
+    Keyword,
+    OpenParenthesis,
+    CloseParenthesis,
+    OpenBrace,
+    CloseBrace,
+    Semicolon,
+};
+
+const Token = struct {
+    type: TokenType,
+    value: []const u8,
+};
+
+const KEYWORDS = [_][]const u8{ "int", "return", "void" };
+fn getIdentifierType(token: []const u8) TokenType {
+    for (KEYWORDS) |keyword| {
+        if (mem.eql(u8, keyword, token)) {
+            return .Keyword;
+        }
+    }
+    return .Identifier;
+}
+
+const Lexer = @This();
 
 allocator: Allocator,
-tokens: ArrayList([]const u8),
+tokens: ArrayList(Token),
 reIdentifier: Regex,
 reConstant: Regex,
 reComment: Regex,
 
-pub fn init(allocator: Allocator) !Self {
+pub fn init(allocator: Allocator) !Lexer {
     return .{
         .allocator = allocator,
         .tokens = .empty,
@@ -21,14 +49,14 @@ pub fn init(allocator: Allocator) !Self {
     };
 }
 
-pub fn deinit(self: *Self) void {
+pub fn deinit(self: *Lexer) void {
     defer self.reIdentifier.deinit();
     defer self.reConstant.deinit();
     defer self.reComment.deinit();
     defer self.tokens.deinit(self.allocator);
 }
 
-pub fn tokenize(self: *Self, text: [:0]const u8) ![][]const u8 {
+pub fn tokenize(self: *Lexer, text: [:0]const u8) ![]Token {
     var tokenStart: usize = 0;
     var lineNumber: usize = 1;
     while (tokenStart < text.len) {
@@ -38,25 +66,26 @@ pub fn tokenize(self: *Self, text: [:0]const u8) ![][]const u8 {
         switch (currentChar) {
             'a'...'z', 'A'...'Z', '_' => {
                 const token = self.reIdentifier.exec(nextToken) orelse badToken(nextToken, lineNumber);
-                try self.tokens.append(self.allocator, token);
+                const tokenType = getIdentifierType(token);
+                try self.tokens.append(self.allocator, .{ .type = tokenType, .value = token });
                 tokenStart += token.len;
             },
             '0'...'9' => {
                 const token = self.reConstant.exec(nextToken) orelse badToken(nextToken, lineNumber);
-                try self.tokens.append(self.allocator, token);
+                try self.tokens.append(self.allocator, .{ .type = .Constant, .value = token });
                 tokenStart += token.len;
             },
             '(', ')', '{', '}', ';' => {
-                const token = switch (currentChar) {
-                    '(' => "(",
-                    ')' => ")",
-                    '{' => "{",
-                    '}' => "}",
-                    ';' => ";",
+                const token: Token = switch (currentChar) {
+                    '(' => .{ .type = .OpenParenthesis, .value = "(" },
+                    ')' => .{ .type = .CloseParenthesis, .value = ")" },
+                    '{' => .{ .type = .OpenBrace, .value = "{" },
+                    '}' => .{ .type = .CloseBrace, .value = "}" },
+                    ';' => .{ .type = .Semicolon, .value = ";" },
                     else => unreachable,
                 };
                 try self.tokens.append(self.allocator, token);
-                tokenStart += token.len;
+                tokenStart += token.value.len;
             },
             ' ', '\t' => {
                 tokenStart += 1;

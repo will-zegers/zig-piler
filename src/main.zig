@@ -1,6 +1,7 @@
 const std = @import("std");
 const mem = std.mem;
 const Lexer = @import("Lexer.zig");
+const regex = @import("regex");
 
 pub fn main(init: std.process.Init) !void {
     var args = try init.minimal.args.iterateAllocator(init.gpa);
@@ -28,9 +29,10 @@ pub fn main(init: std.process.Init) !void {
         defer lexer.deinit();
 
         const tokens = try lexer.tokenize(textZ);
-        const tokensJoined = try mem.join(init.gpa, "  ", tokens);
-        defer init.gpa.free(tokensJoined);
 
-        std.log.info("Generated tokens:\n  {s}", .{tokensJoined});
+        std.log.info("Generated tokens:", .{});
+        for (tokens) |token| {
+            std.log.info(" - {s}\t<{}>", .{ token.value, token.type });
+        }
     }
 }
