@@ -2,34 +2,12 @@ const std = @import("std");
 const mem = std.mem;
 const Allocator = mem.Allocator;
 const ArrayList = std.ArrayList;
-const Regex = @import("Lexer/Regex.zig");
 const StringHashMap = std.StringHashMap;
 
-pub const TokenType = enum {
-    Identifier,
-    Constant,
-    Keyword,
-    OpenParenthesis,
-    CloseParenthesis,
-    OpenBrace,
-    CloseBrace,
-    Semicolon,
-};
-
-const Token = struct {
-    type: TokenType,
-    value: []const u8,
-};
-
-const KEYWORDS = [_][]const u8{ "int", "return", "void" };
-fn getIdentifierType(token: []const u8) TokenType {
-    for (KEYWORDS) |keyword| {
-        if (mem.eql(u8, keyword, token)) {
-            return .Keyword;
-        }
-    }
-    return .Identifier;
-}
+const Regex = @import("Lexer/Regex.zig");
+const token = @import("token.zig");
+const Token = token.Token;
+const TokenType = token.TokenType;
 
 const Lexer = @This();
 
@@ -65,18 +43,18 @@ pub fn tokenize(self: *Lexer, text: [:0]const u8) ![]Token {
 
         switch (currentChar) {
             'a'...'z', 'A'...'Z', '_' => {
-                const token = self.reIdentifier.exec(nextToken) orelse badToken(nextToken, lineNumber);
-                const tokenType = getIdentifierType(token);
-                try self.tokens.append(self.allocator, .{ .type = tokenType, .value = token });
-                tokenStart += token.len;
+                const identifier = self.reIdentifier.exec(nextToken) orelse badToken(nextToken, lineNumber);
+                const tokenType = token.getIdentifierType(identifier);
+                try self.tokens.append(self.allocator, .{ .type = tokenType, .value = identifier });
+                tokenStart += identifier.len;
             },
             '0'...'9' => {
-                const token = self.reConstant.exec(nextToken) orelse badToken(nextToken, lineNumber);
-                try self.tokens.append(self.allocator, .{ .type = .Constant, .value = token });
-                tokenStart += token.len;
+                const constant = self.reConstant.exec(nextToken) orelse badToken(nextToken, lineNumber);
+                try self.tokens.append(self.allocator, .{ .type = .Constant, .value = constant });
+                tokenStart += constant.len;
             },
             '(', ')', '{', '}', ';' => {
-                const token: Token = switch (currentChar) {
+                const tok: Token = switch (currentChar) {
                     '(' => .{ .type = .OpenParenthesis, .value = "(" },
                     ')' => .{ .type = .CloseParenthesis, .value = ")" },
                     '{' => .{ .type = .OpenBrace, .value = "{" },
@@ -84,8 +62,8 @@ pub fn tokenize(self: *Lexer, text: [:0]const u8) ![]Token {
                     ';' => .{ .type = .Semicolon, .value = ";" },
                     else => unreachable,
                 };
-                try self.tokens.append(self.allocator, token);
-                tokenStart += token.value.len;
+                try self.tokens.append(self.allocator, tok);
+                tokenStart += tok.value.len;
             },
             ' ', '\t' => {
                 tokenStart += 1;
@@ -111,6 +89,6 @@ fn badToken(text: [:0]const u8, lineNumber: usize) noreturn {
         std.process.fatal("Lexing error on line {d}", .{lineNumber});
     };
 
-    const token = reBadToken.exec(text).?;
-    std.process.fatal("Invalid symbol found '{s}' on line {d}", .{ token, lineNumber });
+    const tok = reBadToken.exec(text).?;
+    std.process.fatal("Invalid symbol found '{s}' on line {d}", .{ tok, lineNumber });
 }
