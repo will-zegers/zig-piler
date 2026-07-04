@@ -1,16 +1,25 @@
 const std = @import("std");
 const mem = std.mem;
+const StaticStringMap = std.StaticStringMap;
 
 pub const TokenType = enum {
-    Identifier,
-    Constant,
-    Keyword,
-    OpenParenthesis,
-    CloseParenthesis,
-    OpenBrace,
     CloseBrace,
+    CloseParenthesis,
+    Constant,
+    Identifier,
+    Int,
+    OpenBrace,
+    OpenParenthesis,
+    Return,
     Semicolon,
+    Void,
 };
+
+pub const KeywordMap = StaticStringMap(TokenType).initComptime(.{
+    .{ "int", .Int },
+    .{ "return", .Return },
+    .{ "void", .Void },
+});
 
 pub const Token = struct {
     const Self = @This();
@@ -38,13 +47,3 @@ pub const TokenIterator = struct {
         return null;
     }
 };
-
-const KEYWORDS = [_][]const u8{ "int", "return", "void" };
-pub fn getIdentifierType(token: []const u8) TokenType {
-    for (KEYWORDS) |keyword| {
-        if (mem.eql(u8, keyword, token)) {
-            return .Keyword;
-        }
-    }
-    return .Identifier;
-}

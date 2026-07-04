@@ -8,6 +8,7 @@ const Regex = @import("Lexer/Regex.zig");
 const token = @import("token.zig");
 const Token = token.Token;
 const TokenType = token.TokenType;
+const KeywordMap = token.KeywordMap;
 
 const Lexer = @This();
 
@@ -44,7 +45,7 @@ pub fn tokenize(self: *Lexer, text: [:0]const u8) ![]Token {
         switch (currentChar) {
             'a'...'z', 'A'...'Z', '_' => {
                 const identifier = self.reIdentifier.exec(nextToken) orelse badToken(nextToken, lineNumber);
-                const tokenType = token.getIdentifierType(identifier);
+                const tokenType = KeywordMap.get(identifier) orelse .Identifier;
                 try self.tokens.append(self.allocator, .{ .type = tokenType, .value = identifier });
                 tokenStart += identifier.len;
             },
