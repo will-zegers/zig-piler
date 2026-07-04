@@ -28,6 +28,10 @@ pub const Token = struct {
     value: []const u8,
 };
 
+pub fn iterate(tokens: []Token) TokenIterator {
+    return .{ .items = tokens };
+}
+
 pub const TokenIterator = struct {
     items: []const Token,
     index: usize = 0,

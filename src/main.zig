@@ -2,7 +2,7 @@ const std = @import("std");
 const mem = std.mem;
 const Lexer = @import("Lexer.zig");
 const regex = @import("regex");
-const Parser = @import("Parser.zig").Parser;
+const Parser = @import("Parser.zig");
 const TokenIterator = @import("token.zig").TokenIterator;
 
 pub fn main(init: std.process.Init) !void {
@@ -36,11 +36,9 @@ pub fn main(init: std.process.Init) !void {
         const tokens = try lexer.tokenize(textZ);
 
         if (runParser) {
-            var tokenIter: TokenIterator = .{ .items = tokens };
             std.log.info("Running parser...", .{});
-            var parser = Parser.parse(&tokenIter);
-
-            try parser.print();
+            const ast = Parser.parse(tokens);
+            _ = ast;
         }
     }
 }

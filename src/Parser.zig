@@ -1,144 +1,86 @@
 const std = @import("std");
 const fatal = std.process.fatal;
 
-const token = @import("token.zig");
-const Token = token.Token;
-const TokenType = token.TokenType;
-const TokenIterator = token.TokenIterator;
+const tok = @import("token.zig");
+const Token = tok.Token;
+const TokenIterator = tok.TokenIterator;
+const TokenType = tok.TokenType;
 
-pub const Parser = struct {
-    const Self = @This();
+const Parser = @This();
 
+pub fn parse(tokens: []Token) AST {
+    var tokenIter = tok.iterate(tokens);
+
+    const ast = AST.init(&tokenIter);
+    if (tokenIter.next()) |token| {
+        fatal("Unexpected token(s) at end of file: {s}", .{token.value});
+    }
+
+    return ast;
+}
+
+const AST = struct {
     program: Program,
 
-    pub fn parse(tokens: *TokenIterator) Self {
-        const program: Program = .parse(tokens);
-        if (tokens.peek()) |t| {
-            fatal("Unexpected token '{s}' at end of file", .{t.value});
-        }
-        return .{ .program = program };
-    }
-
-    pub fn print(self: Self) !void {
-        try self.program.print();
-    }
-};
-
-const Expression = struct {
-    const Self = @This();
-
-    value: []const u8,
-    type: TokenType,
-
-    pub fn parse(tokens: *TokenIterator) Self {
-        const tok = expect(.Constant, tokens);
-        _ = expect(.Semicolon, tokens);
-        return .{
-            .value = tok.value,
-            .type = tok.type,
-        };
-    }
-
-    pub fn print(self: Self) void {
-        std.log.info("∙∙∙∙∙∙∙∙∙∙Expression (", .{});
-        std.log.info("∙∙∙∙∙∙∙∙∙∙∙∙{s} ({any})", .{ self.value, self.type });
-        std.log.info("∙∙∙∙∙∙∙∙∙∙)", .{});
-    }
-};
-
-const Body = struct {
-    const Self = @This();
-
-    token_: Token,
-    expression: Expression,
-
-    pub fn parse(tokens: *TokenIterator) Self {
-        const token_ = expect(.Keyword, tokens);
-        const expression: Expression = .parse(tokens);
-        return .{
-            .token_ = token_,
-            .expression = expression,
-        };
-    }
-
-    pub fn print(self: Self) void {
-        std.log.info("∙∙∙∙∙∙Body (", .{});
-        std.log.info("∙∙∙∙∙∙∙∙keyword = {s} ({any})", .{ self.token_.value, self.token_.type });
-        std.log.info("∙∙∙∙∙∙∙∙expression = ", .{});
-        self.expression.print();
-        std.log.info("∙∙∙∙∙∙)", .{});
-    }
-};
-
-const Function = struct {
-    const Self = @This();
-
-    returnType: []const u8,
-    name: []const u8,
-    args: []const u8,
-    body: Body,
-
-    pub fn parse(tokens: *TokenIterator) Self {
-        const returnType = expect(.Keyword, tokens).value;
-        const name = expect(.Identifier, tokens).value;
-        _ = expect(.OpenParenthesis, tokens);
-        const args = expect(.Keyword, tokens).value;
-        _ = expect(.CloseParenthesis, tokens);
-        _ = expect(.OpenBrace, tokens);
-        const body = Body.parse(tokens);
-        _ = expect(.CloseBrace, tokens);
-        return .{
-            .returnType = returnType,
-            .name = name,
-            .args = args,
-            .body = body,
-        };
-    }
-
-    pub fn print(self: Self) void {
-        std.log.info("∙∙Function (", .{});
-        std.log.info("∙∙∙∙name = {s}", .{self.name});
-        std.log.info("∙∙∙∙body = ", .{});
-        self.body.print();
-        std.log.info("∙∙)", .{});
+    pub fn init(tokens: *TokenIterator) AST {
+        return .{ .program = .init(tokens) };
     }
 };
 
 const Program = struct {
-    const Self = @This();
-
     function: Function,
 
-    pub fn parse(tokens: *TokenIterator) Self {
-        return .{ .function = .parse(tokens) };
-    }
-
-    pub fn print(self: Self) !void {
-        std.log.info("Program (", .{});
-        self.function.print();
-        std.log.info(")", .{});
+    pub fn init(tokens: *TokenIterator) Program {
+        return .{ .function = .init(tokens) };
     }
 };
 
-fn expect(expected: TokenType, tokens: *TokenIterator) Token {
+const Function = struct {
+    name: []const u8,
+    body: Statement,
+
+    pub fn init(tokens: *TokenIterator) Function {
+        _ = expect(.Int, tokens);
+        const name = expect(.Identifier, tokens);
+        _ = expect(.OpenParenthesis, tokens);
+        _ = expect(.Void, tokens);
+        _ = expect(.CloseParenthesis, tokens);
+        _ = expect(.OpenBrace, tokens);
+        const body = Statement.Return(tokens);
+        _ = expect(.CloseBrace, tokens);
+
+        return .{ .name = name, .body = body };
+    }
+};
+
+const Statement = struct {
+    expr: Expression,
+
+    pub fn Return(tokens: *TokenIterator) Statement {
+        _ = expect(.Return, tokens);
+        const expr = Expression.Constant(tokens);
+        _ = expect(.Semicolon, tokens);
+
+        return .{ .expr = expr };
+    }
+};
+
+const Expression = struct {
+    value: []const u8,
+
+    pub fn Constant(tokens: *TokenIterator) Expression {
+        return .{ .value = expect(.Constant, tokens) };
+    }
+};
+
+fn expect(expected: TokenType, tokens: *TokenIterator) []const u8 {
     const actual = tokens.next() orelse {
-        fatal("End of file reached. Expected {any}", .{expected});
+        fatal("Unexpected end of file", .{});
     };
 
     if (expected == actual.type) {
-        return actual;
+        return actual.value;
     }
 
-    switch (actual.type) {
-        .Identifier => switch (expected) {
-            .Keyword => fatal("{s} does not name a type", .{actual.value}),
-            else => fatal("Undeclared identifer {s}", .{actual.value}),
-        },
-        .Keyword => fatal("Unexpected keyword use {s}", .{actual.value}),
-        .Constant => fatal("Exted identifier or keyword, got {s}", .{actual.value}),
-        else => switch (expected) {
-            .Semicolon => fatal("Missing semicolon before {s}\n", .{actual.value}),
-            else => fatal("Unexpected token {s}\n", .{actual.value}),
-        },
-    }
+    fatal("Got unexpected token {s} of type {any}; expected type {any}", .{ actual.value, actual.type, expected });
 }
