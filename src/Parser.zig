@@ -8,10 +8,12 @@ const TokenType = tok.TokenType;
 
 const Parser = @This();
 
+pub const AST = Program;
+
 pub fn parse(tokens: []Token) AST {
     var tokenIter = tok.iterate(tokens);
 
-    const ast = AST.init(&tokenIter);
+    const ast = Program.init(&tokenIter);
     if (tokenIter.next()) |token| {
         fatal("Unexpected token(s) at end of file: {s}", .{token.value});
     }
@@ -19,23 +21,21 @@ pub fn parse(tokens: []Token) AST {
     return ast;
 }
 
-const AST = struct {
-    program: Program,
-
-    pub fn init(tokens: *TokenIterator) AST {
-        return .{ .program = .init(tokens) };
-    }
-};
-
-const Program = struct {
+pub const Program = struct {
     function: Function,
 
     pub fn init(tokens: *TokenIterator) Program {
         return .{ .function = .init(tokens) };
     }
+
+    pub fn print(self: Program) void {
+        std.debug.print("{any} (\n", .{@TypeOf(self)});
+        self.function.print();
+        std.debug.print(")\n", .{});
+    }
 };
 
-const Function = struct {
+pub const Function = struct {
     name: []const u8,
     body: Statement,
 
@@ -51,9 +51,22 @@ const Function = struct {
 
         return .{ .name = name, .body = body };
     }
+
+    pub fn print(self: Function) void {
+        std.debug.print("  {any} (\n", .{@TypeOf(self)});
+        std.debug.print("    name={s}\n", .{self.name});
+        std.debug.print("    body=\n", .{});
+        self.body.print();
+        std.debug.print("  )\n", .{});
+    }
 };
 
-const Statement = struct {
+pub const Statement = struct {
+    const Type = enum {
+        Return,
+    };
+
+    type: Type,
     expr: Expression,
 
     pub fn Return(tokens: *TokenIterator) Statement {
@@ -61,15 +74,35 @@ const Statement = struct {
         const expr = Expression.Constant(tokens);
         _ = expect(.Semicolon, tokens);
 
-        return .{ .expr = expr };
+        return .{ .type = .Return, .expr = expr };
+    }
+
+    pub fn print(self: Statement) void {
+        std.debug.print("      {any} (\n", .{@TypeOf(self)});
+        std.debug.print("        type={any} expr=\n", .{self.type});
+        std.debug.print("        expr=\n", .{});
+        self.expr.print();
+        std.debug.print("      )\n", .{});
     }
 };
 
-const Expression = struct {
+pub const Expression = struct {
+    const Type = enum {
+        Constant,
+    };
+
+    type: Type,
     value: []const u8,
 
     pub fn Constant(tokens: *TokenIterator) Expression {
-        return .{ .value = expect(.Constant, tokens) };
+        return .{ .type = .Constant, .value = expect(.Constant, tokens) };
+    }
+
+    pub fn print(self: Expression) void {
+        std.debug.print("          {any} (\n", .{@TypeOf(self)});
+        std.debug.print("            type={any}\n", .{self.type});
+        std.debug.print("            value={s})\n", .{self.value});
+        std.debug.print("          )\n", .{});
     }
 };
 
