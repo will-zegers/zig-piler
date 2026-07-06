@@ -5,9 +5,9 @@ const Parser = @import("Parser.zig");
 
 const Assembler = @This();
 
-pub const Assembly = Program;
+pub const AST = Program;
 
-pub fn codeGen(allocator: Allocator, ast: Parser.AST) Assembly {
+pub fn codeGen(allocator: Allocator, ast: Parser.AST) AST {
     return .init(allocator, ast);
 }
 

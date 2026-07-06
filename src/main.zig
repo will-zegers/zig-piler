@@ -14,6 +14,7 @@ pub fn main(init: std.process.Init) !void {
 
     var inputFile: ?[]const u8 = null;
     var outputFile: []const u8 = "out.asm";
+    var debug = false;
 
     _ = args.skip(); // skip the executable name
     while (args.next()) |arg| {
@@ -22,6 +23,8 @@ pub fn main(init: std.process.Init) !void {
                 std.log.err("missing file name after -o", .{});
                 std.process.exit(0);
             };
+        } else if (mem.eql(u8, "--debug", arg)) {
+            debug = true;
         } else {
             inputFile = arg;
         }
@@ -47,16 +50,20 @@ pub fn main(init: std.process.Init) !void {
 
     std.log.info("Running parser...", .{});
     const ast = Parser.parse(tokens);
-    std.debug.print("-------parsed-------\n", .{});
-    ast.print();
+    if (debug) {
+        std.debug.print("-------parsed-------\n", .{});
+        ast.print();
+    }
 
     std.log.info("Running assembler...", .{});
     var assembly = Assembler.codeGen(init.gpa, ast);
     defer assembly.deinit();
-    std.debug.print("------generated-------\n", .{});
-    assembly.print();
+    if (debug) {
+        std.debug.print("------generated-------\n", .{});
+        assembly.print();
+    }
 
-    std.log.info("Emitting code...", .{});
+    std.log.info("Writing code to './{s}'", .{outputFile});
     var ce = try CodeEmitter.init(init.gpa, assembly);
     defer ce.deinit();
     try ce.writeToFile(init.io, "out.asm");
