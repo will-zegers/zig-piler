@@ -1,57 +1,63 @@
 const std = @import("std");
+const Io = std.Io;
 const mem = std.mem;
 const Lexer = @import("Lexer.zig");
 const regex = @import("regex");
 const Parser = @import("Parser.zig");
 const Assembler = @import("Assembler.zig");
+const CodeEmitter = @import("CodeEmitter.zig");
 const TokenIterator = @import("token.zig").TokenIterator;
 
 pub fn main(init: std.process.Init) !void {
     var args = try init.minimal.args.iterateAllocator(init.gpa);
     defer args.deinit();
 
-    var lex = false;
-    var parse = false;
-    var codegen = false;
-    var inputFile: [:0]const u8 = undefined;
+    var inputFile: ?[]const u8 = null;
+    var outputFile: []const u8 = "out.asm";
+
     _ = args.skip(); // skip the executable name
     while (args.next()) |arg| {
-        if (mem.eql(u8, "--lex", arg)) {
-            lex = true;
-        } else if (mem.eql(u8, "--parse", arg)) {
-            parse = true;
-        } else if (mem.eql(u8, "--codegen", arg)) {
-            codegen = true;
+        if (mem.eql(u8, "-o", arg)) {
+            outputFile = args.next() orelse {
+                std.log.err("missing file name after -o", .{});
+                std.process.exit(0);
+            };
         } else {
             inputFile = arg;
         }
     }
+    if (inputFile == null) {
+        std.log.info(
+            \\usage: zig-piler [options] file
+            \\        -o <file>    Place the output into <file>
+        , .{});
+        std.process.exit(0);
+    }
 
-    const text = try std.Io.Dir.cwd().readFileAlloc(init.io, inputFile, init.gpa, .unlimited);
+    const text = try std.Io.Dir.cwd().readFileAlloc(init.io, inputFile.?, init.gpa, .unlimited);
     const textZ = try init.gpa.dupeSentinel(u8, text, 0);
     defer init.gpa.free(textZ);
     init.gpa.free(text);
 
-    if (codegen or parse or lex) {
-        std.log.info("Running lexer...", .{});
-        var lexer = try Lexer.init(init.gpa);
-        defer lexer.deinit();
+    std.log.info("Running lexer...", .{});
+    var lexer = try Lexer.init(init.gpa);
+    defer lexer.deinit();
 
-        const tokens = try lexer.tokenize(textZ);
+    const tokens = try lexer.tokenize(textZ);
 
-        if (codegen or parse) {
-            std.log.info("Running parser...", .{});
-            const ast = Parser.parse(tokens);
-            std.debug.print("-------parsed-------\n", .{});
-            ast.print();
+    std.log.info("Running parser...", .{});
+    const ast = Parser.parse(tokens);
+    std.debug.print("-------parsed-------\n", .{});
+    ast.print();
 
-            if (codegen) {
-                std.log.info("Running assembler...", .{});
-                var generated = Assembler.codeGen(init.gpa, ast);
-                defer generated.deinit();
-                std.debug.print("------generated-------\n", .{});
-                generated.print();
-            }
-        }
-    }
+    std.log.info("Running assembler...", .{});
+    var assembly = Assembler.codeGen(init.gpa, ast);
+    defer assembly.deinit();
+    std.debug.print("------generated-------\n", .{});
+    assembly.print();
+
+    std.log.info("Emitting code...", .{});
+    var ce = try CodeEmitter.init(init.gpa, assembly);
+    defer ce.deinit();
+    try ce.writeToFile(init.io, "out.asm");
 }

@@ -5,7 +5,9 @@ const Parser = @import("Parser.zig");
 
 const Assembler = @This();
 
-pub fn codeGen(allocator: Allocator, ast: Parser.AST) Program {
+pub const Assembly = Program;
+
+pub fn codeGen(allocator: Allocator, ast: Parser.AST) Assembly {
     return .init(allocator, ast);
 }
 
@@ -68,30 +70,30 @@ const Function = struct {
 };
 
 const Instruction = struct {
-    const Type = enum {
-        Mov,
-        Ret,
+    pub const Mnemonic = enum { // Weird name, sure. But it fits, and an homage to THAT cyberpunk movie
+        movl,
+        ret,
     };
 
-    type: Type,
+    mnemonic: Mnemonic,
     src: ?Operand = null,
     dst: ?Operand = null,
 
     pub fn Mov(statement: Parser.Statement) Instruction {
         return .{
-            .type = .Mov,
+            .mnemonic = .movl,
             .src = Operand{ .Imm = statement.expr.value },
-            .dst = Operand{ .Reg = .EAX }
+            .dst = Operand{ .Reg = .eax }
         };
     }
 
     pub fn Ret() Instruction {
-        return .{ .type = .Ret };
+        return .{ .mnemonic = .ret };
     }
 
     pub fn print(self: Instruction) void {
         std.debug.print("      {any} (\n", .{@TypeOf(self)});
-        std.debug.print("        type={any}\n", .{self.type});
+        std.debug.print("        mnemonic={any}\n", .{self.mnemonic});
         if (self.src) |src| {
             switch(src) {
                 .Imm => std.debug.print("        src=Imm({s})\n", .{src.Imm}),
@@ -108,7 +110,7 @@ const Instruction = struct {
     }
 };
 
-const Reg = enum { EAX, };
+const Reg = enum { eax, };
 
 const OperandType = enum {
     Imm,
