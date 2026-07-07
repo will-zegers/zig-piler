@@ -25,12 +25,6 @@ const Program = struct {
     pub fn deinit(self: *Program) void {
         self.function.deinit();
     }
-
-    pub fn print(self: Program) void {
-        std.debug.print("{any} (\n", .{@TypeOf(self)});
-        self.function.print();
-        std.debug.print(")\n", .{});
-    }
 };
 
 const Function = struct {
@@ -57,16 +51,6 @@ const Function = struct {
     pub fn deinit(self: *Function) void {
         self.allocator.free(self.instructions);
     }
-
-    pub fn print(self: Function) void {
-        std.debug.print("  {any} (\n", .{@TypeOf(self)});
-        std.debug.print("    name={s}\n", .{self.name});
-        std.debug.print("    instructions=\n", .{});
-        for (self.instructions) |instr| {
-            instr.print();
-        }
-        std.debug.print("  )\n", .{});
-    }
 };
 
 const Instruction = struct {
@@ -89,24 +73,6 @@ const Instruction = struct {
 
     pub fn Ret() Instruction {
         return .{ .mnemonic = .ret };
-    }
-
-    pub fn print(self: Instruction) void {
-        std.debug.print("      {any} (\n", .{@TypeOf(self)});
-        std.debug.print("        mnemonic={any}\n", .{self.mnemonic});
-        if (self.src) |src| {
-            switch(src) {
-                .Imm => std.debug.print("        src=Imm({s})\n", .{src.Imm}),
-                .Reg => std.debug.print("        src=Reg({s})\n", .{@tagName(src.Reg)}),
-            }
-        }
-        if (self.dst) |dst| {
-            switch(dst) {
-                .Imm => std.debug.print("        dst=Imm({s})\n", .{dst.Imm}),
-                .Reg => std.debug.print("        dst=Reg({s})\n", .{@tagName(dst.Reg)}),
-            }
-        }
-        std.debug.print("      )\n", .{});
     }
 };
 

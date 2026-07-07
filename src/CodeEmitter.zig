@@ -19,6 +19,7 @@ pub fn init(allocator: Allocator, ast: Assembler.AST) !CodeEmitter {
     defer allocator.free(functionDef);
 
     try instructions.append(allocator, try allocator.dupe(u8, functionDef));
+
     for (ast.function.instructions) |instr| {
         var instructionBuilder: ArrayList([]const u8) = .empty; // essentially a string builder
         defer instructionBuilder.deinit(allocator);
@@ -52,6 +53,7 @@ pub fn init(allocator: Allocator, ast: Assembler.AST) !CodeEmitter {
         const instruction = try std.mem.join(allocator, "", instructionBuilder.items); // build
         try instructions.append(allocator, instruction);
     }
+
     switch (builtin.os.tag) {
         .linux => try instructions.append(allocator, try allocator.dupe(u8, ".section .note.GNU-stack,\"\",@progbits")),
         else => unreachable, // only running this on linux atm

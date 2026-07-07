@@ -27,12 +27,6 @@ pub const Program = struct {
     pub fn init(tokens: *TokenIterator) Program {
         return .{ .function = .init(tokens) };
     }
-
-    pub fn print(self: Program) void {
-        std.debug.print("{any} (\n", .{@TypeOf(self)});
-        self.function.print();
-        std.debug.print(")\n", .{});
-    }
 };
 
 pub const Function = struct {
@@ -51,14 +45,6 @@ pub const Function = struct {
 
         return .{ .name = name, .body = body };
     }
-
-    pub fn print(self: Function) void {
-        std.debug.print("  {any} (\n", .{@TypeOf(self)});
-        std.debug.print("    name={s}\n", .{self.name});
-        std.debug.print("    body=\n", .{});
-        self.body.print();
-        std.debug.print("  )\n", .{});
-    }
 };
 
 pub const Statement = struct {
@@ -76,14 +62,6 @@ pub const Statement = struct {
 
         return .{ .type = .Return, .expr = expr };
     }
-
-    pub fn print(self: Statement) void {
-        std.debug.print("      {any} (\n", .{@TypeOf(self)});
-        std.debug.print("        type={any} expr=\n", .{self.type});
-        std.debug.print("        expr=\n", .{});
-        self.expr.print();
-        std.debug.print("      )\n", .{});
-    }
 };
 
 pub const Expression = struct {
@@ -96,13 +74,6 @@ pub const Expression = struct {
 
     pub fn Constant(tokens: *TokenIterator) Expression {
         return .{ .type = .Constant, .value = expect(.Constant, tokens) };
-    }
-
-    pub fn print(self: Expression) void {
-        std.debug.print("          {any} (\n", .{@TypeOf(self)});
-        std.debug.print("            type={any}\n", .{self.type});
-        std.debug.print("            value={s})\n", .{self.value});
-        std.debug.print("          )\n", .{});
     }
 };
 

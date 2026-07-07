@@ -7,6 +7,7 @@ const Parser = @import("Parser.zig");
 const Assembler = @import("Assembler.zig");
 const CodeEmitter = @import("CodeEmitter.zig");
 const TokenIterator = @import("token.zig").TokenIterator;
+const Debugger = @import("Debugger.zig");
 
 pub fn main(init: std.process.Init) !void {
     var args = try init.minimal.args.iterateAllocator(init.gpa);
@@ -52,7 +53,7 @@ pub fn main(init: std.process.Init) !void {
     const ast = Parser.parse(tokens);
     if (debug) {
         std.debug.print("-------parsed-------\n", .{});
-        ast.print();
+        Debugger.printParserAST(ast);
     }
 
     std.log.info("Running assembler...", .{});
@@ -60,7 +61,7 @@ pub fn main(init: std.process.Init) !void {
     defer assembly.deinit();
     if (debug) {
         std.debug.print("------generated-------\n", .{});
-        assembly.print();
+        Debugger.printAssemblerAST(assembly);
     }
 
     std.log.info("Writing code to './{s}'", .{outputFile});
