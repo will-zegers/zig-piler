@@ -3,6 +3,13 @@ const print = std.debug.print;
 
 const Parser = @import("Parser.zig");
 const Assembler = @import("Assembler.zig");
+const Token = @import("token.zig").Token;
+
+pub fn printLexerTokens(tokens: []Token) void {
+    for (tokens) |token| {
+        std.debug.print("{any}: {s}\n", .{ token.type, token.value });
+    }
+}
 
 pub fn printParserAST(ast: Parser.AST) void {
     const program = ast;

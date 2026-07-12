@@ -5,10 +5,10 @@ const ArrayList = std.ArrayList;
 const StringHashMap = std.StringHashMap;
 
 const Regex = @import("Lexer/Regex.zig");
-const token = @import("token.zig");
-const Token = token.Token;
-const TokenType = token.TokenType;
-const KeywordMap = token.KeywordMap;
+const tok = @import("token.zig");
+const Token = tok.Token;
+const TokenType = tok.TokenType;
+const KeywordMap = tok.KeywordMap;
 
 const Lexer = @This();
 
@@ -55,7 +55,7 @@ pub fn tokenize(self: *Lexer, text: [:0]const u8) ![]Token {
                 tokenStart += constant.len;
             },
             '(', ')', '{', '}', ';' => {
-                const tok: Token = switch (currentChar) {
+                const token: Token = switch (currentChar) {
                     '(' => .{ .type = .OpenParenthesis, .value = "(" },
                     ')' => .{ .type = .CloseParenthesis, .value = ")" },
                     '{' => .{ .type = .OpenBrace, .value = "{" },
@@ -63,8 +63,8 @@ pub fn tokenize(self: *Lexer, text: [:0]const u8) ![]Token {
                     ';' => .{ .type = .Semicolon, .value = ";" },
                     else => unreachable,
                 };
-                try self.tokens.append(self.allocator, tok);
-                tokenStart += tok.value.len;
+                try self.tokens.append(self.allocator, token);
+                tokenStart += token.value.len;
             },
             ' ', '\t' => {
                 tokenStart += 1;
@@ -76,6 +76,19 @@ pub fn tokenize(self: *Lexer, text: [:0]const u8) ![]Token {
             '/' => {
                 const comment = self.reComment.exec(nextToken) orelse badToken(nextToken, lineNumber);
                 tokenStart += comment.len;
+            },
+            '-' => {
+                const token: Token = if (nextToken[1] == '-')
+                    .{ .type = .Decrement, .value = "--" }
+                else
+                    .{ .type = .Negate, .value = "-" };
+
+                try self.tokens.append(self.allocator, token);
+                tokenStart += 1;
+            },
+            '~' => {
+                try self.tokens.append(self.allocator, .{ .type = .Negate, .value = "~" });
+                tokenStart += 1;
             },
             else => {
                 badToken(nextToken, lineNumber);
@@ -90,6 +103,6 @@ fn badToken(text: [:0]const u8, lineNumber: usize) noreturn {
         std.process.fatal("Lexing error on line {d}", .{lineNumber});
     };
 
-    const tok = reBadToken.exec(text).?;
-    std.process.fatal("Invalid symbol found '{s}' on line {d}", .{ tok, lineNumber });
+    const token = reBadToken.exec(text).?;
+    std.process.fatal("Invalid symbol found '{s}' on line {d}", .{ token, lineNumber });
 }
