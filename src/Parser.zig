@@ -57,7 +57,7 @@ pub const Statement = struct {
 
     pub fn Return(tokens: *TokenIterator) Statement {
         _ = expect(.Return, tokens);
-        const expr = Expression.Constant(tokens);
+        const expr = Expression.init(tokens);
         _ = expect(.Semicolon, tokens);
 
         return .{ .type = .Return, .expr = expr };
@@ -72,8 +72,24 @@ pub const Expression = struct {
     type: Type,
     value: []const u8,
 
-    pub fn Constant(tokens: *TokenIterator) Expression {
-        return .{ .type = .Constant, .value = expect(.Constant, tokens) };
+    pub fn init(tokens: *TokenIterator) Expression {
+        if (tokens.next()) |token| {
+            switch (token.type) {
+                .Constant => return .{ .type = .Constant, .value = token.value },
+                .Complement, .Negate => {
+                    const expr = .init(tokens);
+                    return expr;
+                },
+                .OpenParenthesis => {
+                    const expr = .init(tokens);
+                    _ = expect(.CloseParenthesis, tokens);
+                    return expr;
+                },
+                else => fatal("Unexpected expression at {s}", .{token.value}),
+            }
+        }
+
+        fatal("Unexpected end of file", .{});
     }
 };
 
