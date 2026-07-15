@@ -3,6 +3,7 @@ const print = std.debug.print;
 
 const Parser = @import("Parser.zig");
 const Assembler = @import("Assembler.zig");
+const TAC = @import("TAC.zig");
 const Token = @import("token.zig").Token;
 
 pub fn printLexerTokens(tokens: []Token) void {
@@ -45,6 +46,39 @@ fn printExprHierarchy(expr: Parser.Expression, indent: usize) !void {
         try printExprHierarchy(child.*, indent + 2);
     }
     print("{s})\n", .{indentStr});
+}
+
+pub fn printTAC(ir: TAC.IR) void {
+    const program = ir;
+    const function = program.function;
+    const body = function.body;
+    print("{any} (\n", .{@TypeOf(program)});
+    print("  {any} (\n", .{@TypeOf(function)});
+    print("    identifier={s} body=\n", .{function.identifier});
+    print("    body=\n", .{});
+    for (body.items) |instr| {
+        print("      {s} (", .{@tagName(instr)});
+        switch (instr) {
+            .Unary => |unary| {
+                print("operator={any}, ", .{unary.operator});
+                switch (unary.src) {
+                    .expr => |expr| print("src={any}({s}), ", .{ expr.type, expr.value.? }),
+                    .name => |name| print("src={s}, ", .{name}),
+                }
+                switch (unary.dst) {
+                    .expr => |expr| print("src={any}({s})", .{ expr.type, expr.value.? }),
+                    .name => |name| print("dst={s}", .{name}),
+                }
+                print(")\n", .{});
+            },
+            .Return => |ret| {
+                print("val={s})\n", .{ret.val.name});
+            },
+        }
+    }
+    print("    )\n", .{});
+    print("  )\n", .{});
+    print(")\n", .{});
 }
 
 pub fn printAssemblerAST(ast: Assembler.AST) void {

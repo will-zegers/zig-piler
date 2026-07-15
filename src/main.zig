@@ -7,6 +7,7 @@ const Parser = @import("Parser.zig");
 const Assembler = @import("Assembler.zig");
 const CodeEmitter = @import("CodeEmitter.zig");
 const Debugger = @import("Debugger.zig");
+const TAC = @import("TAC.zig");
 
 pub fn main(init: std.process.Init) !void {
     var args = try init.minimal.args.iterateAllocator(init.gpa);
@@ -18,6 +19,7 @@ pub fn main(init: std.process.Init) !void {
 
     var lex: bool = false;
     var parse: bool = false;
+    var tacky: bool = false;
     var codegen: bool = false;
     _ = args.skip(); // skip the executable name
     while (args.next()) |arg| {
@@ -30,6 +32,8 @@ pub fn main(init: std.process.Init) !void {
             lex = true;
         } else if (mem.eql(u8, "--parse", arg)) {
             parse = true;
+        } else if (mem.eql(u8, "--tacky", arg)) {
+            tacky = true;
         } else if (mem.eql(u8, "--codegen", arg)) {
             codegen = true;
         } else if (mem.eql(u8, "--debug", arg)) {
@@ -51,7 +55,7 @@ pub fn main(init: std.process.Init) !void {
     defer init.gpa.free(textZ);
     init.gpa.free(text);
 
-    if (lex or parse or codegen) {
+    if (lex or parse or tacky or codegen) {
         std.log.info("Running lexer...", .{});
         var lexer = try Lexer.init(init.gpa);
         defer lexer.deinit();
@@ -62,27 +66,41 @@ pub fn main(init: std.process.Init) !void {
             Debugger.printLexerTokens(tokens);
         }
 
-        if (parse or codegen) {
+        if (parse or tacky or codegen) {
             std.log.info("Running parser...", .{});
-            const ast = Parser.parse(tokens);
+            var ast = Parser.parse(init.gpa, tokens);
+            defer ast.deinit();
+
             if (parse and debug) {
                 std.debug.print("-------parsed-------\n", .{});
                 Debugger.printParserAST(ast);
             }
 
-            if (codegen) {
-                std.log.info("Running assembler...", .{});
-                var assembly = Assembler.codeGen(init.gpa, ast);
-                defer assembly.deinit();
-                if (debug) {
-                    std.debug.print("------generated-------\n", .{});
-                    Debugger.printAssemblerAST(assembly);
+            if (tacky or codegen) {
+                std.log.info("Generating Tacky...", .{});
+                var tac = TAC.init(init.gpa, ast);
+                defer tac.function.deinit();
+
+                if (tacky and debug) {
+                    std.debug.print("-------TAC-------\n", .{});
+                    Debugger.printTAC(tac);
                 }
 
-                std.log.info("Writing code to './{s}'", .{outputFile});
-                var ce = try CodeEmitter.init(init.gpa, assembly);
-                defer ce.deinit();
-                try ce.writeToFile(init.io, "out.asm");
+                if (codegen) {
+                    std.log.info("Running assembler...", .{});
+                    var assembly = Assembler.codeGen(init.gpa, ast);
+                    defer assembly.deinit();
+
+                    if (debug) {
+                        std.debug.print("------generated-------\n", .{});
+                        Debugger.printAssemblerAST(assembly);
+                    }
+
+                    std.log.info("Writing code to './{s}'", .{outputFile});
+                    var ce = try CodeEmitter.init(init.gpa, assembly);
+                    defer ce.deinit();
+                    try ce.writeToFile(init.io, "out.asm");
+                }
             }
         }
     }

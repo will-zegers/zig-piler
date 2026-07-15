@@ -1,5 +1,6 @@
 const std = @import("std");
 const fatal = std.process.fatal;
+const Allocator = std.mem.Allocator;
 
 const tok = @import("token.zig");
 const Token = tok.Token;
@@ -10,10 +11,10 @@ const Parser = @This();
 
 pub const AST = Program;
 
-pub fn parse(tokens: []Token) AST {
+pub fn parse(allocator: Allocator, tokens: []Token) AST {
     var tokenIter = tok.iterate(tokens);
 
-    const ast = Program.init(&tokenIter);
+    const ast = Program.init(allocator, &tokenIter);
     if (tokenIter.next()) |token| {
         fatal("Unexpected token(s) at end of file: {s}", .{token.value});
     }
@@ -22,28 +23,38 @@ pub fn parse(tokens: []Token) AST {
 }
 
 pub const Program = struct {
+    allocator: Allocator,
     function: Function,
 
-    pub fn init(tokens: *TokenIterator) Program {
-        return .{ .function = .init(tokens) };
+    pub fn init(allocator: Allocator, tokens: *TokenIterator) Program {
+        return .{ .allocator = allocator, .function = .init(allocator, tokens) };
+    }
+
+    pub fn deinit(self: *Program) void {
+        self.function.deinit();
     }
 };
 
 pub const Function = struct {
+    allocator: Allocator,
     name: []const u8,
     body: Statement,
 
-    pub fn init(tokens: *TokenIterator) Function {
+    pub fn init(allocator: Allocator, tokens: *TokenIterator) Function {
         _ = expect(.Int, tokens);
         const name = expect(.Identifier, tokens);
         _ = expect(.OpenParenthesis, tokens);
         _ = expect(.Void, tokens);
         _ = expect(.CloseParenthesis, tokens);
         _ = expect(.OpenBrace, tokens);
-        const body = Statement.Return(tokens);
+        const body = Statement.Return(allocator, tokens);
         _ = expect(.CloseBrace, tokens);
 
-        return .{ .name = name, .body = body };
+        return .{ .allocator = allocator, .name = name, .body = body };
+    }
+
+    pub fn deinit(self: *Function) void {
+        self.body.deinit();
     }
 };
 
@@ -52,37 +63,42 @@ pub const Statement = struct {
         Return,
     };
 
+    allocator: Allocator,
     type: Type,
     expr: Expression,
 
-    pub fn Return(tokens: *TokenIterator) Statement {
+    pub fn Return(allocator: Allocator, tokens: *TokenIterator) Statement {
         _ = expect(.Return, tokens);
-        const expr = Expression.init(tokens);
+        const expr = Expression.init(allocator, tokens);
         _ = expect(.Semicolon, tokens);
 
-        return .{ .type = .Return, .expr = expr };
+        return .{ .allocator = allocator, .type = .Return, .expr = expr };
+    }
+
+    pub fn deinit(self: *Statement) void {
+        self.expr.deinit();
     }
 };
 
 pub const Expression = struct {
     const Type = enum {
         Constant,
-        UnaryOperator,
+        Unary,
     };
 
-    allocator: ?std.mem.Allocator = null,
+    allocator: std.mem.Allocator,
     type: Type,
     value: ?[]const u8 = null,
     opType: ?UnaryOperator = null,
     child: ?*Expression = null,
 
-    pub fn init(tokens: *TokenIterator) Expression {
+    pub fn init(allocator: Allocator, tokens: *TokenIterator) Expression {
         if (tokens.next()) |token| {
             switch (token.type) {
-                .Constant => return Constant(token.value),
-                .UnaryOp => return Unary(token, tokens),
+                .Constant => return _Constant(allocator, token.value),
+                .UnaryOp => return _Unary(allocator, token, tokens),
                 .OpenParenthesis => {
-                    const expr = init(tokens);
+                    const expr = init(allocator, tokens);
                     _ = expect(.CloseParenthesis, tokens);
                     return expr;
                 },
@@ -93,16 +109,20 @@ pub const Expression = struct {
         fatal("Unexpected end of file", .{});
     }
 
-    fn Constant(value: []const u8) Expression {
-        return .{ .type = .Constant, .value = value };
+    pub fn deinit(self: *Expression) void {
+        if (self.child) |child| {
+            child.deinit();
+            self.allocator.destroy(child);
+        }
     }
 
-    pub fn Unary(token: Token, tokens: *TokenIterator) Expression {
-        var gpa: std.heap.DebugAllocator(.{}) = .init;
-        const allocator = gpa.allocator();
+    fn _Constant(allocator: Allocator, value: []const u8) Expression {
+        return .{ .allocator = allocator, .type = .Constant, .value = value };
+    }
 
+    fn _Unary(allocator: Allocator, token: Token, tokens: *TokenIterator) Expression {
         const expr = allocator.create(Expression) catch fatal("Failed to create child expr for token '{}'", .{token});
-        expr.* = init(tokens);
+        expr.* = init(allocator, tokens);
 
         const opType: UnaryOperator = switch (token.value[0]) {
             '~' => .Complement,
@@ -110,7 +130,7 @@ pub const Expression = struct {
             else => unreachable,
         };
 
-        return .{ .allocator = allocator, .type = .UnaryOperator, .child = expr, .opType = opType };
+        return .{ .allocator = allocator, .type = .Unary, .child = expr, .opType = opType };
     }
 };
 
