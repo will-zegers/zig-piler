@@ -62,19 +62,19 @@ pub fn printTAC(ir: TAC.IR) void {
             .Unary => |unary| {
                 print("operator={any}, ", .{unary.operator});
                 switch (unary.src) {
-                    .expr => |expr| print("src={s}({s}), ", .{ @tagName(expr), expr.Constant.int }),
-                    .name => |name| print("src={s}, ", .{name}),
+                    .Constant => |expr| print("src={any}({s}), ", .{ @TypeOf(expr), expr.int }),
+                    .Var => |name| print("src={s}, ", .{name}),
                 }
                 switch (unary.dst) {
-                    .expr => |expr| print("src={s}({s})", .{ @tagName(expr), expr.Constant.int }),
-                    .name => |name| print("dst={s}", .{name}),
+                    .Constant => |expr| print("src={any}({s})", .{ @TypeOf(expr), expr.int }),
+                    .Var => |name| print("dst={s}", .{name}),
                 }
                 print(")\n", .{});
             },
             .Return => |ret| {
                 switch (ret.val) {
-                    .expr => |expr| print("val={s}({s}))\n", .{ @tagName(expr), expr.Constant.int }),
-                    .name => |name| print("val={s})\n", .{name}),
+                    .Constant => |expr| print("val={any}({s}))\n", .{ @TypeOf(expr), expr.int }),
+                    .Var => |name| print("val={s})\n", .{name}),
                 }
             },
         }

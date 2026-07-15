@@ -49,7 +49,7 @@ const Function = struct {
 
         for (self.body.items) |item| {
             switch (item) {
-                .Unary => |unary| self.allocator.free(unary.dst.name),
+                .Unary => |unary| self.allocator.free(unary.dst.Var),
                 else => {},
             }
         }
@@ -57,17 +57,19 @@ const Function = struct {
 
     fn emitTac(allocator: Allocator, expr: Parser.Expression, tag: *Tag, body: *std.ArrayList(Instruction)) !Val {
         switch (expr) {
-            .Constant => return .{ .expr = expr },
+            .Constant => return .{ .Constant = expr.Constant },
             .Unary => |unary| {
                 const src = try emitTac(allocator, unary.expr.*, tag, body);
-                const dst: Val = .{ .name = try std.fmt.allocPrint(allocator, "{s}.{d}", .{ tag.ID, tag.count }) };
-                tag.count += 1;
-
-                const instruction: Instruction = .{ .Unary = .{ .operator = unary.operator, .src = src, .dst = dst } };
-                try body.append(allocator, instruction);
+                const dst: Val = .{ .Var = try nextTag(allocator, tag) };
+                try body.append(allocator, .{ .Unary = .{ .operator = unary.operator, .src = src, .dst = dst } });
                 return dst;
             },
         }
+    }
+
+    fn nextTag(allocator: Allocator, tag: *Tag) ![]u8 {
+        defer tag.count += 1;
+        return try std.fmt.allocPrint(allocator, "{s}.{d}", .{ tag.ID, tag.count });
     }
 };
 
@@ -87,8 +89,13 @@ const Unary = struct {
     dst: Val,
 };
 
-const ValTag = enum { expr, name };
+const ValTag = enum { Constant, Var };
 const Val = union(ValTag) {
-    expr: Parser.Expression,
-    name: []u8,
+    Constant: Constant,
+    Var: Var,
 };
+
+const Constant = Parser.Constant;
+const Var = []u8;
+
+const UnaryOperator = Parser.Unary.Operator;
