@@ -67,21 +67,22 @@ pub const Statement = struct {
 pub const Expression = struct {
     const Type = enum {
         Constant,
+        UnaryOperator,
     };
 
+    allocator: ?std.mem.Allocator = null,
     type: Type,
-    value: []const u8,
+    value: ?[]const u8 = null,
+    opType: ?UnaryOperator = null,
+    child: ?*Expression = null,
 
     pub fn init(tokens: *TokenIterator) Expression {
         if (tokens.next()) |token| {
             switch (token.type) {
-                .Constant => return .{ .type = .Constant, .value = token.value },
-                .Complement, .Negate => {
-                    const expr = .init(tokens);
-                    return expr;
-                },
+                .Constant => return Constant(token.value),
+                .UnaryOp => return Unary(token, tokens),
                 .OpenParenthesis => {
-                    const expr = .init(tokens);
+                    const expr = init(tokens);
                     _ = expect(.CloseParenthesis, tokens);
                     return expr;
                 },
@@ -91,6 +92,31 @@ pub const Expression = struct {
 
         fatal("Unexpected end of file", .{});
     }
+
+    fn Constant(value: []const u8) Expression {
+        return .{ .type = .Constant, .value = value };
+    }
+
+    pub fn Unary(token: Token, tokens: *TokenIterator) Expression {
+        var gpa: std.heap.DebugAllocator(.{}) = .init;
+        const allocator = gpa.allocator();
+
+        const expr = allocator.create(Expression) catch fatal("Failed to create child expr for token '{}'", .{token});
+        expr.* = init(tokens);
+
+        const opType: UnaryOperator = switch (token.value[0]) {
+            '~' => .Complement,
+            '-' => .Negate,
+            else => unreachable,
+        };
+
+        return .{ .allocator = allocator, .type = .UnaryOperator, .child = expr, .opType = opType };
+    }
+};
+
+pub const UnaryOperator = enum {
+    Complement,
+    Negate,
 };
 
 fn expect(expected: TokenType, tokens: *TokenIterator) []const u8 {

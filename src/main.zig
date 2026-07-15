@@ -57,7 +57,7 @@ pub fn main(init: std.process.Init) !void {
         defer lexer.deinit();
 
         const tokens = try lexer.tokenize(textZ);
-        if (debug) {
+        if (lex and debug) {
             std.debug.print("-------tokens-------\n", .{});
             Debugger.printLexerTokens(tokens);
         }
@@ -65,7 +65,7 @@ pub fn main(init: std.process.Init) !void {
         if (parse or codegen) {
             std.log.info("Running parser...", .{});
             const ast = Parser.parse(tokens);
-            if (debug) {
+            if (parse and debug) {
                 std.debug.print("-------parsed-------\n", .{});
                 Debugger.printParserAST(ast);
             }

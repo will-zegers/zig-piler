@@ -5,16 +5,14 @@ const StaticStringMap = std.StaticStringMap;
 pub const TokenType = enum {
     CloseBrace,
     CloseParenthesis,
-    Complement,
     Constant,
-    Decrement,
     Identifier,
     Int,
-    Negate,
     OpenBrace,
     OpenParenthesis,
     Return,
     Semicolon,
+    UnaryOp,
     Void,
 };
 

@@ -66,7 +66,7 @@ const Instruction = struct {
     pub fn Mov(statement: Parser.Statement) Instruction {
         return .{
             .mnemonic = .movl,
-            .src = Operand{ .Imm = statement.expr.value },
+            .src = Operand{ .Imm = statement.expr.value.? },
             .dst = Operand{ .Reg = .eax }
         };
     }

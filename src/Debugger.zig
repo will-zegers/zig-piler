@@ -16,18 +16,35 @@ pub fn printParserAST(ast: Parser.AST) void {
     const function = program.function;
     const body = function.body;
     const expr = body.expr;
-    print("{any} (", .{@TypeOf(program)});
+    print("{any} (\n", .{@TypeOf(program)});
     print("  {any} (\n", .{@TypeOf(function)});
-    print("      {any} (\n", .{@TypeOf(body)});
-    print("        type={any} expr=\n", .{body.type});
-    print("        expr=\n", .{});
-    print("          {any} (\n", .{@TypeOf(expr)});
-    print("            type={any}\n", .{expr.type});
-    print("            value={s})\n", .{expr.value});
-    print("          )\n", .{});
-    print("      )\n", .{});
+    print("    {any} (\n", .{@TypeOf(body)});
+    print("      type={any} expr=\n", .{body.type});
+    print("      expr=", .{});
+
+    printExprHierarchy(expr, 6) catch {};
+
+    print("    )\n", .{});
     print("  )\n", .{});
-    print(")", .{});
+    print(")\n", .{});
+}
+
+fn printExprHierarchy(expr: Parser.Expression, indent: usize) !void {
+    const indentStr = try std.heap.page_allocator.alloc(u8, indent);
+    for (indentStr, 0..) |_, i| {
+        indentStr[i] = ' ';
+    }
+    defer std.heap.page_allocator.free(indentStr);
+
+    print("{any} (\n", .{@TypeOf(expr)});
+    print("{s}  type={any}\n", .{ indentStr, expr.type });
+    if (expr.value) |value| print("{s}  value={s})\n", .{ indentStr, value });
+    if (expr.opType) |opType| print("{s}  opType={any})\n", .{ indentStr, opType });
+    if (expr.child) |child| {
+        print("{s}  child=", .{indentStr});
+        try printExprHierarchy(child.*, indent + 2);
+    }
+    print("{s})\n", .{indentStr});
 }
 
 pub fn printAssemblerAST(ast: Assembler.AST) void {
@@ -57,5 +74,5 @@ pub fn printAssemblerAST(ast: Assembler.AST) void {
     }
 
     print("  )\n", .{});
-    print(")", .{});
+    print(")\n", .{});
 }

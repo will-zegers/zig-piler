@@ -77,18 +77,14 @@ pub fn tokenize(self: *Lexer, text: [:0]const u8) ![]Token {
                 const comment = self.reComment.exec(nextToken) orelse badToken(nextToken, lineNumber);
                 tokenStart += comment.len;
             },
-            '-' => {
-                const token: Token = if (nextToken[1] == '-')
-                    .{ .type = .Decrement, .value = "--" }
-                else
-                    .{ .type = .Negate, .value = "-" };
-
+            '-', '~' => {
+                const token: Token = switch (currentChar) {
+                    '-' => .{ .type = .UnaryOp, .value = "-" },
+                    '~' => .{ .type = .UnaryOp, .value = "~" },
+                    else => unreachable,
+                };
                 try self.tokens.append(self.allocator, token);
-                tokenStart += 1;
-            },
-            '~' => {
-                try self.tokens.append(self.allocator, .{ .type = .Negate, .value = "~" });
-                tokenStart += 1;
+                tokenStart += token.value.len;
             },
             else => {
                 badToken(nextToken, lineNumber);
