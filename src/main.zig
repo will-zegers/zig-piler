@@ -20,7 +20,7 @@ pub fn main(init: std.process.Init) !void {
     var lex: bool = false;
     var parse: bool = false;
     var tacky: bool = false;
-    var codegen: bool = false;
+    var codegen: bool = true;
     _ = args.skip(); // skip the executable name
     while (args.next()) |arg| {
         if (mem.eql(u8, "-o", arg)) {
@@ -30,12 +30,13 @@ pub fn main(init: std.process.Init) !void {
             };
         } else if (mem.eql(u8, "--lex", arg)) {
             lex = true;
+            codegen = false;
         } else if (mem.eql(u8, "--parse", arg)) {
             parse = true;
+            codegen = false;
         } else if (mem.eql(u8, "--tacky", arg)) {
             tacky = true;
-        } else if (mem.eql(u8, "--codegen", arg)) {
-            codegen = true;
+            codegen = false;
         } else if (mem.eql(u8, "--debug", arg)) {
             debug = true;
         } else {
@@ -45,6 +46,10 @@ pub fn main(init: std.process.Init) !void {
     if (inputFile == null) {
         std.log.info(
             \\usage: zig-piler [options] file
+            \\        --lex        Run only the lexer
+            \\        --parse      Run the lexer and parser
+            \\        --tacky      Run the lexer, parser, and generate intermediate representation
+            \\        --codegen    Run all stages and generate an output file [default]
             \\        -o <file>    Place the output into <file>
         , .{});
         std.process.exit(0);
