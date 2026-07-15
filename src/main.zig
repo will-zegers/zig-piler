@@ -7,7 +7,7 @@ const Parser = @import("Parser.zig");
 const Assembler = @import("Assembler.zig");
 const CodeEmitter = @import("CodeEmitter.zig");
 const Debugger = @import("Debugger.zig");
-// const TAC = @import("TAC.zig");
+const TAC = @import("TAC.zig");
 
 pub fn main(init: std.process.Init) !void {
     var args = try init.minimal.args.iterateAllocator(init.gpa);
@@ -81,32 +81,32 @@ pub fn main(init: std.process.Init) !void {
                 Debugger.printParserAST(ast);
             }
 
-            // if (tacky or codegen) {
-            //     std.log.info("Generating Tacky...", .{});
-            //     var tac = TAC.init(init.gpa, ast);
-            //     defer tac.function.deinit();
+            if (tacky or codegen) {
+                std.log.info("Generating Tacky...", .{});
+                var tac = TAC.init(init.gpa, ast);
+                defer tac.function.deinit();
 
-            //     if (tacky and debug) {
-            //         std.debug.print("-------TAC-------\n", .{});
-            //         // Debugger.printTAC(tac);
-            //     }
+                if (tacky and debug) {
+                    std.debug.print("-------TAC-------\n", .{});
+                    Debugger.printTAC(tac);
+                }
 
-            //     if (codegen) {
-            //         std.log.info("Running assembler...", .{});
-            //         var assembly = Assembler.codeGen(init.gpa, ast);
-            //         defer assembly.deinit();
+                if (codegen) {
+                    std.log.info("Running assembler...", .{});
+                    var assembly = Assembler.codeGen(init.gpa, ast);
+                    defer assembly.deinit();
 
-            //         if (debug) {
-            //             std.debug.print("------generated-------\n", .{});
-            //             // Debugger.printAssemblerAST(assembly);
-            //         }
+                    if (debug) {
+                        std.debug.print("------generated-------\n", .{});
+                        // Debugger.printAssemblerAST(assembly);
+                    }
 
-            //         std.log.info("Writing code to './{s}'", .{outputFile});
-            //         var ce = try CodeEmitter.init(init.gpa, assembly);
-            //         defer ce.deinit();
-            //         try ce.writeToFile(init.io, "out.asm");
-            //     }
-            // }
+                    std.log.info("Writing code to './{s}'", .{outputFile});
+                    var ce = try CodeEmitter.init(init.gpa, assembly);
+                    defer ce.deinit();
+                    try ce.writeToFile(init.io, "out.asm");
+                }
+            }
         }
     }
 }

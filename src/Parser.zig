@@ -59,21 +59,20 @@ pub const Function = struct {
 };
 
 pub const Statement = struct {
-    const Type = enum {
+    const Tag = enum {
         Return,
     };
 
     allocator: Allocator,
-    type: Type,
     expr: Expression,
+    tag: Tag,
 
     pub fn Return(allocator: Allocator, tokens: *TokenIterator) Statement {
         _ = expect(.Return, tokens);
-
         const expr = expressionFactory(allocator, tokens);
         _ = expect(.Semicolon, tokens);
 
-        return .{ .allocator = allocator, .type = .Return, .expr = expr };
+        return .{ .allocator = allocator, .expr = expr, .tag = .Return };
     }
 
     pub fn deinit(self: *Statement) void {

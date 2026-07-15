@@ -56,14 +56,14 @@ const Function = struct {
     }
 
     fn emitTac(allocator: Allocator, expr: Parser.Expression, tag: *Tag, body: *std.ArrayList(Instruction)) !Val {
-        switch (expr.type) {
+        switch (expr) {
             .Constant => return .{ .expr = expr },
-            .Unary => {
-                const src = try emitTac(allocator, expr.child.?.*, tag, body);
+            .Unary => |unary| {
+                const src = try emitTac(allocator, unary.expr.*, tag, body);
                 const dst: Val = .{ .name = try std.fmt.allocPrint(allocator, "{s}.{d}", .{ tag.ID, tag.count }) };
                 tag.count += 1;
 
-                const instruction: Instruction = .{ .Unary = .{ .operator = expr.opType.?, .src = src, .dst = dst } };
+                const instruction: Instruction = .{ .Unary = .{ .operator = unary.operator, .src = src, .dst = dst } };
                 try body.append(allocator, instruction);
                 return dst;
             },
@@ -82,7 +82,7 @@ const Return = struct {
 };
 
 const Unary = struct {
-    operator: Parser.UnaryOperator,
+    operator: Parser.Unary.Operator,
     src: Val,
     dst: Val,
 };

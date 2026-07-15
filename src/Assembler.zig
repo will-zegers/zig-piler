@@ -33,7 +33,7 @@ const Function = struct {
     instructions: []Instruction,
 
     pub fn init(allocator: Allocator, function: Parser.Function) Function {
-        switch (function.body.type) {
+        switch (function.body.tag) {
             .Return => return .{
                 .allocator = allocator,
                 .name = function.name,
@@ -66,7 +66,7 @@ const Instruction = struct {
     pub fn Mov(statement: Parser.Statement) Instruction {
         return .{
             .mnemonic = .movl,
-            .src = Operand{ .Imm = statement.expr.value.? },
+            .src = Operand{ .Imm = statement.expr.Constant.int },
             .dst = Operand{ .Reg = .eax }
         };
     }
