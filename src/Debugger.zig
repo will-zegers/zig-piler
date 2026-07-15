@@ -3,7 +3,7 @@ const print = std.debug.print;
 
 const Parser = @import("Parser.zig");
 const Assembler = @import("Assembler.zig");
-const TAC = @import("TAC.zig");
+// const TAC = @import("TAC.zig");
 const Token = @import("token.zig").Token;
 
 pub fn printLexerTokens(tokens: []Token) void {
@@ -20,7 +20,7 @@ pub fn printParserAST(ast: Parser.AST) void {
     print("{any} (\n", .{@TypeOf(program)});
     print("  {any} (\n", .{@TypeOf(function)});
     print("    {any} (\n", .{@TypeOf(body)});
-    print("      type={any} expr=\n", .{body.type});
+    print("      type={any}\n", .{body.type});
     print("      expr=", .{});
 
     printExprHierarchy(expr, 6) catch {};
@@ -37,49 +37,52 @@ fn printExprHierarchy(expr: Parser.Expression, indent: usize) !void {
     }
     defer std.heap.page_allocator.free(indentStr);
 
-    print("{any} (\n", .{@TypeOf(expr)});
-    print("{s}  type={any}\n", .{ indentStr, expr.type });
-    if (expr.value) |value| print("{s}  value={s})\n", .{ indentStr, value });
-    if (expr.opType) |opType| print("{s}  opType={any})\n", .{ indentStr, opType });
-    if (expr.child) |child| {
-        print("{s}  child=", .{indentStr});
-        try printExprHierarchy(child.*, indent + 2);
+    print("{s} (\n", .{@tagName(expr)});
+    switch (expr) {
+        .Constant => |constant| {
+            print("{s}  int={s})\n", .{ indentStr, constant.int });
+        },
+        .Unary => |unary| {
+            print("{s}  operation={s})\n", .{ indentStr, @tagName(unary.operator) });
+            print("{s}  expr=", .{indentStr});
+            try printExprHierarchy(unary.expr.*, indent + 2);
+        },
     }
     print("{s})\n", .{indentStr});
 }
 
-pub fn printTAC(ir: TAC.IR) void {
-    const program = ir;
-    const function = program.function;
-    const body = function.body;
-    print("{any} (\n", .{@TypeOf(program)});
-    print("  {any} (\n", .{@TypeOf(function)});
-    print("    identifier={s} body=\n", .{function.identifier});
-    print("    body=\n", .{});
-    for (body.items) |instr| {
-        print("      {s} (", .{@tagName(instr)});
-        switch (instr) {
-            .Unary => |unary| {
-                print("operator={any}, ", .{unary.operator});
-                switch (unary.src) {
-                    .expr => |expr| print("src={any}({s}), ", .{ expr.type, expr.value.? }),
-                    .name => |name| print("src={s}, ", .{name}),
-                }
-                switch (unary.dst) {
-                    .expr => |expr| print("src={any}({s})", .{ expr.type, expr.value.? }),
-                    .name => |name| print("dst={s}", .{name}),
-                }
-                print(")\n", .{});
-            },
-            .Return => |ret| {
-                print("val={s})\n", .{ret.val.name});
-            },
-        }
-    }
-    print("    )\n", .{});
-    print("  )\n", .{});
-    print(")\n", .{});
-}
+// pub fn printTAC(ir: TAC.IR) void {
+//     const program = ir;
+//     const function = program.function;
+//     const body = function.body;
+//     print("{any} (\n", .{@TypeOf(program)});
+//     print("  {any} (\n", .{@TypeOf(function)});
+//     print("    identifier={s} body=\n", .{function.identifier});
+//     print("    body=\n", .{});
+//     for (body.items) |instr| {
+//         print("      {s} (", .{@tagName(instr)});
+//         switch (instr) {
+//             .Unary => |unary| {
+//                 print("operator={any}, ", .{unary.operator});
+//                 switch (unary.src) {
+//                     .expr => |expr| print("src={any}({s}), ", .{ expr.type, expr.value.? }),
+//                     .name => |name| print("src={s}, ", .{name}),
+//                 }
+//                 switch (unary.dst) {
+//                     .expr => |expr| print("src={any}({s})", .{ expr.type, expr.value.? }),
+//                     .name => |name| print("dst={s}", .{name}),
+//                 }
+//                 print(")\n", .{});
+//             },
+//             .Return => |ret| {
+//                 print("val={s})\n", .{ret.val.name});
+//             },
+//         }
+//     }
+//     print("    )\n", .{});
+//     print("  )\n", .{});
+//     print(")\n", .{});
+// }
 
 pub fn printAssemblerAST(ast: Assembler.AST) void {
     const program = ast;
