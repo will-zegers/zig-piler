@@ -38,7 +38,7 @@ pub const Function = struct {
         var tag: Tag = .{ .ID = function.name, .count = 0 };
 
         var body: ArrayList(Instruction) = .empty;
-        const val = emitTac(allocator, function.body.expr, &tag, &body) catch fatal("", .{});
+        const val = emitTac(allocator, function.body.factor, &tag, &body) catch fatal("", .{});
         body.append(allocator, .{ .Return = .{ .val = val } }) catch fatal("", .{});
 
         return .{ .allocator = allocator, .name = function.name, .body = body };
@@ -55,11 +55,11 @@ pub const Function = struct {
         }
     }
 
-    fn emitTac(allocator: Allocator, expr: Parser.Expression, tag: *Tag, body: *std.ArrayList(Instruction)) !Val {
-        switch (expr) {
-            .Constant => return .{ .Constant = expr.Constant },
+    fn emitTac(allocator: Allocator, factor: Parser.Factor, tag: *Tag, body: *std.ArrayList(Instruction)) !Val {
+        switch (factor) {
+            .Constant => return .{ .Constant = factor.Constant },
             .Unary => |unary| {
-                const src = try emitTac(allocator, unary.expr.*, tag, body);
+                const src = try emitTac(allocator, unary.factor.*, tag, body);
                 const dst: Val = .{ .Var = try nextTag(allocator, tag) };
                 try body.append(allocator, .{ .Unary = .{ .operator = unary.operator, .src = src, .dst = dst } });
                 return dst;

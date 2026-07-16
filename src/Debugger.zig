@@ -16,33 +16,33 @@ pub fn printParserAST(ast: Parser.AST) void {
     const program = ast;
     const function = program.function;
     const body = function.body;
-    const expr = body.expr;
+    const factor = body.factor;
     print("{any} (\n", .{@TypeOf(program)});
     print("  {any} (\n", .{@TypeOf(function)});
     print("    {any} (\n", .{body.tag});
-    print("      expr=", .{});
-    printExprHierarchy(expr, 6) catch {};
+    print("      factor=", .{});
+    printFactorHierarchy(factor, 6) catch {};
     print("    )\n", .{});
     print("  )\n", .{});
     print(")\n", .{});
 }
 
-fn printExprHierarchy(expr: Parser.Expression, indent: usize) !void {
+fn printFactorHierarchy(factor: Parser.Factor, indent: usize) !void {
     const indentStr = try std.heap.page_allocator.alloc(u8, indent);
     for (indentStr, 0..) |_, i| {
         indentStr[i] = ' ';
     }
     defer std.heap.page_allocator.free(indentStr);
 
-    print("{s} (\n", .{@tagName(expr)});
-    switch (expr) {
+    print("{s} (\n", .{@tagName(factor)});
+    switch (factor) {
         .Constant => |constant| {
             print("{s}  int={s})\n", .{ indentStr, constant.int });
         },
         .Unary => |unary| {
             print("{s}  operation={s})\n", .{ indentStr, @tagName(unary.operator) });
-            print("{s}  expr=", .{indentStr});
-            try printExprHierarchy(unary.expr.*, indent + 2);
+            print("{s}  factor=", .{indentStr});
+            try printFactorHierarchy(unary.factor.*, indent + 2);
         },
     }
     print("{s})\n", .{indentStr});
@@ -62,18 +62,18 @@ pub fn printTAC(ir: TAC.IR) void {
             .Unary => |unary| {
                 print("operator={any}, ", .{unary.operator});
                 switch (unary.src) {
-                    .Constant => |expr| print("src={any}({s}), ", .{ @TypeOf(expr), expr.int }),
+                    .Constant => |factor| print("src={any}({s}), ", .{ @TypeOf(factor), factor.int }),
                     .Var => |name| print("src={s}, ", .{name}),
                 }
                 switch (unary.dst) {
-                    .Constant => |expr| print("src={any}({s})", .{ @TypeOf(expr), expr.int }),
+                    .Constant => |factor| print("src={any}({s})", .{ @TypeOf(factor), factor.int }),
                     .Var => |name| print("dst={s}", .{name}),
                 }
                 print(")\n", .{});
             },
             .Return => |ret| {
                 switch (ret.val) {
-                    .Constant => |expr| print("val={any}({s}))\n", .{ @TypeOf(expr), expr.int }),
+                    .Constant => |factor| print("val={any}({s}))\n", .{ @TypeOf(factor), factor.int }),
                     .Var => |name| print("val={s})\n", .{name}),
                 }
             },
