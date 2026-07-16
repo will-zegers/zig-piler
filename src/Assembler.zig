@@ -84,8 +84,8 @@ const Function = struct {
                 fixedInstructions.appendSlice(
                     allocator,
                     &.{
-                        .{ .Mov = .{.src = instr.Mov.src, .dst = .{ .Reg = .R10 } } },
-                        .{ .Mov = .{.src = .{ .Reg = .R10 }, .dst = instr.Mov.dst } },
+                        .{ .Mov = .{.src = instr.Mov.src, .dst = .{ .Reg = .r10 } } },
+                        .{ .Mov = .{.src = .{ .Reg = .r10 }, .dst = instr.Mov.dst } },
                     }
                 ) catch std.process.exit(1);
             } else {
@@ -149,7 +149,7 @@ pub const Ret = struct {
         instructions.appendSlice(
             allocator,
             &.{
-                .{ .Mov = .{.src = val, .dst = .{ .Reg = .AX } } },
+                .{ .Mov = .{.src = val, .dst = .{ .Reg = .rax } } },
                 .{ .Ret = .{} },
             },
         ) catch std.process.exit(1);
@@ -191,7 +191,7 @@ const OperandType = enum {
     Pseudo,
     Stack,
 };
-const Operand = union(OperandType) {
+pub const Operand = union(OperandType) {
     Imm: []const u8,
     Reg: Reg,
     Pseudo: []const u8,
@@ -206,5 +206,5 @@ const Operand = union(OperandType) {
     }
 };
 
-const Reg = enum { AX, R10};
+const Reg = enum { rax, r10};
 

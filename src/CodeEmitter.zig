@@ -4,6 +4,7 @@ const builtin = @import("builtin");
 const Io = std.Io;
 const Allocator = std.mem.Allocator;
 const ArrayList = std.ArrayList;
+const parseInt = std.fmt.parseInt;
 
 const Assembler = @import("Assembler.zig");
 
@@ -15,51 +16,79 @@ instructions: ArrayList([]const u8),
 pub fn init(allocator: Allocator, ast: Assembler.AST) !CodeEmitter {
     var instructions: ArrayList([]const u8) = .empty;
 
-    const functionDef = try std.fmt.allocPrint(allocator, ".global {0s}\n{0s}:", .{ast.function.name});
-    defer allocator.free(functionDef);
+    const functionDefTemplate =
+        \\  .globl {0s}
+        \\{0s}:
+        \\  pushq   %rbp
+        \\  movq    %rsp, %rbp
+    ;
 
-    try instructions.append(allocator, try allocator.dupe(u8, functionDef));
+    const functionDefinition = try std.fmt.allocPrint(allocator, functionDefTemplate, .{ast.function.name});
 
-    for (ast.function.instructions) |instr| {
-        var instructionBuilder: ArrayList([]const u8) = .empty; // essentially a string builder
-        defer instructionBuilder.deinit(allocator);
+    try instructions.append(allocator, functionDefinition);
 
-        try instructionBuilder.append(allocator, "  ");
-        try instructionBuilder.append(allocator, @tagName(instr.mnemonic));
-        if (instr.src) |src| {
-            switch (src) {
-                .Imm => {
-                    try instructionBuilder.append(allocator, " $");
-                    try instructionBuilder.append(allocator, src.Imm);
-                },
-                .Reg => {
-                    try instructionBuilder.append(allocator, " %");
-                    try instructionBuilder.append(allocator, @tagName(src.Reg));
-                }
-            }
-            if (instr.dst) |dst| {
-                switch (dst) {
-                    .Imm => {
-                        try instructionBuilder.append(allocator, " $");
-                        try instructionBuilder.append(allocator, dst.Imm);
-                    },
-                    .Reg => {
-                        try instructionBuilder.append(allocator, " %");
-                        try instructionBuilder.append(allocator, @tagName(dst.Reg));
-                    }
-                }
-            }
+    for (ast.function.instructions.items) |instruction| {
+        switch (instruction) {
+            .AllocStack => |allocStack| {
+                const template =
+                    \\  subq    ${d}, %rsp
+                ;
+                const instr = try std.fmt.allocPrint(allocator, template, .{allocStack.stackPointer});
+                try instructions.append(allocator, instr);
+            },
+            .Mov => |mov| {
+                const template =
+                    \\  movq    {s}, {s}
+                ;
+                const src = try getOperandString(allocator, mov.src);
+                defer allocator.free(src);
+                const dst = try getOperandString(allocator, mov.dst);
+                defer allocator.free(dst);
+
+                const instr = try std.fmt.allocPrint(allocator, template, .{src, dst});
+                try instructions.append(allocator, instr);
+            },
+            .Ret => {
+                const instr =
+                    \\  movq    %rbp, %rsp
+                    \\  popq    %rbp
+                    \\  ret
+                ;
+                try instructions.append(allocator, try allocator.dupe(u8, instr));
+            },
+            .Unary => |unary| {
+                const template =
+                    \\  {s}    {s}
+                ;
+                const operator = switch (unary.operator) {
+                    .Complement => "notl",
+                    .Negate => "negl",
+                };
+                const operand = try getOperandString(allocator, unary.operand);
+                defer allocator.free(operand);
+
+                const instr = try std.fmt.allocPrint(allocator, template, .{operator, operand});
+                try instructions.append(allocator, instr);
+            },
         }
-        const instruction = try std.mem.join(allocator, "", instructionBuilder.items); // build
-        try instructions.append(allocator, instruction);
     }
 
     switch (builtin.os.tag) {
         .linux => try instructions.append(allocator, try allocator.dupe(u8, ".section .note.GNU-stack,\"\",@progbits")),
         else => unreachable, // only running this on linux atm
     }
+    try instructions.append(allocator, try allocator.dupe(u8, "\n")); // need newline at end of file
 
     return .{ .allocator = allocator, .instructions = instructions };
+}
+
+fn getOperandString(allocator: Allocator, operand: Assembler.Operand) ![]const u8 {
+    return switch(operand) {
+        .Imm => |op|   try std.fmt.allocPrint(allocator, "{c}{s}", .{'$', op}),
+        .Reg => |op|   try std.fmt.allocPrint(allocator, "{c}{s}", .{'%', @tagName(op)}),
+        .Stack => |op| try std.fmt.allocPrint(allocator, "{d}{s}", .{op, "(%rbp)"}),
+        .Pseudo => unreachable,
+    };
 }
 
 pub fn writeToFile(self: CodeEmitter, io: Io, outputPath: []const u8) !void {

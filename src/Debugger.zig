@@ -101,7 +101,7 @@ pub fn printAssemblerAST(ast: Assembler.AST) void {
                     .Imm => |imm| print("src=Imm({s}) ", .{imm}),
                     .Pseudo => |reg| print("src=Pseudo({s}) ", .{reg}),
                     .Reg => |reg| print("src=Reg({s}) ", .{@tagName(reg)}),
-                    .Stack => |stack| print("dst=Stack({d})", .{stack}),
+                    .Stack => |stack| print("dst=Stack({d}) ", .{stack}),
                 }
                 switch (mov.dst) {
                     .Imm => |imm| print("dst=Imm({s})", .{imm}),
@@ -118,6 +118,9 @@ pub fn printAssemblerAST(ast: Assembler.AST) void {
                     .Reg => |reg| print("dst=Reg({s})", .{@tagName(reg)}),
                     .Stack => |stack| print("dst=Stack({d})", .{stack}),
                 }
+            },
+            .AllocStack => |allocStack| {
+                print("int={d}", .{allocStack.stackPointer});
             },
             else => {},
         }
