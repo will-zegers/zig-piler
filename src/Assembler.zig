@@ -37,17 +37,26 @@ const Function = struct {
     pub fn init(allocator: Allocator, function: TAC.Function) Function {
         var instructions: ArrayList(Instruction) = .empty;
 
+        // First pass to build Assembly AST
         for (function.body.items) |instr| {
             switch (instr) {
                 .Unary => |unary| Unary.append(allocator, &instructions, unary),
                 .Return => |ret| Ret.append(allocator, &instructions, ret),
             }
         }
-        _ = assignStackVars(allocator, &instructions);
+        // Second pass, replace Pseudo registers with stack locations
+        const stackPointer = assignStackLocations(allocator, &instructions);
+
+        // Insert stack pointer arithmetic at the start
+        instructions.insert(allocator, 0, AllocStack.init(stackPointer)) catch std.process.exit(0);
+
+        // Find illegal (i.e. memory-to-memory) moves; split them into memory-to-register-memory moves
+        fixMoves(allocator, &instructions);
+
         return .{ .allocator = allocator, .name = function.name, .instructions = instructions, };
     }
 
-    pub fn assignStackVars(allocator: Allocator, instructions: *ArrayList(Instruction)) isize {
+    fn assignStackLocations(allocator: Allocator, instructions: *ArrayList(Instruction)) isize {
         var pseudoMap: std.StringHashMap(isize) = .init(allocator);
         defer pseudoMap.deinit();
         var stackCounter: isize = -4;
@@ -65,6 +74,26 @@ const Function = struct {
             }
         }
         return stackCounter;
+    }
+
+    fn fixMoves(allocator: Allocator, instructions: *ArrayList(Instruction)) void {
+        var fixedInstructions: ArrayList(Instruction) = .empty;
+
+        for (instructions.items) |instr| {
+            if (instr.isIllegalMove()) {
+                fixedInstructions.appendSlice(
+                    allocator,
+                    &.{
+                        .{ .Mov = .{.src = instr.Mov.src, .dst = .{ .Reg = .R10 } } },
+                        .{ .Mov = .{.src = .{ .Reg = .R10 }, .dst = instr.Mov.dst } },
+                    }
+                ) catch std.process.exit(1);
+            } else {
+                fixedInstructions.append(allocator, instr) catch std.process.exit(1);
+            }
+        }
+        instructions.clearAndFree(allocator);
+        instructions.* = fixedInstructions;
     }
 
     fn replaceIfPseudo(map: *std.StringHashMap(isize), stackCounter: *isize, operand: *Operand) void {
@@ -95,6 +124,14 @@ const Instruction = union(InstructionTag) {
     Ret: Ret,
     Unary: Unary,
     AllocStack: AllocStack,
+
+    pub fn isMov(self: Instruction) bool {
+        return self == Instruction.Mov;
+    }
+
+    pub fn isIllegalMove(self: Instruction) bool {
+        return self.isMov() and (self.Mov.dst.isStack() and self.Mov.src.isStack());
+    }
 };
 
 pub const Mov = struct {
@@ -140,7 +177,13 @@ pub const Unary = struct {
     }
 };
 
-pub const AllocStack = struct {};
+pub const AllocStack = struct {
+    stackPointer: isize,
+
+    pub fn init(stackPointer: isize) Instruction {
+        return .{ .AllocStack = .{ .stackPointer = stackPointer } };
+    }
+};
 
 const OperandType = enum {
     Imm,
@@ -156,6 +199,10 @@ const Operand = union(OperandType) {
 
     pub fn isPseudo(self: Operand) bool {
         return self == Operand.Pseudo;
+    }
+
+    pub fn isStack(self: Operand) bool {
+        return self == Operand.Stack;
     }
 };
 
