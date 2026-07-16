@@ -43,18 +43,18 @@ pub fn tokenize(self: *Lexer, text: [:0]const u8) ![]Token {
         const currentChar = nextToken[0];
 
         switch (currentChar) {
-            'a'...'z', 'A'...'Z', '_' => {
+            'a'...'z', 'A'...'Z', '_' => { // identifiers and keywords
                 const identifier = self.reIdentifier.exec(nextToken) orelse badToken(nextToken, lineNumber);
                 const tokenType = KeywordMap.get(identifier) orelse .Identifier;
                 try self.tokens.append(self.allocator, .{ .type = tokenType, .value = identifier });
                 tokenStart += identifier.len;
             },
-            '0'...'9' => {
+            '0'...'9' => { // constants
                 const constant = self.reConstant.exec(nextToken) orelse badToken(nextToken, lineNumber);
                 try self.tokens.append(self.allocator, .{ .type = .Constant, .value = constant });
                 tokenStart += constant.len;
             },
-            '(', ')', '{', '}', ';' => {
+            '(', ')', '{', '}', ';' => { // brackets and semicolons
                 const token: Token = switch (currentChar) {
                     '(' => .{ .type = .OpenParenthesis, .value = "(" },
                     ')' => .{ .type = .CloseParenthesis, .value = ")" },
@@ -66,21 +66,40 @@ pub fn tokenize(self: *Lexer, text: [:0]const u8) ![]Token {
                 try self.tokens.append(self.allocator, token);
                 tokenStart += token.value.len;
             },
-            ' ', '\t' => {
+            ' ', '\t' => { // ignore tabs
                 tokenStart += 1;
             },
-            '\n' => {
+            '\n' => { // ignore newlines, but increment lineNumber for debugging
                 lineNumber += 1;
                 tokenStart += 1;
             },
             '/' => {
-                const comment = self.reComment.exec(nextToken) orelse badToken(nextToken, lineNumber);
-                tokenStart += comment.len;
+                switch (nextToken[1]) {
+                    '/', '*' => { // comment
+                        const comment = self.reComment.exec(nextToken) orelse badToken(nextToken, lineNumber);
+                        tokenStart += comment.len;
+                    },
+                    else => { // division binary operator
+                        const token: Token = .{ .type = .BinaryOp, .value = "/" };
+                        try self.tokens.append(self.allocator, token);
+                        tokenStart += token.value.len;
+                    },
+                }
             },
-            '-', '~' => {
+            '-', '~' => { // unary operators
                 const token: Token = switch (currentChar) {
                     '-' => .{ .type = .UnaryOp, .value = "-" },
                     '~' => .{ .type = .UnaryOp, .value = "~" },
+                    else => unreachable,
+                };
+                try self.tokens.append(self.allocator, token);
+                tokenStart += token.value.len;
+            },
+            '%', '*', '+' => { // binary operators
+                const token: Token = switch (currentChar) {
+                    '%' => .{ .type = .BinaryOp, .value = "%" },
+                    '*' => .{ .type = .BinaryOp, .value = "*" },
+                    '+' => .{ .type = .BinaryOp, .value = "+" },
                     else => unreachable,
                 };
                 try self.tokens.append(self.allocator, token);

@@ -3,6 +3,7 @@ const mem = std.mem;
 const StaticStringMap = std.StaticStringMap;
 
 pub const TokenType = enum {
+    BinaryOp,
     CloseBrace,
     CloseParenthesis,
     Constant,
