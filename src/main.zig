@@ -4,10 +4,10 @@ const mem = std.mem;
 
 const Lexer = @import("Lexer.zig");
 const Parser = @import("Parser.zig");
-const Assembler = @import("Assembler.zig");
-const CodeEmitter = @import("CodeEmitter.zig");
-const Debugger = @import("Debugger.zig");
 const TAC = @import("TAC.zig");
+const Assembler = @import("Assembler.zig");
+// const CodeEmitter = @import("CodeEmitter.zig");
+const Debugger = @import("Debugger.zig");
 
 pub fn main(init: std.process.Init) !void {
     var args = try init.minimal.args.iterateAllocator(init.gpa);
@@ -93,18 +93,18 @@ pub fn main(init: std.process.Init) !void {
 
                 if (codegen) {
                     std.log.info("Running assembler...", .{});
-                    var assembly = Assembler.codeGen(init.gpa, ast);
+                    var assembly = Assembler.codeGen(init.gpa, tac);
                     defer assembly.deinit();
 
                     if (debug) {
                         std.debug.print("------generated-------\n", .{});
-                        // Debugger.printAssemblerAST(assembly);
+                        Debugger.printAssemblerAST(assembly);
                     }
 
-                    std.log.info("Writing code to './{s}'", .{outputFile});
-                    var ce = try CodeEmitter.init(init.gpa, assembly);
-                    defer ce.deinit();
-                    try ce.writeToFile(init.io, "out.asm");
+                    // std.log.info("Writing code to './{s}'", .{outputFile});
+                    // var ce = try CodeEmitter.init(init.gpa, assembly);
+                    // defer ce.deinit();
+                    // try ce.writeToFile(init.io, "out.asm");
                 }
             }
         }

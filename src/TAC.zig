@@ -23,9 +23,9 @@ const Program = struct {
     }
 };
 
-const Function = struct {
+pub const Function = struct {
     allocator: Allocator,
-    identifier: []const u8,
+    name: []const u8,
     body: ArrayList(Instruction),
 
     const Tag = struct {
@@ -41,7 +41,7 @@ const Function = struct {
         const val = emitTac(allocator, function.body.expr, &tag, &body) catch fatal("", .{});
         body.append(allocator, .{ .Return = .{ .val = val } }) catch fatal("", .{});
 
-        return .{ .allocator = allocator, .identifier = function.name, .body = body };
+        return .{ .allocator = allocator, .name = function.name, .body = body };
     }
 
     pub fn deinit(self: *Function) void {
@@ -79,11 +79,11 @@ const Instruction = union(InstructionTag) {
     Unary: Unary,
 };
 
-const Return = struct {
+pub const Return = struct {
     val: Val,
 };
 
-const Unary = struct {
+pub const Unary = struct {
     operator: Parser.Unary.Operator,
     src: Val,
     dst: Val,

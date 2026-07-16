@@ -54,7 +54,7 @@ pub fn printTAC(ir: TAC.IR) void {
     const body = function.body;
     print("{any} (\n", .{@TypeOf(program)});
     print("  {any} (\n", .{@TypeOf(function)});
-    print("    identifier={s}\n", .{function.identifier});
+    print("    name={s}\n", .{function.name});
     print("    body=\n", .{});
     for (body.items) |instr| {
         print("      {s} (", .{@tagName(instr)});
@@ -88,28 +88,43 @@ pub fn printAssemblerAST(ast: Assembler.AST) void {
     const program = ast;
     const function = program.function;
 
-    print("{any} (", .{@TypeOf(program)});
+    print("{any} (\n", .{@TypeOf(program)});
     print("  {any} (\n", .{@TypeOf(function)});
     print("    name={s}\n", .{function.name});
-    print("    instructions= (\n", .{});
+    print("    instructions=[\n", .{});
 
-    for (function.instructions) |instr| {
-        print("      {any} (\n", .{@TypeOf(instr)});
-        print("        mnemonic={any}\n", .{instr.mnemonic});
-        if (instr.src) |src| {
-            switch (src) {
-                .Imm => print("        src=Imm({s})\n", .{src.Imm}),
-                .Reg => print("        src=Reg({s})\n", .{@tagName(src.Reg)}),
-            }
+    for (function.instructions.items) |instr| {
+        print("      {s} (", .{@tagName(instr)});
+        switch (instr) {
+            .Mov => |mov| {
+                switch (mov.src) {
+                    .Imm => |imm| print("src=Imm({s}) ", .{imm}),
+                    .Pseudo => |reg| print("src=Pseudo({s}) ", .{reg}),
+                    .Reg => |reg| print("src=Reg({s}) ", .{@tagName(reg)}),
+                    .Stack => |stack| print("dst=Stack({d})", .{stack}),
+                }
+                switch (mov.dst) {
+                    .Imm => |imm| print("dst=Imm({s})", .{imm}),
+                    .Pseudo => |reg| print("dst=Pseudo({s})", .{reg}),
+                    .Reg => |reg| print("dst=Reg({s})", .{@tagName(reg)}),
+                    .Stack => |stack| print("dst=Stack({d})", .{stack}),
+                }
+            },
+            .Unary => |unary| {
+                print("operator={s} ", .{@tagName(unary.operator)});
+                switch (unary.operand) {
+                    .Imm => |imm| print("dst=Imm({s})", .{imm}),
+                    .Pseudo => |reg| print("dst=Pseudo({s})", .{reg}),
+                    .Reg => |reg| print("dst=Reg({s})", .{@tagName(reg)}),
+                    .Stack => |stack| print("dst=Stack({d})", .{stack}),
+                }
+            },
+            else => {},
         }
-        if (instr.dst) |dst| {
-            switch (dst) {
-                .Imm => print("        dst=Imm({s})\n", .{dst.Imm}),
-                .Reg => print("        dst=Reg({s})\n", .{@tagName(dst.Reg)}),
-            }
-        }
+        print(")\n", .{});
     }
 
+    print("    ]\n", .{});
     print("  )\n", .{});
     print(")\n", .{});
 }
