@@ -39,16 +39,20 @@ pub const Function = struct {
     body: Statement,
 
     pub fn init(allocator: Allocator, tokens: *TokenIterator) Function {
-        _ = expect(.Int, tokens);
-        const name = expect(.Identifier, tokens);
-        _ = expect(.OpenParenthesis, tokens);
-        _ = expect(.Void, tokens);
-        _ = expect(.CloseParenthesis, tokens);
-        _ = expect(.OpenBrace, tokens);
-        const body = Statement.Return(allocator, tokens);
-        _ = expect(.CloseBrace, tokens);
+        expect(.Int, tokens.next());
 
-        return .{ .allocator = allocator, .name = name, .body = body };
+        const name = tokens.next();
+        expect(.Identifier, name);
+
+        expect(.OpenParenthesis, tokens.next());
+        expect(.Void, tokens.next());
+        expect(.CloseParenthesis, tokens.next());
+
+        expect(.OpenBrace, tokens.next());
+        const body = Statement.Return(allocator, tokens);
+        expect(.CloseBrace, tokens.next());
+
+        return .{ .allocator = allocator, .name = name.?.symbol, .body = body };
     }
 
     pub fn deinit(self: *Function) void {
@@ -66,9 +70,9 @@ pub const Statement = struct {
     tag: Tag,
 
     pub fn Return(allocator: Allocator, tokens: *TokenIterator) Statement {
-        _ = expect(.Return, tokens);
+        expect(.Return, tokens.next());
         const expr = parseExpression(allocator, tokens, 0);
-        _ = expect(.Semicolon, tokens);
+        expect(.Semicolon, tokens.next());
 
         return .{ .allocator = allocator, .expr = expr, .tag = .Return };
     }
@@ -143,10 +147,10 @@ pub const Binary = struct {
             '-' => .Sub,
             else => unreachable,
         };
-        const leftPtr = allocator.create(Expression) catch fatal("Failed to allocate binary", .{});
+        const leftPtr = allocator.create(Expression) catch allocationError(Binary);
         leftPtr.* = left;
 
-        const rightPtr = allocator.create(Expression) catch fatal("Failed to allocate binary", .{});
+        const rightPtr = allocator.create(Expression) catch allocationError(Binary);
         rightPtr.* = right;
 
         return .{ .allocator = allocator, .operator = operator, .left = leftPtr, .right = rightPtr };
@@ -210,7 +214,7 @@ pub const Unary = struct {
     factor: *Factor,
 
     pub fn init(allocator: Allocator, symbol: []const u8, tokens: *TokenIterator) Unary {
-        const factor = allocator.create(Factor) catch fatal("Failed to allocate factor", .{});
+        const factor = allocator.create(Factor) catch allocationError(Unary);
         factor.* = factorFactory(allocator, tokens);
 
         const operator: Operator = switch (symbol[0]) {
@@ -238,9 +242,9 @@ pub const Parantheses = struct {
     expr: *Expression,
 
     pub fn init(allocator: Allocator, tokens: *TokenIterator) Parantheses {
-        const expr = allocator.create(Expression) catch fatal("Could not allocate parantheses", .{});
+        const expr = allocator.create(Expression) catch allocationError(Parantheses);
         expr.* = parseExpression(allocator, tokens, 0);
-        _ = expect(.CloseParenthesis, tokens);
+        expect(.CloseParenthesis, tokens.next());
 
         return .{ .allocator = allocator, .expr = expr };
     }
@@ -259,16 +263,20 @@ pub const Parantheses = struct {
     }
 };
 
-fn expect(expected: Token.Type, tokens: *TokenIterator) []const u8 {
-    const actual = tokens.next() orelse unexpectedEOF();
-
-    if (expected == actual.type) {
-        return actual.symbol;
+fn expect(expected: Token.Type, token: ?Token) void {
+    if (token == null) {
+        unexpectedEOF();
     }
 
-    fatal("Got unexpected token {s} of type {any}; expected type {any}", .{ actual.symbol, actual.type, expected });
+    if (expected != token.?.type) {
+        fatal("Got unexpected token {s} of type {any}; expected type {any}", .{ token.?.symbol, token.?.type, expected });
+    }
 }
 
 fn unexpectedEOF() noreturn {
     fatal("Unexpected end of file", .{});
+}
+
+fn allocationError(t: type) noreturn {
+    fatal("Allocation failed for struct {any}", .{t});
 }
