@@ -18,19 +18,19 @@ pub fn printParserAST(ast: Parser.AST) void {
     const body = function.body;
     const expr = body.expr;
     print("{any} (\n", .{@TypeOf(program)});
-    print("  {any} (\n", .{@TypeOf(function)});
-    print("    {any} (\n", .{body.tag});
-    print("      expr=\n", .{});
+    print(". {any} (\n", .{@TypeOf(function)});
+    print(". . {any} (\n", .{body.tag});
+    print(". . . expr=\n", .{});
     printExpression(expr, 8) catch {};
-    print("    )\n", .{});
-    print("  )\n", .{});
+    print(". . )\n", .{});
+    print(". )\n", .{});
     print(")\n", .{});
 }
 
 fn printExpression(expr: Parser.Expression, indent: usize) !void {
     const indentStr = try std.heap.page_allocator.alloc(u8, indent);
     for (indentStr, 0..) |_, i| {
-        indentStr[i] = ' ';
+        indentStr[i] = if (i % 2 == 0) '.' else ' ';
     }
     defer std.heap.page_allocator.free(indentStr);
 
@@ -40,10 +40,10 @@ fn printExpression(expr: Parser.Expression, indent: usize) !void {
             try printFactor(expr.Factor, indent + 2);
         },
         .Binary => |binary| {
-            print("{s}  left=\n", .{indentStr});
+            print("{s}. left=\n", .{indentStr});
             try printExpression(expr.Binary.left.*, indent + 6);
-            print("{s}  operator={s}\n", .{ indentStr, @tagName(binary.operator) });
-            print("{s}  right=\n", .{indentStr});
+            print("{s}. operator={s}\n", .{ indentStr, @tagName(binary.operator) });
+            print("{s}. right=\n", .{indentStr});
             try printExpression(expr.Binary.right.*, indent + 6);
         },
     }
@@ -53,23 +53,23 @@ fn printExpression(expr: Parser.Expression, indent: usize) !void {
 fn printFactor(factor: Parser.Factor, indent: usize) !void {
     const indentStr = try std.heap.page_allocator.alloc(u8, indent);
     for (indentStr, 0..) |_, i| {
-        indentStr[i] = ' ';
+        indentStr[i] = if (i % 2 == 0) '.' else ' ';
     }
     defer std.heap.page_allocator.free(indentStr);
 
     print("{s}{s} (\n", .{ indentStr, @tagName(factor) });
     switch (factor) {
         .Constant => |constant| {
-            print("{s}  int={s})\n", .{ indentStr, constant.int });
+            print("{s}. int={s})\n", .{ indentStr, constant.int });
         },
         .Unary => |unary| {
-            print("{s}  operation={s})\n", .{ indentStr, @tagName(unary.operator) });
-            print("{s}  factor=", .{indentStr});
+            print("{s}. operation={s})\n", .{ indentStr, @tagName(unary.operator) });
+            print("{s}. factor=", .{indentStr});
             try printFactor(unary.factor.*, indent + 2);
         },
         .Parantheses => {
-            print("{s}  (...\n", .{indentStr});
-            print("{s}  ...)\n", .{indentStr});
+            print("{s}. (...\n", .{indentStr});
+            print("{s}. ...)\n", .{indentStr});
         },
     }
     print("{s})\n", .{indentStr});
@@ -89,12 +89,12 @@ pub fn printTAC(ir: TAC.IR) void {
             .Unary => |unary| {
                 print("operator={any}, ", .{unary.operator});
                 switch (unary.src) {
-                    .Constant => |factor| print("src={any}({s}), ", .{ @TypeOf(factor), factor.int }),
-                    .Var => |name| print("src={s}, ", .{name}),
+                    .Constant => |src| print("src={any}({s}), ", .{ @TypeOf(src), src.int }),
+                    .Var => |src| print("src={s}, ", .{src}),
                 }
                 switch (unary.dst) {
-                    .Constant => |factor| print("src={any}({s})", .{ @TypeOf(factor), factor.int }),
-                    .Var => |name| print("dst={s}", .{name}),
+                    .Constant => |dst| print("src={any}({s})", .{ @TypeOf(dst), dst.int }),
+                    .Var => |dst| print("dst={s}", .{dst}),
                 }
                 print(")\n", .{});
             },
@@ -103,6 +103,22 @@ pub fn printTAC(ir: TAC.IR) void {
                     .Constant => |factor| print("val={any}({s}))\n", .{ @TypeOf(factor), factor.int }),
                     .Var => |name| print("val={s})\n", .{name}),
                 }
+            },
+            .Binary => |binary| {
+                print("operator={any}, ", .{binary.operator});
+                switch (binary.left) {
+                    .Constant => |left| print("left={any}({s}) ", .{ @TypeOf(left), left.int }),
+                    .Var => |left| print("left={s} ", .{left}),
+                }
+                switch (binary.right) {
+                    .Constant => |left| print("right={any}({s}) ", .{ @TypeOf(left), left.int }),
+                    .Var => |left| print("right={s} ", .{left}),
+                }
+                switch (binary.dst) {
+                    .Constant => |dst| print("dst={any}({s})", .{ @TypeOf(dst), dst.int }),
+                    .Var => |dst| print("dst={s}", .{dst}),
+                }
+                print(")\n", .{});
             },
         }
     }

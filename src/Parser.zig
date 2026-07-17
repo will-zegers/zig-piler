@@ -121,7 +121,7 @@ pub const Expression = union(ExpressionTag) {
 };
 
 pub const Binary = struct {
-    const Operator = enum {
+    pub const Operator = enum {
         Add,
         Div,
         Mod,

@@ -38,7 +38,7 @@ pub const Function = struct {
         var tag: Tag = .{ .ID = function.name, .count = 0 };
 
         var body: ArrayList(Instruction) = .empty;
-        const val = emitTac(allocator, function.body.factor, &tag, &body) catch fatal("", .{});
+        const val = emitTac(allocator, function.body.expr, &tag, &body) catch fatal("", .{});
         body.append(allocator, .{ .Return = .{ .val = val } }) catch fatal("", .{});
 
         return .{ .allocator = allocator, .name = function.name, .body = body };
@@ -49,19 +49,33 @@ pub const Function = struct {
 
         for (self.body.items) |item| {
             switch (item) {
-                .Unary => |unary| self.allocator.free(unary.dst.Var),
+                .Unary => self.allocator.free(item.Unary.dst.Var),
+                .Binary => self.allocator.free(item.Binary.dst.Var),
                 else => {},
             }
         }
     }
 
-    fn emitTac(allocator: Allocator, factor: Parser.Factor, tag: *Tag, body: *std.ArrayList(Instruction)) !Val {
-        switch (factor) {
-            .Constant => return .{ .Constant = factor.Constant },
-            .Unary => |unary| {
-                const src = try emitTac(allocator, unary.factor.*, tag, body);
+    fn emitTac(allocator: Allocator, expr: Parser.Expression, tag: *Tag, body: *std.ArrayList(Instruction)) !Val {
+        switch (expr) {
+            .Factor => |factor| switch (factor) {
+                .Constant => return .{ .Constant = factor.Constant },
+                .Unary => |unary| {
+                    const unaryExpr: Parser.Expression = .{ .Factor = unary.factor.* };
+                    const src = try emitTac(allocator, unaryExpr, tag, body);
+                    const dst: Val = .{ .Var = try nextTag(allocator, tag) };
+                    try body.append(allocator, .{ .Unary = .{ .operator = unary.operator, .src = src, .dst = dst } });
+                    return dst;
+                },
+                .Parantheses => |parantheses| {
+                    return try emitTac(allocator, parantheses.expr.*, tag, body);
+                },
+            },
+            .Binary => |binary| {
+                const left = try emitTac(allocator, binary.left.*, tag, body);
+                const right = try emitTac(allocator, binary.right.*, tag, body);
                 const dst: Val = .{ .Var = try nextTag(allocator, tag) };
-                try body.append(allocator, .{ .Unary = .{ .operator = unary.operator, .src = src, .dst = dst } });
+                try body.append(allocator, .{ .Binary = .{ .operator = binary.operator, .left = left, .right = right, .dst = dst } });
                 return dst;
             },
         }
@@ -73,8 +87,9 @@ pub const Function = struct {
     }
 };
 
-const InstructionTag = enum { Return, Unary };
+const InstructionTag = enum { Binary, Return, Unary };
 const Instruction = union(InstructionTag) {
+    Binary: Binary,
     Return: Return,
     Unary: Unary,
 };
@@ -89,6 +104,13 @@ pub const Unary = struct {
     dst: Val,
 };
 
+pub const Binary = struct {
+    operator: Parser.Binary.Operator,
+    left: Val,
+    right: Val,
+    dst: Val,
+};
+
 const ValTag = enum { Constant, Var };
 const Val = union(ValTag) {
     Constant: Constant,
@@ -97,5 +119,3 @@ const Val = union(ValTag) {
 
 const Constant = Parser.Constant;
 const Var = []u8;
-
-const UnaryOperator = Parser.Unary.Operator;
