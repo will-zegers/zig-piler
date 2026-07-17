@@ -106,13 +106,13 @@ pub fn printTAC(ir: TAC.IR) void {
             },
             .Binary => |binary| {
                 print("operator={any}, ", .{binary.operator});
-                switch (binary.left) {
-                    .Constant => |left| print("left={any}({s}) ", .{ @TypeOf(left), left.int }),
-                    .Var => |left| print("left={s} ", .{left}),
+                switch (binary.src1) {
+                    .Constant => |src1| print("src1={any}({s}) ", .{ @TypeOf(src1), src1.int }),
+                    .Var => |src1| print("src1={s} ", .{src1}),
                 }
-                switch (binary.right) {
-                    .Constant => |left| print("right={any}({s}) ", .{ @TypeOf(left), left.int }),
-                    .Var => |left| print("right={s} ", .{left}),
+                switch (binary.src2) {
+                    .Constant => |src2| print("right={any}({s}) ", .{ @TypeOf(src2), src2.int }),
+                    .Var => |src2| print("right={s} ", .{src2}),
                 }
                 switch (binary.dst) {
                     .Constant => |dst| print("dst={any}({s})", .{ @TypeOf(dst), dst.int }),
@@ -164,6 +164,29 @@ pub fn printAssemblerAST(ast: Assembler.AST) void {
             },
             .AllocStack => |allocStack| {
                 print("int={d}", .{allocStack.stackPointer});
+            },
+            .Binary => |binary| {
+                print("operator={s} ", .{@tagName(binary.operator)});
+                switch (binary.src) {
+                    .Imm => |imm| print("src=Imm({s}) ", .{imm}),
+                    .Pseudo => |reg| print("src=Pseudo({s}) ", .{reg}),
+                    .Reg => |reg| print("src=Reg({s}) ", .{@tagName(reg)}),
+                    .Stack => |stack| print("dst=Stack({d}) ", .{stack}),
+                }
+                switch (binary.dst) {
+                    .Imm => |imm| print("dst=Imm({s})", .{imm}),
+                    .Pseudo => |reg| print("dst=Pseudo({s})", .{reg}),
+                    .Reg => |reg| print("dst=Reg({s})", .{@tagName(reg)}),
+                    .Stack => |stack| print("dst=Stack({d})", .{stack}),
+                }
+            },
+            .Idiv => |idiv| {
+                switch (idiv.operand) {
+                    .Imm => |imm| print("src=Imm({s})", .{imm}),
+                    .Pseudo => |reg| print("src=Pseudo({s})", .{reg}),
+                    .Reg => |reg| print("src=Reg({s})", .{@tagName(reg)}),
+                    .Stack => |stack| print("dst=Stack({d})", .{stack}),
+                }
             },
             else => {},
         }

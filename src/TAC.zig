@@ -72,10 +72,10 @@ pub const Function = struct {
                 },
             },
             .Binary => |binary| {
-                const left = try emitTac(allocator, binary.left.*, tag, body);
-                const right = try emitTac(allocator, binary.right.*, tag, body);
+                const src1 = try emitTac(allocator, binary.left.*, tag, body);
+                const src2 = try emitTac(allocator, binary.right.*, tag, body);
                 const dst: Val = .{ .Var = try nextTag(allocator, tag) };
-                try body.append(allocator, .{ .Binary = .{ .operator = binary.operator, .left = left, .right = right, .dst = dst } });
+                try body.append(allocator, .{ .Binary = .{ .operator = binary.operator, .src1 = src1, .src2 = src2, .dst = dst } });
                 return dst;
             },
         }
@@ -106,8 +106,8 @@ pub const Unary = struct {
 
 pub const Binary = struct {
     operator: Parser.Binary.Operator,
-    left: Val,
-    right: Val,
+    src1: Val,
+    src2: Val,
     dst: Val,
 };
 
