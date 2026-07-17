@@ -82,7 +82,7 @@ pub fn tokenize(self: *Lexer, text: [:0]const u8) ![]Token {
                         tokenStart += comment.len;
                     },
                     else => { // division binary operator
-                        const token: Token = .{ .type = .BinaryOp, .symbol = "/" };
+                        const token: Token = .{ .type = .BinaryOp, .symbol = "/", .precedence = 64 };
                         try self.tokens.append(self.allocator, token);
                         tokenStart += token.symbol.len;
                     },
@@ -90,18 +90,21 @@ pub fn tokenize(self: *Lexer, text: [:0]const u8) ![]Token {
             },
             '-', '~' => { // unary operators
                 const token: Token = switch (currentChar) {
-                    '-' => .{ .type = .UnaryOp, .symbol = "-" },
+                    '-' => switch (nextToken[1]) {
+                        ' ', '\t', '\n' => .{ .type = .BinaryOp, .symbol = "-", .precedence = 32 }, // subtract
+                        else => .{ .type = .UnaryOp, .symbol = "-" }, // binary
+                    },
                     '~' => .{ .type = .UnaryOp, .symbol = "~" },
                     else => unreachable,
                 };
                 try self.tokens.append(self.allocator, token);
                 tokenStart += token.symbol.len;
             },
-            '%', '*', '+' => { // binary operators
+            '%', '*', '+' => { // binary operators (apart from division, handled above)
                 const token: Token = switch (currentChar) {
-                    '%' => .{ .type = .BinaryOp, .symbol = "%" },
-                    '*' => .{ .type = .BinaryOp, .symbol = "*" },
-                    '+' => .{ .type = .BinaryOp, .symbol = "+" },
+                    '%' => .{ .type = .BinaryOp, .symbol = "%", .precedence = 64 },
+                    '*' => .{ .type = .BinaryOp, .symbol = "*", .precedence = 64 },
+                    '+' => .{ .type = .BinaryOp, .symbol = "+", .precedence = 32 },
                     else => unreachable,
                 };
                 try self.tokens.append(self.allocator, token);

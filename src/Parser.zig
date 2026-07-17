@@ -62,21 +62,116 @@ pub const Statement = struct {
     };
 
     allocator: Allocator,
-    factor: Factor,
+    expr: Expression,
     tag: Tag,
 
     pub fn Return(allocator: Allocator, tokens: *TokenIterator) Statement {
         _ = expect(.Return, tokens);
-        const factor = factorFactory(allocator, tokens);
+        const expr = parseExpression(allocator, tokens, 0);
         _ = expect(.Semicolon, tokens);
 
-        return .{ .allocator = allocator, .factor = factor, .tag = .Return };
+        return .{ .allocator = allocator, .expr = expr, .tag = .Return };
     }
 
     pub fn deinit(self: *Statement) void {
-        switch (self.factor) {
-            .Constant => return,
-            .Unary => |*factor| factor.deinit(),
+        switch (self.expr) {
+            .Factor => switch (self.expr.Factor) {
+                .Constant => {},
+                .Unary => |*unary| unary.deinit(),
+                .Parantheses => |*parantheses| parantheses.deinit(),
+            },
+            .Binary => |*binary| binary.deinit(),
+        }
+    }
+};
+
+fn parseExpression(allocator: Allocator, tokens: *TokenIterator, minPrecedence: usize) Expression {
+    var left: Expression = .{ .Factor = factorFactory(allocator, tokens) };
+
+    var nextToken = tokens.peek() orelse unexpectedEOF();
+    while (nextToken.type == .BinaryOp and nextToken.precedence >= minPrecedence) {
+        const operator = tokens.next() orelse unexpectedEOF();
+        const right = parseExpression(allocator, tokens, nextToken.precedence + 1);
+
+        const temp = Binary.init(allocator, operator, left, right);
+        left = .{ .Binary = temp };
+
+        nextToken = tokens.peek() orelse unexpectedEOF();
+    }
+    return left;
+}
+
+fn factorFactory(allocator: Allocator, tokens: *TokenIterator) Factor {
+    const token = tokens.next() orelse unexpectedEOF();
+    return switch (token.type) {
+        .Constant => .{ .Constant = Constant.init(token.symbol) },
+        .UnaryOp => .{ .Unary = Unary.init(allocator, token.symbol, tokens) },
+        .OpenParenthesis => .{ .Parantheses = Parantheses.init(allocator, tokens) },
+        else => fatal("Unexpected factor at '{s}'", .{token.symbol}),
+    };
+}
+
+pub const ExpressionTag = enum {
+    Binary,
+    Factor,
+};
+pub const Expression = union(ExpressionTag) {
+    Binary: Binary,
+    Factor: Factor,
+};
+
+pub const Binary = struct {
+    const Operator = enum {
+        Add,
+        Div,
+        Mod,
+        Mul,
+        Sub,
+    };
+
+    allocator: Allocator,
+    operator: Operator,
+    left: *Expression,
+    right: *Expression,
+
+    pub fn init(allocator: Allocator, token: Token, left: Expression, right: Expression) Binary {
+        const operator: Operator = switch (token.symbol[0]) {
+            '%' => .Mod,
+            '*' => .Mul,
+            '+' => .Add,
+            '/' => .Div,
+            '-' => .Sub,
+            else => unreachable,
+        };
+        const leftPtr = allocator.create(Expression) catch fatal("Failed to allocate binary", .{});
+        leftPtr.* = left;
+
+        const rightPtr = allocator.create(Expression) catch fatal("Failed to allocate binary", .{});
+        rightPtr.* = right;
+
+        return .{ .allocator = allocator, .operator = operator, .left = leftPtr, .right = rightPtr };
+    }
+
+    pub fn deinit(self: Binary) void {
+        defer self.allocator.destroy(self.left);
+        defer self.allocator.destroy(self.right);
+
+        switch (self.left.*) {
+            .Factor => switch (self.left.*.Factor) {
+                .Constant => {},
+                .Unary => |*unary| unary.deinit(),
+                .Parantheses => |*parantheses| parantheses.deinit(),
+            },
+            .Binary => |*binary| binary.deinit(),
+        }
+
+        switch (self.right.*) {
+            .Factor => switch (self.right.*.Factor) {
+                .Constant => {},
+                .Unary => |*unary| unary.deinit(),
+                .Parantheses => |*parantheses| parantheses.deinit(),
+            },
+            .Binary => |*binary| binary.deinit(),
         }
     }
 };
@@ -84,10 +179,12 @@ pub const Statement = struct {
 pub const FactorTag = enum {
     Constant,
     Unary,
+    Parantheses,
 };
 pub const Factor = union(FactorTag) {
     Constant: Constant,
     Unary: Unary,
+    Parantheses: Parantheses,
 };
 
 pub const Constant = struct {
@@ -115,6 +212,7 @@ pub const Unary = struct {
     pub fn init(allocator: Allocator, symbol: []const u8, tokens: *TokenIterator) Unary {
         const factor = allocator.create(Factor) catch fatal("Failed to allocate factor", .{});
         factor.* = factorFactory(allocator, tokens);
+
         const operator: Operator = switch (symbol[0]) {
             '~' => .Complement,
             '-' => .Negate,
@@ -133,31 +231,40 @@ pub const Unary = struct {
     }
 };
 
-pub fn factorFactory(allocator: Allocator, tokens: *TokenIterator) Factor {
-    const token = tokens.next() orelse fatal("Unexpected end of file", .{});
-    return switch (token.type) {
-        .Constant => .{ .Constant = Constant.init(token.symbol) },
-        .UnaryOp => .{ .Unary = Unary.init(allocator, token.symbol, tokens) },
-        .OpenParenthesis => parseParentheses(allocator, tokens),
-        else => fatal("Unexpected factor at '{s}'", .{token.symbol}),
-    };
-}
+pub const Parantheses = struct {
+    allocator: Allocator,
+    expr: *Expression,
 
-fn parseParentheses(allocator: Allocator, tokens: *TokenIterator) Factor {
-    const factor = factorFactory(allocator, tokens);
-    _ = expect(.CloseParenthesis, tokens);
+    pub fn init(allocator: Allocator, tokens: *TokenIterator) Parantheses {
+        const expr = allocator.create(Expression) catch fatal("Could not allocate parantheses", .{});
+        expr.* = parseExpression(allocator, tokens, 0);
+        _ = expect(.CloseParenthesis, tokens);
 
-    return factor;
-}
+        return .{ .allocator = allocator, .expr = expr };
+    }
+
+    pub fn deinit(self: *Parantheses) void {
+        switch (self.expr.*) {
+            .Factor => switch (self.expr.*.Factor) {
+                .Constant => {},
+                .Unary => |*unary| unary.deinit(),
+                .Parantheses => |*parantheses| parantheses.deinit(),
+            },
+            .Binary => self.expr.*.Binary.deinit(),
+        }
+    }
+};
 
 fn expect(expected: Token.Type, tokens: *TokenIterator) []const u8 {
-    const actual = tokens.next() orelse {
-        fatal("Unexpected end of file", .{});
-    };
+    const actual = tokens.next() orelse unexpectedEOF();
 
     if (expected == actual.type) {
         return actual.symbol;
     }
 
     fatal("Got unexpected token {s} of type {any}; expected type {any}", .{ actual.symbol, actual.type, expected });
+}
+
+fn unexpectedEOF() noreturn {
+    fatal("Unexpected end of file", .{});
 }
