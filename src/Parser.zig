@@ -2,21 +2,19 @@ const std = @import("std");
 const fatal = std.process.fatal;
 const Allocator = std.mem.Allocator;
 
-const tok = @import("token.zig");
-const Token = tok.Token;
-const TokenIterator = tok.TokenIterator;
-const TokenType = tok.TokenType;
+const Token = @import("Lexer.zig").Token;
+const TokenIterator = Token.Iterator;
 
 const Parser = @This();
 
 pub const AST = Program;
 
 pub fn parse(allocator: Allocator, tokens: []Token) AST {
-    var tokenIter = tok.iterate(tokens);
+    var tokenIter = Token.iterate(tokens);
 
     const ast = Program.init(allocator, &tokenIter);
     if (tokenIter.next()) |token| {
-        fatal("Unexpected token(s) at end of file: {s}", .{token.value});
+        fatal("Unexpected token(s) at end of file: {s}", .{token.symbol});
     }
 
     return ast;
@@ -138,10 +136,10 @@ pub const Unary = struct {
 pub fn factorFactory(allocator: Allocator, tokens: *TokenIterator) Factor {
     const token = tokens.next() orelse fatal("Unexpected end of file", .{});
     return switch (token.type) {
-        .Constant => .{ .Constant = Constant.init(token.value) },
-        .UnaryOp => .{ .Unary = Unary.init(allocator, token.value, tokens) },
+        .Constant => .{ .Constant = Constant.init(token.symbol) },
+        .UnaryOp => .{ .Unary = Unary.init(allocator, token.symbol, tokens) },
         .OpenParenthesis => parseParentheses(allocator, tokens),
-        else => fatal("Unexpected factor at '{s}'", .{token.value}),
+        else => fatal("Unexpected factor at '{s}'", .{token.symbol}),
     };
 }
 
@@ -152,14 +150,14 @@ fn parseParentheses(allocator: Allocator, tokens: *TokenIterator) Factor {
     return factor;
 }
 
-fn expect(expected: TokenType, tokens: *TokenIterator) []const u8 {
+fn expect(expected: Token.Type, tokens: *TokenIterator) []const u8 {
     const actual = tokens.next() orelse {
         fatal("Unexpected end of file", .{});
     };
 
     if (expected == actual.type) {
-        return actual.value;
+        return actual.symbol;
     }
 
-    fatal("Got unexpected token {s} of type {any}; expected type {any}", .{ actual.value, actual.type, expected });
+    fatal("Got unexpected token {s} of type {any}; expected type {any}", .{ actual.symbol, actual.type, expected });
 }

@@ -4,11 +4,11 @@ const print = std.debug.print;
 const Parser = @import("Parser.zig");
 const Assembler = @import("Assembler.zig");
 const TAC = @import("TAC.zig");
-const Token = @import("token.zig").Token;
+const Token = @import("Lexer.zig").Token;
 
 pub fn printLexerTokens(tokens: []Token) void {
     for (tokens) |token| {
-        std.debug.print("{any}: {s}\n", .{ token.type, token.value });
+        std.debug.print("{any}: {s}\n", .{ token.type, token.symbol });
     }
 }
 

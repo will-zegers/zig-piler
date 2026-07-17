@@ -2,13 +2,15 @@ const std = @import("std");
 const mem = std.mem;
 const Allocator = mem.Allocator;
 const ArrayList = std.ArrayList;
-const StringHashMap = std.StringHashMap;
 
 const Regex = @import("Lexer/Regex.zig");
-const tok = @import("token.zig");
-const Token = tok.Token;
-const TokenType = tok.TokenType;
-const KeywordMap = tok.KeywordMap;
+pub const Token = @import("Lexer/Token.zig");
+
+const KeywordMap = std.StaticStringMap(Token.Type).initComptime(.{
+    .{ "int", .Int },
+    .{ "return", .Return },
+    .{ "void", .Void },
+});
 
 const Lexer = @This();
 
@@ -46,25 +48,25 @@ pub fn tokenize(self: *Lexer, text: [:0]const u8) ![]Token {
             'a'...'z', 'A'...'Z', '_' => { // identifiers and keywords
                 const identifier = self.reIdentifier.exec(nextToken) orelse badToken(nextToken, lineNumber);
                 const tokenType = KeywordMap.get(identifier) orelse .Identifier;
-                try self.tokens.append(self.allocator, .{ .type = tokenType, .value = identifier });
+                try self.tokens.append(self.allocator, .{ .type = tokenType, .symbol = identifier });
                 tokenStart += identifier.len;
             },
             '0'...'9' => { // constants
                 const constant = self.reConstant.exec(nextToken) orelse badToken(nextToken, lineNumber);
-                try self.tokens.append(self.allocator, .{ .type = .Constant, .value = constant });
+                try self.tokens.append(self.allocator, .{ .type = .Constant, .symbol = constant });
                 tokenStart += constant.len;
             },
             '(', ')', '{', '}', ';' => { // brackets and semicolons
                 const token: Token = switch (currentChar) {
-                    '(' => .{ .type = .OpenParenthesis, .value = "(" },
-                    ')' => .{ .type = .CloseParenthesis, .value = ")" },
-                    '{' => .{ .type = .OpenBrace, .value = "{" },
-                    '}' => .{ .type = .CloseBrace, .value = "}" },
-                    ';' => .{ .type = .Semicolon, .value = ";" },
+                    '(' => .{ .type = .OpenParenthesis, .symbol = "(" },
+                    ')' => .{ .type = .CloseParenthesis, .symbol = ")" },
+                    '{' => .{ .type = .OpenBrace, .symbol = "{" },
+                    '}' => .{ .type = .CloseBrace, .symbol = "}" },
+                    ';' => .{ .type = .Semicolon, .symbol = ";" },
                     else => unreachable,
                 };
                 try self.tokens.append(self.allocator, token);
-                tokenStart += token.value.len;
+                tokenStart += token.symbol.len;
             },
             ' ', '\t' => { // ignore tabs
                 tokenStart += 1;
@@ -80,30 +82,30 @@ pub fn tokenize(self: *Lexer, text: [:0]const u8) ![]Token {
                         tokenStart += comment.len;
                     },
                     else => { // division binary operator
-                        const token: Token = .{ .type = .BinaryOp, .value = "/" };
+                        const token: Token = .{ .type = .BinaryOp, .symbol = "/" };
                         try self.tokens.append(self.allocator, token);
-                        tokenStart += token.value.len;
+                        tokenStart += token.symbol.len;
                     },
                 }
             },
             '-', '~' => { // unary operators
                 const token: Token = switch (currentChar) {
-                    '-' => .{ .type = .UnaryOp, .value = "-" },
-                    '~' => .{ .type = .UnaryOp, .value = "~" },
+                    '-' => .{ .type = .UnaryOp, .symbol = "-" },
+                    '~' => .{ .type = .UnaryOp, .symbol = "~" },
                     else => unreachable,
                 };
                 try self.tokens.append(self.allocator, token);
-                tokenStart += token.value.len;
+                tokenStart += token.symbol.len;
             },
             '%', '*', '+' => { // binary operators
                 const token: Token = switch (currentChar) {
-                    '%' => .{ .type = .BinaryOp, .value = "%" },
-                    '*' => .{ .type = .BinaryOp, .value = "*" },
-                    '+' => .{ .type = .BinaryOp, .value = "+" },
+                    '%' => .{ .type = .BinaryOp, .symbol = "%" },
+                    '*' => .{ .type = .BinaryOp, .symbol = "*" },
+                    '+' => .{ .type = .BinaryOp, .symbol = "+" },
                     else => unreachable,
                 };
                 try self.tokens.append(self.allocator, token);
-                tokenStart += token.value.len;
+                tokenStart += token.symbol.len;
             },
             else => {
                 badToken(nextToken, lineNumber);

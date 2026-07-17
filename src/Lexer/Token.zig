@@ -1,8 +1,11 @@
 const std = @import("std");
-const mem = std.mem;
-const StaticStringMap = std.StaticStringMap;
 
-pub const TokenType = enum {
+const Token = @This();
+
+type: Type,
+symbol: []const u8,
+
+pub const Type = enum {
     BinaryOp,
     CloseBrace,
     CloseParenthesis,
@@ -17,28 +20,15 @@ pub const TokenType = enum {
     Void,
 };
 
-pub const KeywordMap = StaticStringMap(TokenType).initComptime(.{
-    .{ "int", .Int },
-    .{ "return", .Return },
-    .{ "void", .Void },
-});
-
-pub const Token = struct {
-    const Self = @This();
-
-    type: TokenType,
-    value: []const u8,
-};
-
-pub fn iterate(tokens: []Token) TokenIterator {
+pub fn iterate(tokens: []Token) Iterator {
     return .{ .items = tokens };
 }
 
-pub const TokenIterator = struct {
+pub const Iterator = struct {
     items: []const Token,
     index: usize = 0,
 
-    pub fn next(self: *TokenIterator) ?Token {
+    pub fn next(self: *Iterator) ?Token {
         if (self.index < self.items.len) {
             defer self.index += 1;
             return self.items[self.index];
@@ -46,7 +36,7 @@ pub const TokenIterator = struct {
         return null;
     }
 
-    pub fn peek(self: *TokenIterator) ?Token {
+    pub fn peek(self: *Iterator) ?Token {
         if (self.index < self.items.len) {
             return self.items[self.index];
         }

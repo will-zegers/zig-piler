@@ -4,7 +4,6 @@ const builtin = @import("builtin");
 const Io = std.Io;
 const Allocator = std.mem.Allocator;
 const ArrayList = std.ArrayList;
-const parseInt = std.fmt.parseInt;
 
 const Assembler = @import("Assembler.zig");
 
