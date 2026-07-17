@@ -223,11 +223,13 @@ pub const Unary = struct {
     }
 
     pub fn deinit(self: *Unary) void {
+        defer self.allocator.destroy(self.factor);
+
         switch (self.factor.*) {
             .Unary => |*factor| factor.deinit(),
+            .Parantheses => |*parantheses| parantheses.deinit(),
             else => {},
         }
-        defer self.allocator.destroy(self.factor);
     }
 };
 
@@ -244,6 +246,8 @@ pub const Parantheses = struct {
     }
 
     pub fn deinit(self: *Parantheses) void {
+        defer self.allocator.destroy(self.expr);
+
         switch (self.expr.*) {
             .Factor => switch (self.expr.*.Factor) {
                 .Constant => {},

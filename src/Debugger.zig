@@ -16,25 +16,48 @@ pub fn printParserAST(ast: Parser.AST) void {
     const program = ast;
     const function = program.function;
     const body = function.body;
-    const factor = body.factor;
+    const expr = body.expr;
     print("{any} (\n", .{@TypeOf(program)});
     print("  {any} (\n", .{@TypeOf(function)});
     print("    {any} (\n", .{body.tag});
-    print("      factor=", .{});
-    printFactorHierarchy(factor, 6) catch {};
+    print("      expr=\n", .{});
+    printExpression(expr, 8) catch {};
     print("    )\n", .{});
     print("  )\n", .{});
     print(")\n", .{});
 }
 
-fn printFactorHierarchy(factor: Parser.Factor, indent: usize) !void {
+fn printExpression(expr: Parser.Expression, indent: usize) !void {
     const indentStr = try std.heap.page_allocator.alloc(u8, indent);
     for (indentStr, 0..) |_, i| {
         indentStr[i] = ' ';
     }
     defer std.heap.page_allocator.free(indentStr);
 
-    print("{s} (\n", .{@tagName(factor)});
+    print("{s}{s} (\n", .{ indentStr, @tagName(expr) });
+    switch (expr) {
+        .Factor => {
+            try printFactor(expr.Factor, indent + 2);
+        },
+        .Binary => |binary| {
+            print("{s}  left=\n", .{indentStr});
+            try printExpression(expr.Binary.left.*, indent + 6);
+            print("{s}  operator={s}\n", .{ indentStr, @tagName(binary.operator) });
+            print("{s}  right=\n", .{indentStr});
+            try printExpression(expr.Binary.right.*, indent + 6);
+        },
+    }
+    print("{s})\n", .{indentStr});
+}
+
+fn printFactor(factor: Parser.Factor, indent: usize) !void {
+    const indentStr = try std.heap.page_allocator.alloc(u8, indent);
+    for (indentStr, 0..) |_, i| {
+        indentStr[i] = ' ';
+    }
+    defer std.heap.page_allocator.free(indentStr);
+
+    print("{s}{s} (\n", .{ indentStr, @tagName(factor) });
     switch (factor) {
         .Constant => |constant| {
             print("{s}  int={s})\n", .{ indentStr, constant.int });
@@ -42,7 +65,11 @@ fn printFactorHierarchy(factor: Parser.Factor, indent: usize) !void {
         .Unary => |unary| {
             print("{s}  operation={s})\n", .{ indentStr, @tagName(unary.operator) });
             print("{s}  factor=", .{indentStr});
-            try printFactorHierarchy(unary.factor.*, indent + 2);
+            try printFactor(unary.factor.*, indent + 2);
+        },
+        .Parantheses => {
+            print("{s}  (...\n", .{indentStr});
+            print("{s}  ...)\n", .{indentStr});
         },
     }
     print("{s})\n", .{indentStr});
