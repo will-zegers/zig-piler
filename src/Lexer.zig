@@ -44,23 +44,22 @@ pub fn tokenize(self: *Lexer, text: [:0]const u8) ![]Token {
     var tokenStart: usize = 0;
     var lineNumber: usize = 1;
     while (tokenStart < text.len) {
-        const nextToken = text[tokenStart..];
-        const currentChar = nextToken[0];
+        const remainingText = text[tokenStart..];
+        const currentChar = remainingText[0];
 
+        var token: Token = undefined;
         switch (currentChar) {
             'a'...'z', 'A'...'Z', '_' => { // identifiers and keywords
-                const identifier = self.reIdentifier.exec(nextToken) orelse badToken(nextToken, lineNumber);
+                const identifier = self.reIdentifier.exec(remainingText) orelse badToken(remainingText, lineNumber);
                 const tokenType = KeywordMap.get(identifier) orelse .Identifier;
-                try self.tokens.append(self.allocator, .{ .type = tokenType, .symbol = identifier });
-                tokenStart += identifier.len;
+                token = .{ .type = tokenType, .symbol = identifier };
             },
             '0'...'9' => { // constants
-                const constant = self.reConstant.exec(nextToken) orelse badToken(nextToken, lineNumber);
-                try self.tokens.append(self.allocator, .{ .type = .Constant, .symbol = constant });
-                tokenStart += constant.len;
+                const constant = self.reConstant.exec(remainingText) orelse badToken(remainingText, lineNumber);
+                token = .{ .type = .Constant, .symbol = constant };
             },
             '(', ')', '{', '}', ';' => { // brackets and semicolons
-                const token: Token = switch (currentChar) {
+                token = switch (currentChar) {
                     '(' => .{ .type = .OpenParenthesis, .symbol = "(" },
                     ')' => .{ .type = .CloseParenthesis, .symbol = ")" },
                     '{' => .{ .type = .OpenBrace, .symbol = "{" },
@@ -68,78 +67,71 @@ pub fn tokenize(self: *Lexer, text: [:0]const u8) ![]Token {
                     ';' => .{ .type = .Semicolon, .symbol = ";" },
                     else => unreachable,
                 };
-                try self.tokens.append(self.allocator, token);
-                tokenStart += token.symbol.len;
             },
             '#' => { // ignore macros for now
-                const macro = self.reMacro.exec(nextToken) orelse badToken(nextToken, lineNumber);
+                const macro = self.reMacro.exec(remainingText) orelse badToken(remainingText, lineNumber);
                 tokenStart += macro.len;
+                continue;
             },
             ' ', '\t' => { // ignore tabs
                 tokenStart += 1;
+                continue;
             },
             '\n' => { // ignore newlines, but increment lineNumber for debugging
                 lineNumber += 1;
                 tokenStart += 1;
+                continue;
             },
-            '/' => {
-                switch (nextToken[1]) {
+            '/' => { // line and block comments; division operator
+                switch (remainingText[1]) {
                     '/', '*' => { // comment
-                        const comment = self.reComment.exec(nextToken) orelse badToken(nextToken, lineNumber);
+                        const comment = self.reComment.exec(remainingText) orelse badToken(remainingText, lineNumber);
                         tokenStart += comment.len;
+                        continue;
                     },
                     else => { // division binary operator
-                        const token: Token = .{ .type = .BinaryOp, .symbol = "/", .precedence = 64 };
-                        try self.tokens.append(self.allocator, token);
-                        tokenStart += token.symbol.len;
+                        token = .{ .type = .BinaryOp, .symbol = "/", .precedence = 140 };
                     },
                 }
             },
-            '-', '~' => { // unary operators
-                const token: Token = switch (currentChar) {
-                    '-' => switch (nextToken[1]) {
-                        ' ', '\t', '\n' => .{ .type = .BinaryOp, .symbol = "-", .precedence = 32 }, // subtract
-                        else => .{ .type = .UnaryOp, .symbol = "-" }, // binary
-                    },
-                    '~' => .{ .type = .UnaryOp, .symbol = "~" },
+            '~' => { // bitwise complement
+                token = .{ .type = .UnaryOp, .symbol = "~" };
+            },
+            '-' => { // negation or subtraction
+                token = switch (remainingText[1]) {
+                    ' ', '\t', '\n' => .{ .type = .BinaryOp, .symbol = "-", .precedence = 130 }, // subtract
+                    else => .{ .type = .UnaryOp, .symbol = "-" }, // binary
+                };
+            },
+            '%', '&', '*', '+', '^', '|' => { // binary operators (apart from div and sub, handled above)
+                token = switch (currentChar) {
+                    '%' => .{ .type = .BinaryOp, .symbol = "%", .precedence = 140 },
+                    '*' => .{ .type = .BinaryOp, .symbol = "*", .precedence = 140 },
+                    '+' => .{ .type = .BinaryOp, .symbol = "+", .precedence = 130 },
+                    '&' => .{ .type = .BinaryOp, .symbol = "&", .precedence = 90 },
+                    '^' => .{ .type = .BinaryOp, .symbol = "^", .precedence = 80 },
+                    '|' => .{ .type = .BinaryOp, .symbol = "|", .precedence = 70 },
                     else => unreachable,
                 };
-                try self.tokens.append(self.allocator, token);
-                tokenStart += token.symbol.len;
             },
-            '%', '&', '*', '+', '^', '|' => { // binary operators (apart from division, handled above)
-                const token: Token = switch (currentChar) {
-                    '%' => .{ .type = .BinaryOp, .symbol = "%", .precedence = 64 },
-                    '*' => .{ .type = .BinaryOp, .symbol = "*", .precedence = 64 },
-                    '+' => .{ .type = .BinaryOp, .symbol = "+", .precedence = 32 },
-                    '&' => .{ .type = .BinaryOp, .symbol = "&", .precedence = 8 },
-                    '^' => .{ .type = .BinaryOp, .symbol = "^", .precedence = 4 },
-                    '|' => .{ .type = .BinaryOp, .symbol = "|", .precedence = 2 },
-                    else => unreachable,
+            '<' => { // shift left, less-than
+                token = switch (remainingText[1]) {
+                    '<' => .{ .type = .BinaryOp, .symbol = "<<", .precedence = 120 }, // bit-shift left
+                    else => badToken(remainingText, lineNumber),
                 };
-                try self.tokens.append(self.allocator, token);
-                tokenStart += token.symbol.len;
             },
-            '<' => {
-                const token: Token = switch (nextToken[1]) {
-                    '<' => .{ .type = .BinaryOp, .symbol = "<<", .precedence = 16 }, // bit-shift left
-                    else => badToken(nextToken, lineNumber),
+            '>' => { // shift right, greater-than
+                token = switch (remainingText[1]) {
+                    '>' => .{ .type = .BinaryOp, .symbol = ">>", .precedence = 120 }, // bit-shift right
+                    else => badToken(remainingText, lineNumber),
                 };
-                try self.tokens.append(self.allocator, token);
-                tokenStart += token.symbol.len;
-            },
-            '>' => {
-                const token: Token = switch (nextToken[1]) {
-                    '>' => .{ .type = .BinaryOp, .symbol = ">>", .precedence = 16 }, // bit-shift right
-                    else => badToken(nextToken, lineNumber),
-                };
-                try self.tokens.append(self.allocator, token);
-                tokenStart += token.symbol.len;
             },
             else => {
-                badToken(nextToken, lineNumber);
+                badToken(remainingText, lineNumber);
             },
         }
+        try self.tokens.append(self.allocator, token);
+        tokenStart += token.symbol.len;
     }
     return self.tokens.items;
 }
