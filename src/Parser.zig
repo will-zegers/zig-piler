@@ -127,10 +127,15 @@ pub const Expression = union(ExpressionTag) {
 pub const Binary = struct {
     pub const Operator = enum {
         Add,
+        And,
         Div,
         Mod,
         Mul,
+        Or,
+        SAL,
+        SAR,
         Sub,
+        Xor,
     };
 
     allocator: Allocator,
@@ -140,11 +145,16 @@ pub const Binary = struct {
 
     pub fn init(allocator: Allocator, token: Token, left: Expression, right: Expression) Binary {
         const operator: Operator = switch (token.symbol[0]) {
-            '%' => .Mod,
-            '*' => .Mul,
+            '&' => .And,
             '+' => .Add,
             '/' => .Div,
+            '%' => .Mod,
+            '*' => .Mul,
+            '|' => .Or,
+            '<' => .SAL,
+            '>' => .SAR,
             '-' => .Sub,
+            '^' => .Xor,
             else => unreachable,
         };
         const leftPtr = allocator.create(Expression) catch allocationError(Binary);

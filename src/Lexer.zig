@@ -19,6 +19,7 @@ tokens: ArrayList(Token),
 reIdentifier: Regex,
 reConstant: Regex,
 reComment: Regex,
+reMacro: Regex,
 
 pub fn init(allocator: Allocator) !Lexer {
     return .{
@@ -27,6 +28,7 @@ pub fn init(allocator: Allocator) !Lexer {
         .reIdentifier = try .init("[a-zA-Z_]\\w*\\b"),
         .reConstant = try .init("[0-9]+\\b"),
         .reComment = try .init("//[^\n]*|/\\*([^*]|\\*+[^*/])*\\*+/"),
+        .reMacro = try .init("\\#[^\n]*"),
     };
 }
 
@@ -34,6 +36,7 @@ pub fn deinit(self: *Lexer) void {
     defer self.reIdentifier.deinit();
     defer self.reConstant.deinit();
     defer self.reComment.deinit();
+    defer self.reMacro.deinit();
     defer self.tokens.deinit(self.allocator);
 }
 
@@ -68,6 +71,10 @@ pub fn tokenize(self: *Lexer, text: [:0]const u8) ![]Token {
                 try self.tokens.append(self.allocator, token);
                 tokenStart += token.symbol.len;
             },
+            '#' => { // ignore macros for now
+                const macro = self.reMacro.exec(nextToken) orelse badToken(nextToken, lineNumber);
+                tokenStart += macro.len;
+            },
             ' ', '\t' => { // ignore tabs
                 tokenStart += 1;
             },
@@ -100,12 +107,31 @@ pub fn tokenize(self: *Lexer, text: [:0]const u8) ![]Token {
                 try self.tokens.append(self.allocator, token);
                 tokenStart += token.symbol.len;
             },
-            '%', '*', '+' => { // binary operators (apart from division, handled above)
+            '%', '&', '*', '+', '^', '|' => { // binary operators (apart from division, handled above)
                 const token: Token = switch (currentChar) {
                     '%' => .{ .type = .BinaryOp, .symbol = "%", .precedence = 64 },
                     '*' => .{ .type = .BinaryOp, .symbol = "*", .precedence = 64 },
                     '+' => .{ .type = .BinaryOp, .symbol = "+", .precedence = 32 },
+                    '&' => .{ .type = .BinaryOp, .symbol = "&", .precedence = 8 },
+                    '^' => .{ .type = .BinaryOp, .symbol = "^", .precedence = 4 },
+                    '|' => .{ .type = .BinaryOp, .symbol = "|", .precedence = 2 },
                     else => unreachable,
+                };
+                try self.tokens.append(self.allocator, token);
+                tokenStart += token.symbol.len;
+            },
+            '<' => {
+                const token: Token = switch (nextToken[1]) {
+                    '<' => .{ .type = .BinaryOp, .symbol = "<<", .precedence = 16 }, // bit-shift left
+                    else => badToken(nextToken, lineNumber),
+                };
+                try self.tokens.append(self.allocator, token);
+                tokenStart += token.symbol.len;
+            },
+            '>' => {
+                const token: Token = switch (nextToken[1]) {
+                    '>' => .{ .type = .BinaryOp, .symbol = ">>", .precedence = 16 }, // bit-shift right
+                    else => badToken(nextToken, lineNumber),
                 };
                 try self.tokens.append(self.allocator, token);
                 tokenStart += token.symbol.len;

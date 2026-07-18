@@ -94,7 +94,7 @@ const Function = struct {
         for (instructions.items) |instr| {
             if (instr.detectIllegal()) |illegal| {
                 switch (illegal) {
-                    .Mov => {
+                    .Ill_Mov => {
                         fixedInstructions.appendSlice(
                             allocator,
                             &.{
@@ -103,7 +103,7 @@ const Function = struct {
                             }
                         ) catch std.process.exit(1);
                     },
-                    .AddSub => {
+                    .Ill_Binary => {
                         fixedInstructions.appendSlice(
                             allocator,
                             &.{
@@ -112,7 +112,7 @@ const Function = struct {
                             }
                         ) catch std.process.exit(1);
                     },
-                    .Idiv => {
+                    .Ill_Idiv => {
                         fixedInstructions.appendSlice(
                             allocator,
                             &.{
@@ -121,13 +121,22 @@ const Function = struct {
                             }
                         ) catch std.process.exit(1);
                     },
-                    .Mul => {
+                    .Ill_Mul => {
                         fixedInstructions.appendSlice(
                             allocator,
                             &.{
                                 .{ .Mov = .{.src = instr.Binary.dst, .dst = .{ .Reg = .r11 } } },
                                 .{ .Binary = .{.operator = instr.Binary.operator, .src = instr.Binary.src, .dst = .{ .Reg = .r11 } } },
                                 .{ .Mov = .{.src = .{ .Reg = .r11 }, .dst = instr.Binary.dst } },
+                            }
+                        ) catch std.process.exit(1);
+                    },
+                    .Ill_Shift => {
+                        fixedInstructions.appendSlice(
+                            allocator,
+                            &.{
+                                .{ .Mov = .{.src = instr.Binary.src, .dst = .{ .Reg = .rcx } } },
+                                .{ .Binary = .{.operator = instr.Binary.operator, .src = .{ .Reg = .rcx }, .dst = instr.Binary.dst } },
                             }
                         ) catch std.process.exit(1);
                     },
@@ -176,18 +185,20 @@ const Instruction = union(InstructionTag) {
     Idiv: Idiv,
 
     const Illegal = enum {
-        AddSub,
-        Idiv,
-        Mov,
-        Mul,
+        Ill_Binary,
+        Ill_Idiv,
+        Ill_Mov,
+        Ill_Mul,
+        Ill_Shift,
     };
 
     // Helper functions to detect illegal operation that need remediation
     pub fn detectIllegal(self: Instruction) ?Illegal {
-        if (self.isIllegalMove()) return .Mov;
-        if (self.isIllegalAddSub()) return .AddSub;
-        if (self.isIllegalIdiv()) return .Idiv;
-        if (self.isIllegalMul()) return .Mul;
+        if (self.isIllegalMove()) return .Ill_Mov;
+        if (self.isIllegalIdiv()) return .Ill_Idiv;
+        if (self.isIllegalMul()) return .Ill_Mul;
+        if (self.isIllegalShift()) return .Ill_Shift;
+        if (self.isIllegalBinary()) return .Ill_Binary;
         return null;
     }
 
@@ -201,14 +212,18 @@ const Instruction = union(InstructionTag) {
         return self == Instruction.Idiv and self.Idiv.operand.isImm();
     }
 
-    // Destination of mul must not be a memory address
+    // Destination of mul or shifts must not be a memory address
     fn isIllegalMul(self: Instruction) bool {
         return self.isBinaryMul() and self.Binary.dst == .Stack;
     }
 
+    fn isIllegalShift(self: Instruction) bool {
+        return self.isBinaryShift() and self.Binary.src != .Imm;
+    }
+
     // Add and sub must not have memory as both its source and destination
-    fn isIllegalAddSub(self: Instruction) bool {
-        return self.isBinaryAddSub() and (self.Binary.src.isStack() and self.Binary.dst.isStack());
+    fn isIllegalBinary(self: Instruction) bool {
+        return self.isBinary() and (self.Binary.src.isStack() and self.Binary.dst.isStack());
     }
 
     fn isMov(self: Instruction) bool {
@@ -221,6 +236,10 @@ const Instruction = union(InstructionTag) {
 
     fn isBinaryMul(self: Instruction) bool {
         return self.isBinary() and self.Binary.operator == .Mul;
+    }
+
+    fn isBinaryShift(self: Instruction) bool {
+        return self.isBinary() and (self.Binary.operator == .SAL or self.Binary.operator == .SAR);
     }
 
     fn isBinaryAddSub(self: Instruction) bool {
@@ -298,12 +317,6 @@ pub const Binary = struct {
         const dst: Operand = .{ .Pseudo = binary.dst.Var };
 
         const instruction = switch (binary.operator) {
-            .Add, .Mul, .Sub, => blk: {
-                break :blk allocator.dupe(Instruction, &.{
-                    .{ .Mov = .{ .src = src1, .dst = dst } },
-                    .{ .Binary = .{ .operator = binary.operator, .src = src2, .dst = dst } },
-                }) catch std.process.exit(1);
-            },
             .Div, .Mod, => blk: {
                 const sourceReg: Operand = switch(binary.operator) {
                     .Div => .{ .Reg = .rax },
@@ -315,6 +328,12 @@ pub const Binary = struct {
                     .{ .Cqo = .{} },
                     .{ .Idiv = .{.operand = src2 } },
                     .{ .Mov = .{ .src = sourceReg, .dst = dst } },
+                }) catch std.process.exit(1);
+            },
+            else => blk: {
+                break :blk allocator.dupe(Instruction, &.{
+                    .{ .Mov = .{ .src = src1, .dst = dst } },
+                    .{ .Binary = .{ .operator = binary.operator, .src = src2, .dst = dst } },
                 }) catch std.process.exit(1);
             },
         };
@@ -352,5 +371,5 @@ pub const Operand = union(OperandType) {
     }
 };
 
-const Reg = enum { rax, rdx, r10, r11};
+const Reg = enum { rax, rcx, rdx, r10, r11};
 

@@ -77,6 +77,11 @@ pub fn init(allocator: Allocator, ast: Assembler.AST) !CodeEmitter {
                     .Add => "addq",
                     .Sub => "subq",
                     .Mul => "imulq",
+                    .And => "andq",
+                    .Or => "orq",
+                    .Xor => "xorq",
+                    .SAL => "salq",
+                    .SAR => "sarq",
                     else => unreachable,
                 };
                 const src = try getOperandString(allocator, binary.src);
