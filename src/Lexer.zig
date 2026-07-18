@@ -43,6 +43,7 @@ pub fn deinit(self: *Lexer) void {
 pub fn tokenize(self: *Lexer, text: [:0]const u8) ![]Token {
     var tokenStart: usize = 0;
     var lineNumber: usize = 1;
+
     while (tokenStart < text.len) {
         const remainingText = text[tokenStart..];
         const currentChar = remainingText[0];
@@ -97,33 +98,57 @@ pub fn tokenize(self: *Lexer, text: [:0]const u8) ![]Token {
             '~' => { // bitwise complement
                 token = .{ .type = .UnaryOp, .symbol = "~" };
             },
+            '!' => { // logical complement
+                token = switch (remainingText[1]) {
+                    '=' => .{ .type = .BinaryOp, .symbol = "!=", .precedence = 100 },
+                    else => .{ .type = .UnaryOp, .symbol = "!", .precedence = 150 },
+                };
+            },
             '-' => { // negation or subtraction
                 token = switch (remainingText[1]) {
                     ' ', '\t', '\n' => .{ .type = .BinaryOp, .symbol = "-", .precedence = 130 }, // subtract
                     else => .{ .type = .UnaryOp, .symbol = "-" }, // binary
                 };
             },
-            '%', '&', '*', '+', '^', '|' => { // binary operators (apart from div and sub, handled above)
+            '%', '*', '+', '^' => { // binary operators (apart from div and sub, handled above)
                 token = switch (currentChar) {
                     '%' => .{ .type = .BinaryOp, .symbol = "%", .precedence = 140 },
                     '*' => .{ .type = .BinaryOp, .symbol = "*", .precedence = 140 },
                     '+' => .{ .type = .BinaryOp, .symbol = "+", .precedence = 130 },
-                    '&' => .{ .type = .BinaryOp, .symbol = "&", .precedence = 90 },
                     '^' => .{ .type = .BinaryOp, .symbol = "^", .precedence = 80 },
-                    '|' => .{ .type = .BinaryOp, .symbol = "|", .precedence = 70 },
                     else => unreachable,
+                };
+            },
+            '&' => {
+                token = switch (remainingText[1]) {
+                    '&' => .{ .type = .BinaryOp, .symbol = "&&", .precedence = 60 }, // logical AND
+                    else => .{ .type = .BinaryOp, .symbol = "&", .precedence = 90 }, // bitwise AND
+                };
+            },
+            '|' => {
+                token = switch (remainingText[1]) {
+                    '|' => .{ .type = .BinaryOp, .symbol = "||", .precedence = 50 }, // logical OR
+                    else => .{ .type = .BinaryOp, .symbol = "|", .precedence = 70 }, // bitwise OR
+                };
+            },
+            '=' => {
+                token = switch (remainingText[1]) {
+                    '=' => .{ .type = .BinaryOp, .symbol = "==", .precedence = 100 },
+                    else => badToken(remainingText, lineNumber),
                 };
             },
             '<' => { // shift left, less-than
                 token = switch (remainingText[1]) {
                     '<' => .{ .type = .BinaryOp, .symbol = "<<", .precedence = 120 }, // bit-shift left
-                    else => badToken(remainingText, lineNumber),
+                    '=' => .{ .type = .BinaryOp, .symbol = "<=", .precedence = 110 }, // LTE
+                    else => .{ .type = .BinaryOp, .symbol = "<", .precedence = 110 }, // LT
                 };
             },
             '>' => { // shift right, greater-than
                 token = switch (remainingText[1]) {
                     '>' => .{ .type = .BinaryOp, .symbol = ">>", .precedence = 120 }, // bit-shift right
-                    else => badToken(remainingText, lineNumber),
+                    '=' => .{ .type = .BinaryOp, .symbol = ">=", .precedence = 110 }, // GTE
+                    else => .{ .type = .BinaryOp, .symbol = ">", .precedence = 110 }, // GT
                 };
             },
             else => {
