@@ -71,7 +71,7 @@ pub const Statement = struct {
 
     pub fn Return(allocator: Allocator, tokens: *TokenIterator) Statement {
         expect(.Return, tokens.next());
-        const expr = parseExpression(allocator, tokens, 0);
+        const expr = Expression.parse(allocator, tokens, 0);
         expect(.Semicolon, tokens.next());
 
         return .{ .allocator = allocator, .expr = expr, .tag = .Return };
@@ -89,32 +89,6 @@ pub const Statement = struct {
     }
 };
 
-fn parseExpression(allocator: Allocator, tokens: *TokenIterator, minPrecedence: usize) Expression {
-    var left: Expression = .{ .Factor = factorFactory(allocator, tokens) };
-
-    var nextToken = tokens.peek() orelse unexpectedEOF();
-    while (nextToken.type == .BinaryOp and nextToken.precedence >= minPrecedence) {
-        const operator = tokens.next() orelse unexpectedEOF();
-        const right = parseExpression(allocator, tokens, nextToken.precedence + 1);
-
-        const temp = Binary.init(allocator, operator, left, right);
-        left = .{ .Binary = temp };
-
-        nextToken = tokens.peek() orelse unexpectedEOF();
-    }
-    return left;
-}
-
-fn factorFactory(allocator: Allocator, tokens: *TokenIterator) Factor {
-    const token = tokens.next() orelse unexpectedEOF();
-    return switch (token.type) {
-        .Constant => .{ .Constant = Constant.init(token.symbol) },
-        .UnaryOp => .{ .Unary = Unary.init(allocator, token.symbol, tokens) },
-        .OpenParenthesis => .{ .Parantheses = Parantheses.init(allocator, tokens) },
-        else => fatal("Unexpected factor at '{s}'", .{token.symbol}),
-    };
-}
-
 pub const ExpressionTag = enum {
     Binary,
     Factor,
@@ -122,6 +96,22 @@ pub const ExpressionTag = enum {
 pub const Expression = union(ExpressionTag) {
     Binary: Binary,
     Factor: Factor,
+
+    fn parse(allocator: Allocator, tokens: *TokenIterator, minPrecedence: usize) Expression {
+        var left: Expression = .{ .Factor = Factor.factory(allocator, tokens) };
+
+        var nextToken = tokens.peek() orelse unexpectedEOF();
+        while (nextToken.type == .BinaryOp and nextToken.precedence >= minPrecedence) {
+            const operator = tokens.next() orelse unexpectedEOF();
+            const right = Expression.parse(allocator, tokens, nextToken.precedence + 1);
+
+            const temp = Binary.init(allocator, operator, left, right);
+            left = .{ .Binary = temp };
+
+            nextToken = tokens.peek() orelse unexpectedEOF();
+        }
+        return left;
+    }
 };
 
 pub const Binary = struct {
@@ -199,6 +189,16 @@ pub const Factor = union(FactorTag) {
     Constant: Constant,
     Unary: Unary,
     Parantheses: Parantheses,
+
+    fn factory(allocator: Allocator, tokens: *TokenIterator) Factor {
+        const token = tokens.next() orelse unexpectedEOF();
+        return switch (token.type) {
+            .Constant => .{ .Constant = Constant.init(token.symbol) },
+            .UnaryOp => .{ .Unary = Unary.init(allocator, token.symbol, tokens) },
+            .OpenParenthesis => .{ .Parantheses = Parantheses.init(allocator, tokens) },
+            else => fatal("Unexpected factor at '{s}'", .{token.symbol}),
+        };
+    }
 };
 
 pub const Constant = struct {
@@ -225,7 +225,7 @@ pub const Unary = struct {
 
     pub fn init(allocator: Allocator, symbol: []const u8, tokens: *TokenIterator) Unary {
         const factor = allocator.create(Factor) catch allocationError(Unary);
-        factor.* = factorFactory(allocator, tokens);
+        factor.* = Factor.factory(allocator, tokens);
 
         const operator: Operator = switch (symbol[0]) {
             '~' => .Complement,
@@ -253,7 +253,7 @@ pub const Parantheses = struct {
 
     pub fn init(allocator: Allocator, tokens: *TokenIterator) Parantheses {
         const expr = allocator.create(Expression) catch allocationError(Parantheses);
-        expr.* = parseExpression(allocator, tokens, 0);
+        expr.* = Expression.parse(allocator, tokens, 0);
         expect(.CloseParenthesis, tokens.next());
 
         return .{ .allocator = allocator, .expr = expr };
