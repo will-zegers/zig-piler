@@ -11,6 +11,8 @@ pub const AST = Program;
 
 const Instructions = ArrayList(Instruction);
 
+const WORD_SIZE: usize = 8;
+
 pub fn codeGen(allocator: Allocator, ast: TAC.IR) AST {
     return .init(allocator, ast);
 }
@@ -143,7 +145,7 @@ const Function = struct {
             const key = operand.*.Pseudo;
             if (map.get(key) == null) {
                 map.put(key, stackCounter.*) catch std.process.exit(1);
-                stackCounter.* -= 4;
+                stackCounter.* -= WORD_SIZE;
             }
             const value = map.get(key).?;
             operand.* = .{ .Stack = value };
@@ -161,7 +163,7 @@ const InstructionTag = enum {
     Unary,
     AllocStack,
     Binary,
-    Cdq,
+    Cqo,
     Idiv,
 };
 const Instruction = union(InstructionTag) {
@@ -170,7 +172,7 @@ const Instruction = union(InstructionTag) {
     Unary: Unary,
     AllocStack: AllocStack,
     Binary: Binary,
-    Cdq: Cdq,
+    Cqo: Cqo,
     Idiv: Idiv,
 
     const Illegal = enum {
@@ -310,7 +312,7 @@ pub const Binary = struct {
                 };
                 break :blk allocator.dupe(Instruction, &.{
                     .{ .Mov = .{ .src = src1, .dst = .{ .Reg = .rax } } },
-                    .{ .Cdq = .{} },
+                    .{ .Cqo = .{} },
                     .{ .Idiv = .{.operand = src2 } },
                     .{ .Mov = .{ .src = sourceReg, .dst = dst } },
                 }) catch std.process.exit(1);
@@ -321,7 +323,7 @@ pub const Binary = struct {
     }
 };
 
-pub const Cdq = struct {};
+pub const Cqo = struct {};
 
 pub const Idiv = struct { operand: Operand };
 

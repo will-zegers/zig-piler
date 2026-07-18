@@ -60,13 +60,47 @@ pub fn init(allocator: Allocator, ast: Assembler.AST) !CodeEmitter {
                     \\  {s}    {s}
                 ;
                 const operator = switch (unary.operator) {
-                    .Complement => "notl",
-                    .Negate => "negl",
+                    .Complement => "notq",
+                    .Negate => "negq",
                 };
                 const operand = try getOperandString(allocator, unary.operand);
                 defer allocator.free(operand);
 
                 const instr = try std.fmt.allocPrint(allocator, template, .{operator, operand});
+                try instructions.append(allocator, instr);
+            },
+            .Binary => |binary| {
+                const template =
+                    \\  {s}    {s}, {s}
+                ;
+                const operator = switch (binary.operator) {
+                    .Add => "addq",
+                    .Sub => "subq",
+                    .Mul => "imulq",
+                    else => unreachable,
+                };
+                const src = try getOperandString(allocator, binary.src);
+                defer allocator.free(src);
+                const dst = try getOperandString(allocator, binary.dst);
+                defer allocator.free(dst);
+
+                const instr = try std.fmt.allocPrint(allocator, template, .{operator, src, dst});
+                try instructions.append(allocator, instr);
+            },
+            .Cqo => {
+                const instr =
+                    \\  cqo
+                ;
+                try instructions.append(allocator, try allocator.dupe(u8, instr));
+            },
+            .Idiv => |idiv| {
+                const template =
+                    \\  idivq    {s}
+                ;
+                const operand = try getOperandString(allocator, idiv.operand);
+                defer allocator.free(operand);
+
+                const instr = try std.fmt.allocPrint(allocator, template, .{operand});
                 try instructions.append(allocator, instr);
             },
         }
