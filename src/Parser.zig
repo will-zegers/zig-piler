@@ -114,14 +114,43 @@ pub const Expression = union(ExpressionTag) {
     }
 };
 
+const BinaryOpMap = std.StaticStringMap(Binary.Operator).initComptime(.{
+    .{ "+", .Add },
+    .{ "&", .AndB },
+    .{ "&&", .AndL },
+    .{ "/", .Div },
+    .{ "==", .Eq },
+    .{ ">", .Gt },
+    .{ ">=", .Gte },
+    .{ "<", .Lt },
+    .{ "<=", .Lte },
+    .{ "%", .Mod },
+    .{ "*", .Mul },
+    .{ "!=", .Neq },
+    .{ "|", .OrB },
+    .{ "||", .OrL },
+    .{ "<<", .SAL },
+    .{ ">>", .SAR },
+    .{ "-", .Sub },
+    .{ "^", .Xor },
+});
+
 pub const Binary = struct {
     pub const Operator = enum {
         Add,
-        And,
+        AndB,
+        AndL,
         Div,
+        Eq,
+        Gt,
+        Gte,
+        Lt,
+        Lte,
         Mod,
         Mul,
-        Or,
+        Neq,
+        OrB,
+        OrL,
         SAL,
         SAR,
         Sub,
@@ -134,19 +163,7 @@ pub const Binary = struct {
     right: *Expression,
 
     pub fn init(allocator: Allocator, token: Token, left: Expression, right: Expression) Binary {
-        const operator: Operator = switch (token.symbol[0]) {
-            '&' => .And,
-            '+' => .Add,
-            '/' => .Div,
-            '%' => .Mod,
-            '*' => .Mul,
-            '|' => .Or,
-            '<' => .SAL,
-            '>' => .SAR,
-            '-' => .Sub,
-            '^' => .Xor,
-            else => unreachable,
-        };
+        const operator: Operator = BinaryOpMap.get(token.symbol) orelse fatal("Problem with token '{s}' of type {any}", .{ token.symbol, token.type });
         const leftPtr = allocator.create(Expression) catch allocationError(Binary);
         leftPtr.* = left;
 
@@ -217,6 +234,7 @@ pub const Unary = struct {
     pub const Operator = enum {
         Complement,
         Negate,
+        Not,
     };
 
     allocator: Allocator,
@@ -230,6 +248,7 @@ pub const Unary = struct {
         const operator: Operator = switch (symbol[0]) {
             '~' => .Complement,
             '-' => .Negate,
+            '!' => .Not,
             else => unreachable,
         };
 

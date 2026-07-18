@@ -44,6 +44,7 @@ pub fn tokenize(self: *Lexer, text: [:0]const u8) ![]Token {
     var tokenStart: usize = 0;
     var lineNumber: usize = 1;
 
+    var prevToken: Token = undefined;
     while (tokenStart < text.len) {
         const remainingText = text[tokenStart..];
         const currentChar = remainingText[0];
@@ -105,8 +106,8 @@ pub fn tokenize(self: *Lexer, text: [:0]const u8) ![]Token {
                 };
             },
             '-' => { // negation or subtraction
-                token = switch (remainingText[1]) {
-                    ' ', '\t', '\n' => .{ .type = .BinaryOp, .symbol = "-", .precedence = 130 }, // subtract
+                token = switch (prevToken.type) {
+                    .Constant, .Identifier, .CloseParenthesis => .{ .type = .BinaryOp, .symbol = "-", .precedence = 130 }, // subtract
                     else => .{ .type = .UnaryOp, .symbol = "-" }, // binary
                 };
             },
@@ -156,6 +157,7 @@ pub fn tokenize(self: *Lexer, text: [:0]const u8) ![]Token {
             },
         }
         try self.tokens.append(self.allocator, token);
+        prevToken = token;
         tokenStart += token.symbol.len;
     }
     return self.tokens.items;
