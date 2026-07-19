@@ -47,6 +47,7 @@ const Function = struct {
                 .Unary => |unary| Unary.append(allocator, &instructions, unary),
                 .Return => |ret| Ret.append(allocator, &instructions, ret),
                 .Binary => |binary| Binary.append(allocator, &instructions, binary),
+                else => {},
             }
         }
         // Second pass, replace Pseudo registers with stack locations

@@ -67,9 +67,8 @@ fn printFactor(factor: Parser.Factor, indent: usize) !void {
             print("{s}. factor=", .{indentStr});
             try printFactor(unary.factor.*, indent + 2);
         },
-        .Parantheses => {
-            print("{s}. (...\n", .{indentStr});
-            print("{s}. ...)\n", .{indentStr});
+        .Parantheses => |para| {
+            std.debug.print("{any}\n", .{para.expr.*});
         },
     }
     print("{s})\n", .{indentStr});
@@ -120,6 +119,31 @@ pub fn printTAC(ir: TAC.IR) void {
                 }
                 print(")\n", .{});
             },
+            .Copy => |copy| {
+                switch (copy.src) {
+                    .Constant => |src| print("src={any}({s}) ", .{ @TypeOf(src), src.int }),
+                    .Var => |src| print("src={s} ", .{src}),
+                }
+                switch (copy.dst) {
+                    .Constant => |dst| print("dst={any}({s})", .{ @TypeOf(dst), dst.int }),
+                    .Var => |dst| print("dst={s}", .{dst}),
+                }
+                print(")\n", .{});
+            },
+            .Label => |label| {
+                print("name={s})\n", .{label.identifier});
+            },
+            .Jump => |jump| {
+                print("label={s})\n", .{jump.target});
+            },
+            .JumpIfZero => |jump| {
+                switch (jump.condition) {
+                    .Constant => |cond| print("cond={any}({s}) ", .{ @TypeOf(cond), cond.int }),
+                    .Var => |cond| print("cond={s} ", .{cond}),
+                }
+                print("label={s})\n", .{jump.target});
+            },
+            else => std.debug.print("\n", .{}),
         }
     }
     print("    )\n", .{});

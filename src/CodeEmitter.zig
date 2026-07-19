@@ -62,6 +62,7 @@ pub fn init(allocator: Allocator, ast: Assembler.AST) !CodeEmitter {
                 const operator = switch (unary.operator) {
                     .Complement => "notq",
                     .Negate => "negq",
+                    .Not => "foo",
                 };
                 const operand = try getOperandString(allocator, unary.operand);
                 defer allocator.free(operand);

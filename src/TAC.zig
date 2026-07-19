@@ -24,74 +24,149 @@ const Program = struct {
 };
 
 pub const Function = struct {
+    const Labels = ArrayList([]const u8);
+    const Tags = ArrayList([]const u8);
+    const Instructions = ArrayList(Instruction);
+
     allocator: Allocator,
     name: []const u8,
     body: ArrayList(Instruction),
-
-    const Tag = struct {
-        ID: []const u8,
-        count: usize,
-    };
+    tags: Tags,
+    labels: Labels,
 
     pub fn init(allocator: Allocator, ast: Parser.AST) Function {
-        const function = ast.function;
-        var tag: Tag = .{ .ID = function.name, .count = 0 };
+        var function: Function = .{
+            .allocator = allocator,
+            .name = ast.function.name,
+            .body = .empty,
+            .tags = .empty,
+            .labels = .empty,
+        };
 
-        var body: ArrayList(Instruction) = .empty;
-        const val = emitTac(allocator, function.body.expr, &tag, &body) catch fatal("", .{});
-        body.append(allocator, .{ .Return = .{ .val = val } }) catch fatal("", .{});
+        const val = function.emitTac(ast.function.body.expr) catch std.process.exit(1);
+        function.body.append(allocator, .{ .Return = .{ .val = val } }) catch std.process.exit(1);
 
-        return .{ .allocator = allocator, .name = function.name, .body = body };
+        return function;
     }
 
     pub fn deinit(self: *Function) void {
         defer self.body.deinit(self.allocator);
+        defer self.tags.deinit(self.allocator);
+        defer self.labels.deinit(self.allocator);
 
-        for (self.body.items) |item| {
-            switch (item) {
-                .Unary => self.allocator.free(item.Unary.dst.Var),
-                .Binary => self.allocator.free(item.Binary.dst.Var),
-                else => {},
-            }
+        for (self.tags.items) |item| {
+            self.allocator.free(item);
+        }
+        for (self.labels.items) |item| {
+            self.allocator.free(item);
         }
     }
 
-    fn emitTac(allocator: Allocator, expr: Parser.Expression, tag: *Tag, body: *std.ArrayList(Instruction)) !Val {
+    fn emitTac(self: *Function, expr: Parser.Expression) !Val {
         switch (expr) {
             .Factor => |factor| switch (factor) {
-                .Constant => return .{ .Constant = factor.Constant },
+                .Constant => return .{ .Constant = .{ .int = factor.Constant.int } },
                 .Unary => |unary| {
                     const unaryExpr: Parser.Expression = .{ .Factor = unary.factor.* };
-                    const src = try emitTac(allocator, unaryExpr, tag, body);
-                    const dst: Val = .{ .Var = try nextTag(allocator, tag) };
-                    try body.append(allocator, .{ .Unary = .{ .operator = unary.operator, .src = src, .dst = dst } });
+                    const src = try self.emitTac(unaryExpr);
+                    const dst: Val = .{ .Var = self.nextTag() };
+                    try self.body.append(self.allocator, .{ .Unary = .{ .operator = unary.operator, .src = src, .dst = dst } });
                     return dst;
                 },
                 .Parantheses => |parantheses| {
-                    return try emitTac(allocator, parantheses.expr.*, tag, body);
+                    return self.emitTac(parantheses.expr.*);
                 },
             },
             .Binary => |binary| {
-                const src1 = try emitTac(allocator, binary.left.*, tag, body);
-                const src2 = try emitTac(allocator, binary.right.*, tag, body);
-                const dst: Val = .{ .Var = try nextTag(allocator, tag) };
-                try body.append(allocator, .{ .Binary = .{ .operator = binary.operator, .src1 = src1, .src2 = src2, .dst = dst } });
-                return dst;
+                switch (binary.operator) {
+                    .AndL => {
+                        const falseLabel = self.nextLabel("andFalse");
+                        const endLabel = self.nextLabel("andEnd");
+
+                        const v1 = try self.emitTac(binary.left.*);
+                        try self.body.append(self.allocator, .{ .JumpIfZero = .{ .condition = v1, .target = falseLabel } });
+
+                        const v2 = try self.emitTac(binary.right.*);
+                        try self.body.append(self.allocator, .{ .JumpIfZero = .{ .condition = v2, .target = falseLabel } });
+
+                        const dst: Val = .{ .Var = self.nextTag() };
+                        try self.body.appendSlice(self.allocator, &.{
+                            .{ .Copy = .{ .src = .{ .Constant = .{ .int = "1" } }, .dst = dst } },
+                            .{ .Jump = .{ .target = endLabel } },
+                            .{ .Label = .{ .identifier = falseLabel } },
+                            .{ .Copy = .{ .src = .{ .Constant = .{ .int = "0" } }, .dst = dst } },
+                            .{ .Label = .{ .identifier = endLabel } },
+                        });
+                        return dst;
+                    },
+                    .OrL => {
+                        const trueLabel = self.nextLabel("orTrue");
+                        const endLabel = self.nextLabel("orEnd");
+
+                        const v1 = try self.emitTac(binary.left.*);
+                        try self.body.append(self.allocator, .{ .JumpIfNotZero = .{ .condition = v1, .target = trueLabel } });
+
+                        const v2 = try self.emitTac(binary.right.*);
+                        try self.body.append(self.allocator, .{ .JumpIfNotZero = .{ .condition = v2, .target = trueLabel } });
+
+                        const dst: Val = .{ .Var = self.nextTag() };
+                        try self.body.appendSlice(self.allocator, &.{
+                            .{ .Copy = .{ .src = .{ .Constant = .{ .int = "0" } }, .dst = dst } },
+                            .{ .Jump = .{ .target = endLabel } },
+                            .{ .Label = .{ .identifier = trueLabel } },
+                            .{ .Copy = .{ .src = .{ .Constant = .{ .int = "1" } }, .dst = dst } },
+                            .{ .Label = .{ .identifier = endLabel } },
+                        });
+                        return dst;
+                    },
+                    else => {
+                        const src1 = try self.emitTac(
+                            binary.left.*,
+                        );
+                        const src2 = try self.emitTac(
+                            binary.right.*,
+                        );
+                        const dst: Val = .{ .Var = self.nextTag() };
+                        try self.body.append(self.allocator, .{ .Binary = .{ .operator = binary.operator, .src1 = src1, .src2 = src2, .dst = dst } });
+                        return dst;
+                    },
+                }
             },
         }
     }
 
-    fn nextTag(allocator: Allocator, tag: *Tag) ![]u8 {
-        defer tag.count += 1;
-        return try std.fmt.allocPrint(allocator, "{s}.{d}", .{ tag.ID, tag.count });
+    fn nextTag(self: *Function) []u8 {
+        const tag = std.fmt.allocPrint(self.allocator, "{s}.{d}", .{ self.name, self.tags.items.len }) catch allocationError(Function);
+        self.tags.append(self.allocator, tag) catch std.process.exit(1);
+        return tag;
+    }
+
+    fn nextLabel(self: *Function, descr: []const u8) []u8 {
+        const label = std.fmt.allocPrint(self.allocator, "{s}.{s}{d}", .{ self.name, descr, self.labels.items.len }) catch allocationError(Function);
+        self.labels.append(self.allocator, label) catch std.process.exit(1);
+        return label;
     }
 };
 
-const InstructionTag = enum { Binary, Return, Unary };
+const InstructionTag = enum {
+    Binary,
+    Return,
+    Unary,
+    Copy,
+    Jump,
+    JumpIfZero,
+    JumpIfNotZero,
+    Label,
+};
 const Instruction = union(InstructionTag) {
     Binary: Binary,
     Return: Return,
     Unary: Unary,
+    Copy: Copy,
+    Jump: Jump,
+    JumpIfZero: JumpIfZero,
+    JumpIfNotZero: JumpIfNotZero,
+    Label: Label,
 };
 
 pub const Return = struct {
@@ -111,11 +186,31 @@ pub const Binary = struct {
     dst: Val,
 };
 
+pub const Copy = struct {
+    src: Val,
+    dst: Val,
+};
+
+pub const Jump = struct { target: []const u8 };
+
+pub const JumpIfZero = struct { condition: Val, target: []const u8 };
+
+pub const JumpIfNotZero = struct { condition: Val, target: []const u8 };
+
+pub const Label = struct { identifier: []const u8 };
+
 const ValTag = enum { Constant, Var };
 const Val = union(ValTag) {
     Constant: Constant,
     Var: Var,
 };
 
-const Constant = Parser.Constant;
+pub const Constant = struct {
+    int: []const u8,
+};
+
 const Var = []u8;
+
+fn allocationError(t: type) noreturn {
+    fatal("Allocation failed for struct {any}", .{t});
+}
