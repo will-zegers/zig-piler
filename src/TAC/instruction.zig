@@ -61,8 +61,6 @@ pub const Val = union(ValTag) {
     Var: Var,
 };
 
-pub const Constant = struct {
-    int: []const u8,
-};
+pub const Constant = []const u8;
 
 const Var = []u8;

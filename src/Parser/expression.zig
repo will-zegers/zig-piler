@@ -128,7 +128,7 @@ pub const Factor = union(FactorTag) {
     pub fn factory(allocator: Allocator, tokens: *TokenIterator) Factor {
         const token = tokens.next() orelse unexpectedEOF();
         return switch (token.type) {
-            .Constant => .{ .Constant = .init(token.symbol) },
+            .Constant => .{ .Constant = token.symbol },
             .UnaryOp => .{ .Unary = .init(allocator, token.symbol, tokens) },
             .OpenParenthesis => .{ .Parantheses = .init(allocator, tokens) },
             else => unexpectedToken(token),
@@ -136,17 +136,7 @@ pub const Factor = union(FactorTag) {
     }
 };
 
-pub const Constant = struct {
-    int: []const u8,
-
-    pub fn init(int: []const u8) Constant {
-        return .{ .int = int };
-    }
-
-    pub fn deinit(_: Constant) void {
-        return;
-    }
-};
+pub const Constant = []const u8;
 
 pub const Unary = struct {
     pub const Operator = enum {

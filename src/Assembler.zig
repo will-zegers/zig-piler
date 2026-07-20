@@ -308,11 +308,11 @@ pub const Mov = struct {
 
     pub fn append(allocator: Allocator, instructions: *Instructions, copy: TAC.Copy) void {
         const src: Operand = switch(copy.src) {
-            .Constant => |constant| .{ .Imm = constant.int },
+            .Constant => |constant| .{ .Imm = constant },
             .Var => |pseudo| .{ .Pseudo = pseudo},
         };
         const dst: Operand = switch(copy.dst) {
-            .Constant => |constant| .{ .Imm = constant.int },
+            .Constant => |constant| .{ .Imm = constant },
             .Var => |pseudo| .{ .Pseudo = pseudo},
         };
         instructions.append(allocator, .{ .Mov = .{ .src = src, .dst = dst } }) catch std.process.exit(1);
@@ -322,7 +322,7 @@ pub const Mov = struct {
 pub const Ret = struct {
     pub fn append(allocator: Allocator, instructions: *Instructions, ret: TAC.Return) void {
         const val: Operand = switch(ret.val) {
-            .Constant => |constant| .{ .Imm = constant.int },
+            .Constant => |constant| .{ .Imm = constant },
             .Var => |pseudo| .{ .Pseudo = pseudo },
         };
 
@@ -344,7 +344,7 @@ pub const Unary = struct {
 
     pub fn append(allocator: Allocator, instructions: *Instructions, unary: TAC.Unary) void {
         const src: Operand = switch(unary.src) {
-            .Constant => |constant| .{ .Imm = constant.int },
+            .Constant => |constant| .{ .Imm = constant },
             .Var => |pseudo| .{ .Pseudo = pseudo},
         };
         const dst: Operand = .{ .Pseudo = unary.dst.Var };
@@ -385,11 +385,11 @@ pub const Binary = struct {
 
     pub fn append(allocator: Allocator, instructions: *Instructions, binary: TAC.Binary) void {
         const src1: Operand = switch(binary.src1) {
-            .Constant => |constant| .{ .Imm = constant.int },
+            .Constant => |constant| .{ .Imm = constant },
             .Var => |pseudo| .{ .Pseudo = pseudo},
         };
         const src2: Operand = switch(binary.src2) {
-            .Constant => |constant| .{ .Imm = constant.int },
+            .Constant => |constant| .{ .Imm = constant },
             .Var => |pseudo| .{ .Pseudo = pseudo},
         };
         const dst: Operand = .{ .Pseudo = binary.dst.Var };
@@ -465,7 +465,7 @@ pub const JmpCC = struct {
         switch (jmpInstr) {
             .JumpIfZero => |jz| {
                 const arg2: Operand = switch (jz.condition) {
-                    .Constant => |constant| .{ .Imm = constant.int },
+                    .Constant => |constant| .{ .Imm = constant },
                     .Var => |pseudo| .{ .Pseudo = pseudo },
                 };
                 instructions.appendSlice(allocator, &.{
@@ -475,7 +475,7 @@ pub const JmpCC = struct {
             },
             .JumpIfNotZero => |jnz| {
                 const arg2: Operand = switch (jnz.condition) {
-                    .Constant => |constant| .{ .Imm = constant.int},
+                    .Constant => |constant| .{ .Imm = constant },
                     .Var => |pseudo| .{ .Pseudo = pseudo },
                 };
                 instructions.appendSlice(allocator, &.{

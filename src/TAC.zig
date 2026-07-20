@@ -75,7 +75,7 @@ pub const Function = struct {
     fn emitTac(self: *Function, expr: Parser.Expression) !Val {
         switch (expr) {
             .Factor => |factor| switch (factor) {
-                .Constant => return .{ .Constant = .{ .int = factor.Constant.int } },
+                .Constant => return .{ .Constant = factor.Constant },
                 .Unary => |unary| {
                     const unaryExpr: Parser.Expression = .{ .Factor = unary.factor.* };
                     const src = try self.emitTac(unaryExpr);
@@ -101,10 +101,10 @@ pub const Function = struct {
 
                         const dst: Val = .{ .Var = self.nextTag() };
                         try self.body.appendSlice(self.allocator, &.{
-                            .{ .Copy = .{ .src = .{ .Constant = .{ .int = "1" } }, .dst = dst } },
+                            .{ .Copy = .{ .src = .{ .Constant = "1" }, .dst = dst } },
                             .{ .Jump = .{ .target = endLabel } },
                             .{ .Label = .{ .identifier = falseLabel } },
-                            .{ .Copy = .{ .src = .{ .Constant = .{ .int = "0" } }, .dst = dst } },
+                            .{ .Copy = .{ .src = .{ .Constant = "0" }, .dst = dst } },
                             .{ .Label = .{ .identifier = endLabel } },
                         });
                         return dst;
@@ -121,10 +121,10 @@ pub const Function = struct {
 
                         const dst: Val = .{ .Var = self.nextTag() };
                         try self.body.appendSlice(self.allocator, &.{
-                            .{ .Copy = .{ .src = .{ .Constant = .{ .int = "0" } }, .dst = dst } },
+                            .{ .Copy = .{ .src = .{ .Constant = "0" }, .dst = dst } },
                             .{ .Jump = .{ .target = endLabel } },
                             .{ .Label = .{ .identifier = trueLabel } },
-                            .{ .Copy = .{ .src = .{ .Constant = .{ .int = "1" } }, .dst = dst } },
+                            .{ .Copy = .{ .src = .{ .Constant = "1" }, .dst = dst } },
                             .{ .Label = .{ .identifier = endLabel } },
                         });
                         return dst;

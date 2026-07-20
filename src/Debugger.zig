@@ -60,7 +60,7 @@ fn printFactor(factor: Parser.Factor, indent: usize) !void {
     print("{s}{s} (\n", .{ indentStr, @tagName(factor) });
     switch (factor) {
         .Constant => |constant| {
-            print("{s}. int={s})\n", .{ indentStr, constant.int });
+            print("{s}. int={s})\n", .{ indentStr, constant });
         },
         .Unary => |unary| {
             print("{s}. operation={s})\n", .{ indentStr, @tagName(unary.operator) });
@@ -88,44 +88,44 @@ pub fn printTAC(ir: TAC.IR) void {
             .Unary => |unary| {
                 print("operator={any}, ", .{unary.operator});
                 switch (unary.src) {
-                    .Constant => |src| print("src={any}({s}), ", .{ @TypeOf(src), src.int }),
+                    .Constant => |src| print("src={any}({s}), ", .{ @TypeOf(src), src }),
                     .Var => |src| print("src={s}, ", .{src}),
                 }
                 switch (unary.dst) {
-                    .Constant => |dst| print("src={any}({s})", .{ @TypeOf(dst), dst.int }),
+                    .Constant => |dst| print("src={any}({s})", .{ @TypeOf(dst), dst }),
                     .Var => |dst| print("dst={s}", .{dst}),
                 }
                 print(")\n", .{});
             },
             .Return => |ret| {
                 switch (ret.val) {
-                    .Constant => |factor| print("val={any}({s}))\n", .{ @TypeOf(factor), factor.int }),
+                    .Constant => |factor| print("val={any}({s}))\n", .{ @TypeOf(factor), factor }),
                     .Var => |name| print("val={s})\n", .{name}),
                 }
             },
             .Binary => |binary| {
                 print("operator={any}, ", .{binary.operator});
                 switch (binary.src1) {
-                    .Constant => |src1| print("src1={any}({s}) ", .{ @TypeOf(src1), src1.int }),
+                    .Constant => |src1| print("src1={any}({s}) ", .{ @TypeOf(src1), src1 }),
                     .Var => |src1| print("src1={s} ", .{src1}),
                 }
                 switch (binary.src2) {
-                    .Constant => |src2| print("right={any}({s}) ", .{ @TypeOf(src2), src2.int }),
+                    .Constant => |src2| print("right={any}({s}) ", .{ @TypeOf(src2), src2 }),
                     .Var => |src2| print("right={s} ", .{src2}),
                 }
                 switch (binary.dst) {
-                    .Constant => |dst| print("dst={any}({s})", .{ @TypeOf(dst), dst.int }),
+                    .Constant => |dst| print("dst={any}({s})", .{ @TypeOf(dst), dst }),
                     .Var => |dst| print("dst={s}", .{dst}),
                 }
                 print(")\n", .{});
             },
             .Copy => |copy| {
                 switch (copy.src) {
-                    .Constant => |src| print("src={any}({s}) ", .{ @TypeOf(src), src.int }),
+                    .Constant => |src| print("src={any}({s}) ", .{ @TypeOf(src), src }),
                     .Var => |src| print("src={s} ", .{src}),
                 }
                 switch (copy.dst) {
-                    .Constant => |dst| print("dst={any}({s})", .{ @TypeOf(dst), dst.int }),
+                    .Constant => |dst| print("dst={any}({s})", .{ @TypeOf(dst), dst }),
                     .Var => |dst| print("dst={s}", .{dst}),
                 }
                 print(")\n", .{});
@@ -138,7 +138,7 @@ pub fn printTAC(ir: TAC.IR) void {
             },
             .JumpIfZero => |jump| {
                 switch (jump.condition) {
-                    .Constant => |cond| print("cond={any}({s}) ", .{ @TypeOf(cond), cond.int }),
+                    .Constant => |cond| print("cond={any}({s}) ", .{ @TypeOf(cond), cond }),
                     .Var => |cond| print("cond={s} ", .{cond}),
                 }
                 print("label={s})\n", .{jump.target});
