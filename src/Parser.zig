@@ -5,7 +5,7 @@ const Allocator = std.mem.Allocator;
 const Token = @import("Lexer.zig").Token;
 const TokenIterator = Token.Iterator;
 
-const expression = @import("Parser/Expression.zig");
+const expression = @import("Parser/expression.zig");
 pub const Expression = expression.Expression;
 pub const Binary = expression.Binary;
 pub const Unary = expression.Unary;

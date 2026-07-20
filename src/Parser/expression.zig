@@ -14,6 +14,7 @@ pub const Expression = union(ExpressionTag) {
     Binary: Binary,
     Factor: Factor,
 
+    /// Evaluates expression from left-to-right with precedence climbing
     pub fn parse(allocator: Allocator, tokens: *TokenIterator, minPrecedence: usize) Expression {
         var left: Expression = .{ .Factor = Factor.factory(allocator, tokens) };
 
@@ -31,28 +32,28 @@ pub const Expression = union(ExpressionTag) {
     }
 };
 
-const BinaryOpMap = std.StaticStringMap(Binary.Operator).initComptime(.{
-    .{ "+", .Add },
-    .{ "&", .AndB },
-    .{ "&&", .AndL },
-    .{ "/", .Div },
-    .{ "==", .Eq },
-    .{ ">", .Gt },
-    .{ ">=", .Gte },
-    .{ "<", .Lt },
-    .{ "<=", .Lte },
-    .{ "%", .Mod },
-    .{ "*", .Mul },
-    .{ "!=", .Neq },
-    .{ "|", .OrB },
-    .{ "||", .OrL },
-    .{ "<<", .SAL },
-    .{ ">>", .SAR },
-    .{ "-", .Sub },
-    .{ "^", .Xor },
-});
-
 pub const Binary = struct {
+    const BinaryOpMap = std.StaticStringMap(Operator).initComptime(.{
+        .{ "+", .Add },
+        .{ "&", .AndB },
+        .{ "&&", .AndL },
+        .{ "/", .Div },
+        .{ "==", .Eq },
+        .{ ">", .Gt },
+        .{ ">=", .Gte },
+        .{ "<", .Lt },
+        .{ "<=", .Lte },
+        .{ "%", .Mod },
+        .{ "*", .Mul },
+        .{ "!=", .Neq },
+        .{ "|", .OrB },
+        .{ "||", .OrL },
+        .{ "<<", .SAL },
+        .{ ">>", .SAR },
+        .{ "-", .Sub },
+        .{ "^", .Xor },
+    });
+
     pub const Operator = enum {
         Add,
         AndB,

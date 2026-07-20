@@ -4,6 +4,16 @@ const ArrayList = std.ArrayList;
 const fatal = std.process.fatal;
 
 const Parser = @import("Parser.zig");
+const instruction = @import("TAC/instruction.zig");
+
+pub const Binary = instruction.Binary;
+pub const Copy = instruction.Copy;
+pub const Instruction = instruction.Instruction;
+pub const Jump = instruction.Jump;
+pub const Label = instruction.Label;
+pub const Return = instruction.Return;
+pub const Unary = instruction.Unary;
+const Val = instruction.Val;
 
 pub const TAC = @This();
 pub const IR = Program;
@@ -142,78 +152,11 @@ pub const Function = struct {
     }
 
     fn nextLabel(self: *Function, descr: []const u8) []u8 {
-        const label = std.fmt.allocPrint(self.allocator, "{s}.{s}{d}", .{ self.name, descr, self.labels.items.len }) catch allocationError(Function);
+        const label = std.fmt.allocPrint(self.allocator, "{s}.{s}.{d}", .{ self.name, descr, self.labels.items.len }) catch allocationError(Function);
         self.labels.append(self.allocator, label) catch std.process.exit(1);
         return label;
     }
 };
-
-const InstructionTag = enum {
-    Binary,
-    Return,
-    Unary,
-    Copy,
-    Jump,
-    JumpIfZero,
-    JumpIfNotZero,
-    Label,
-};
-pub const Instruction = union(InstructionTag) {
-    Binary: Binary,
-    Return: Return,
-    Unary: Unary,
-    Copy: Copy,
-    Jump: Jump,
-    JumpIfZero: JumpIfZero,
-    JumpIfNotZero: JumpIfNotZero,
-    Label: Label,
-};
-
-pub const Return = struct {
-    val: Val,
-};
-
-pub const Unary = struct {
-    pub const Operator = Parser.Unary.Operator;
-
-    operator: Operator,
-    src: Val,
-    dst: Val,
-};
-
-pub const Binary = struct {
-    pub const Operator = Parser.Binary.Operator;
-
-    operator: Operator,
-    src1: Val,
-    src2: Val,
-    dst: Val,
-};
-
-pub const Copy = struct {
-    src: Val,
-    dst: Val,
-};
-
-pub const Jump = struct { target: []const u8 };
-
-pub const JumpIfZero = struct { condition: Val, target: []const u8 };
-
-pub const JumpIfNotZero = struct { condition: Val, target: []const u8 };
-
-pub const Label = struct { identifier: []const u8 };
-
-const ValTag = enum { Constant, Var };
-const Val = union(ValTag) {
-    Constant: Constant,
-    Var: Var,
-};
-
-pub const Constant = struct {
-    int: []const u8,
-};
-
-const Var = []u8;
 
 fn allocationError(t: type) noreturn {
     fatal("Allocation failed for struct {any}", .{t});
