@@ -163,6 +163,7 @@ pub fn printAssemblerAST(ast: Assembler.AST) void {
     for (function.instructions.items) |instr| {
         print("      {s} (", .{@tagName(instr)});
         switch (instr) {
+            .Ret => std.debug.print(")\n", .{}),
             .Mov => |mov| {
                 switch (mov.src) {
                     .Imm => |imm| print("src=Imm({s}) ", .{imm}),
@@ -212,7 +213,22 @@ pub fn printAssemblerAST(ast: Assembler.AST) void {
                     .Stack => |stack| print("dst=Stack({d})", .{stack}),
                 }
             },
-            else => {},
+            .Cmp => |cmp| {
+                std.debug.print("arg1={any}, arg2={any}", .{ cmp.arg1, cmp.arg2 });
+            },
+            .Jmp => |jmp| {
+                std.debug.print("target={s}", .{jmp.target});
+            },
+            .JmpCC => |jmp| {
+                std.debug.print("condition={s}, target={s}", .{ @tagName(jmp.condition), jmp.target });
+            },
+            .SetCC => |set| {
+                std.debug.print("condition={s}, target={s}", .{ @tagName(set.condition), @tagName(set.operand) });
+            },
+            .Label => |label| {
+                std.debug.print("id={s}", .{label.id});
+            },
+            else => std.debug.print("\n", .{}),
         }
         print(")\n", .{});
     }

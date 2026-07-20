@@ -109,6 +109,7 @@ pub fn init(allocator: Allocator, ast: Assembler.AST) !CodeEmitter {
                 const instr = try std.fmt.allocPrint(allocator, template, .{operand});
                 try instructions.append(allocator, instr);
             },
+            else => unreachable,
         }
     }
 

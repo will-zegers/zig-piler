@@ -2,7 +2,6 @@
 const std = @import("std");
 const ArrayList = std.ArrayList;
 const Allocator = std.mem.Allocator;
-const Parser = @import("Parser.zig");
 const TAC = @import("TAC.zig");
 
 const Assembler = @This();
@@ -47,14 +46,18 @@ const Function = struct {
                 .Unary => |unary| Unary.append(allocator, &instructions, unary),
                 .Return => |ret| Ret.append(allocator, &instructions, ret),
                 .Binary => |binary| Binary.append(allocator, &instructions, binary),
-                else => {},
+                .Copy => |copy| Mov.append(allocator, &instructions, copy),
+                .Jump => |jmp| Jmp.append(allocator, &instructions, jmp),
+                .JumpIfZero => JmpCC.append(allocator, &instructions, instr),
+                .JumpIfNotZero => JmpCC.append(allocator, &instructions, instr),
+                .Label => |label| Label.append(allocator, &instructions, label),
             }
         }
         // Second pass, replace Pseudo registers with stack locations
         const stackPointer = assignStackLocations(allocator, &instructions);
 
         // Insert stack pointer arithmetic at the start
-        instructions.insert(allocator, 0, AllocStack.init(stackPointer)) catch std.process.exit(0);
+        AllocStack.prepend(allocator, stackPointer, &instructions);
 
         // Find illegal instructions (see specifications in the Instruction struct)
         fixIllegalInstructions(allocator, &instructions);
@@ -83,6 +86,13 @@ const Function = struct {
                 .Idiv => |*idiv| {
                     replaceIfPseudo(&pseudoMap, &stackCounter, &idiv.operand);
                 },
+                .Cmp => |*cmp| {
+                    replaceIfPseudo(&pseudoMap, &stackCounter, &cmp.arg1);
+                    replaceIfPseudo(&pseudoMap, &stackCounter, &cmp.arg2);
+                },
+                .SetCC => |*setcc| {
+                    replaceIfPseudo(&pseudoMap, &stackCounter, &setcc.operand);
+                },
                 else => {},
             }
         }
@@ -95,7 +105,7 @@ const Function = struct {
         for (instructions.items) |instr| {
             if (instr.detectIllegal()) |illegal| {
                 switch (illegal) {
-                    .Ill_Mov => {
+                    .Ill_Mov_Operands => {
                         fixedInstructions.appendSlice(
                             allocator,
                             &.{
@@ -104,7 +114,7 @@ const Function = struct {
                             }
                         ) catch std.process.exit(1);
                     },
-                    .Ill_Binary => {
+                    .Ill_Binary_Operands => {
                         fixedInstructions.appendSlice(
                             allocator,
                             &.{
@@ -113,7 +123,25 @@ const Function = struct {
                             }
                         ) catch std.process.exit(1);
                     },
-                    .Ill_Idiv => {
+                    .Ill_Cmp_Operands => {
+                        fixedInstructions.appendSlice(
+                            allocator,
+                            &.{
+                                .{ .Mov = .{.src = instr.Cmp.arg1, .dst = .{ .Reg = .r10 } } },
+                                .{ .Cmp = .{.arg1 = .{ .Reg = .r10 }, .arg2 = instr.Cmp.arg2 } },
+                            }
+                        ) catch std.process.exit(1);
+                    },
+                    .Ill_Cmp_Imm_Dst => {
+                        fixedInstructions.appendSlice(
+                            allocator,
+                            &.{
+                                .{ .Mov = .{.src = instr.Cmp.arg2, .dst = .{ .Reg = .r11 } } },
+                                .{ .Cmp = .{.arg1 = instr.Cmp.arg1, .arg2 = . { .Reg = .r11 } } },
+                            }
+                        ) catch std.process.exit(1);
+                    },
+                    .Ill_Idiv_Operand => {
                         fixedInstructions.appendSlice(
                             allocator,
                             &.{
@@ -122,7 +150,7 @@ const Function = struct {
                             }
                         ) catch std.process.exit(1);
                     },
-                    .Ill_Mul => {
+                    .Ill_Mul_Mem_Dst => {
                         fixedInstructions.appendSlice(
                             allocator,
                             &.{
@@ -132,7 +160,7 @@ const Function = struct {
                             }
                         ) catch std.process.exit(1);
                     },
-                    .Ill_Shift => {
+                    .Ill_Shift_Rcx => {
                         fixedInstructions.appendSlice(
                             allocator,
                             &.{
@@ -175,6 +203,11 @@ const InstructionTag = enum {
     Binary,
     Cqo,
     Idiv,
+    Cmp,
+    Jmp,
+    JmpCC,
+    SetCC,
+    Label,
 };
 const Instruction = union(InstructionTag) {
     Mov: Mov,
@@ -184,22 +217,31 @@ const Instruction = union(InstructionTag) {
     Binary: Binary,
     Cqo: Cqo,
     Idiv: Idiv,
+    Cmp: Cmp,
+    Jmp: Jmp,
+    JmpCC: JmpCC,
+    SetCC: SetCC,
+    Label: Label,
 
     const Illegal = enum {
-        Ill_Binary,
-        Ill_Idiv,
-        Ill_Mov,
-        Ill_Mul,
-        Ill_Shift,
+        Ill_Binary_Operands,
+        Ill_Cmp_Operands,
+        Ill_Cmp_Imm_Dst,
+        Ill_Idiv_Operand,
+        Ill_Mov_Operands,
+        Ill_Mul_Mem_Dst,
+        Ill_Shift_Rcx,
     };
 
     // Helper functions to detect illegal operation that need remediation
     pub fn detectIllegal(self: Instruction) ?Illegal {
-        if (self.isIllegalMove()) return .Ill_Mov;
-        if (self.isIllegalIdiv()) return .Ill_Idiv;
-        if (self.isIllegalMul()) return .Ill_Mul;
-        if (self.isIllegalShift()) return .Ill_Shift;
-        if (self.isIllegalBinary()) return .Ill_Binary;
+        if (self.isIllegalMove()) return .Ill_Mov_Operands;
+        if (self.isIllegalIdiv()) return .Ill_Idiv_Operand;
+        if (self.isIllegalMul()) return .Ill_Mul_Mem_Dst;
+        if (self.isIllegalShift()) return .Ill_Shift_Rcx;
+        if (self.isIllegalBinary()) return .Ill_Binary_Operands;
+        if (self.isIllegalCmpOperands()) return .Ill_Cmp_Operands;
+        if (self.isIllegalCmpImmDst()) return .Ill_Cmp_Imm_Dst;
         return null;
     }
 
@@ -222,9 +264,19 @@ const Instruction = union(InstructionTag) {
         return self.isBinaryShift() and self.Binary.src != .Imm;
     }
 
-    // Add and sub must not have memory as both its source and destination
+    // Add, sub, and cmp must not have memory as both its source and destination
     fn isIllegalBinary(self: Instruction) bool {
         return self.isBinary() and (self.Binary.src.isStack() and self.Binary.dst.isStack());
+    }
+
+    // Add and sub must not have memory as both its source and destination
+    fn isIllegalCmpOperands(self: Instruction) bool {
+        return self == Instruction.Cmp and (self.Cmp.arg1.isStack() and self.Cmp.arg2.isStack());
+    }
+
+    // Add and sub must not have memory as both its source and destination
+    fn isIllegalCmpImmDst(self: Instruction) bool {
+        return self == Instruction.Cmp and self.Cmp.arg2.isImm();
     }
 
     fn isMov(self: Instruction) bool {
@@ -253,6 +305,18 @@ const Instruction = union(InstructionTag) {
 pub const Mov = struct {
     src: Operand,
     dst: Operand,
+
+    pub fn append(allocator: Allocator, instructions: *Instructions, copy: TAC.Copy) void {
+        const src: Operand = switch(copy.src) {
+            .Constant => |constant| .{ .Imm = constant.int },
+            .Var => |pseudo| .{ .Pseudo = pseudo},
+        };
+        const dst: Operand = switch(copy.dst) {
+            .Constant => |constant| .{ .Imm = constant.int },
+            .Var => |pseudo| .{ .Pseudo = pseudo},
+        };
+        instructions.append(allocator, .{ .Mov = .{ .src = src, .dst = dst } }) catch std.process.exit(1);
+    }
 };
 
 pub const Ret = struct {
@@ -273,7 +337,9 @@ pub const Ret = struct {
 };
 
 pub const Unary = struct {
-    operator: Parser.Unary.Operator,
+    pub const Operator = TAC.Unary.Operator;
+
+    operator: Operator,
     operand: Operand,
 
     pub fn append(allocator: Allocator, instructions: *Instructions, unary: TAC.Unary) void {
@@ -296,13 +362,15 @@ pub const Unary = struct {
 pub const AllocStack = struct {
     stackPointer: isize,
 
-    pub fn init(stackPointer: isize) Instruction {
-        return .{ .AllocStack = .{ .stackPointer = stackPointer } };
+    pub fn prepend(allocator: Allocator, stackPointer: isize, instructions: *Instructions) void {
+        instructions.insert(allocator, 0, .{ .AllocStack = .{ .stackPointer = stackPointer } }) catch std.process.exit(0);
     }
 };
 
 pub const Binary = struct {
-    operator: Parser.Binary.Operator,
+    const Operator = TAC.Binary.Operator;
+
+    operator: Operator,
     src: Operand,
     dst: Operand,
 
@@ -331,6 +399,23 @@ pub const Binary = struct {
                     .{ .Mov = .{ .src = sourceReg, .dst = dst } },
                 }) catch std.process.exit(1);
             },
+            .Eq, .Gt, .Gte, .Lt, .Lte, .Neq => |op| blk: {
+                const cCode: ConditionCode = switch (op) {
+                    .Eq => .E,
+                    .Gt => .G,
+                    .Gte => .GE,
+                    .Lt => .L,
+                    .Lte => .LE,
+                    .Neq => .NE,
+                    else => unreachable,
+                };
+                break :blk allocator.dupe(Instruction, &.{
+                    .{ .Cmp = .{ .arg1 = src2, .arg2 = src1 } },
+                    .{ .Mov = .{ .src = .{.Imm = "0"}, .dst = dst  } },
+                    .{ .SetCC = .{ .condition = cCode, .operand = dst } },
+                }) catch std.process.exit(1);
+            },
+            .AndL, .OrL => unreachable, // logical AND and OR should not have a binary instruction
             else => blk: {
                 break :blk allocator.dupe(Instruction, &.{
                     .{ .Mov = .{ .src = src1, .dst = dst } },
@@ -339,6 +424,7 @@ pub const Binary = struct {
             },
         };
         defer allocator.free(instruction);
+
         instructions.appendSlice(allocator, instruction) catch std.process.exit(1);
     }
 };
@@ -346,6 +432,62 @@ pub const Binary = struct {
 pub const Cqo = struct {};
 
 pub const Idiv = struct { operand: Operand };
+
+pub const Cmp = struct{
+    arg1: Operand,
+    arg2: Operand,
+};
+
+pub const Jmp = struct {
+    target: Identifier,
+
+        pub fn append(allocator: Allocator, instructions: *Instructions, jmp: TAC.Jump) void {
+            instructions.append(allocator, .{
+                .Jmp = .{ .target = jmp.target }
+            }) catch std.process.exit(1);
+        }
+};
+
+pub const JmpCC = struct {
+    condition: ConditionCode,
+    target: Identifier,
+
+    pub fn append(allocator: Allocator, instructions: *Instructions, jmpInstr: TAC.Instruction) void {
+        switch (jmpInstr) {
+            .JumpIfZero => |jz| {
+                const arg2: Operand = switch (jz.condition) {
+                    .Constant => |constant| .{ .Imm = constant.int },
+                    .Var => |pseudo| .{ .Pseudo = pseudo },
+                };
+                instructions.appendSlice(allocator, &.{
+                    .{ .Cmp = .{ .arg1 = .{ .Imm = "0" }, .arg2 = arg2 } },
+                    .{ .JmpCC = .{ .condition = .E, .target = jz.target } },
+                }) catch std.process.exit(1);
+            },
+            .JumpIfNotZero => |jnz| {
+                const arg2: Operand = switch (jnz.condition) {
+                    .Constant => |constant| .{ .Imm = constant.int},
+                    .Var => |pseudo| .{ .Pseudo = pseudo },
+                };
+                instructions.appendSlice(allocator, &.{
+                    .{ .Cmp = .{ .arg1 = .{ .Imm = "0" }, .arg2 = arg2 } },
+                    .{ .JmpCC = .{ .condition = .NE, .target = jnz.target } },
+                }) catch std.process.exit(1);
+            },
+            else => unreachable,
+        }
+    }
+};
+
+pub const SetCC = struct {condition: ConditionCode, operand: Operand};
+
+pub const Label = struct {
+    id: Identifier,
+
+    pub fn append(allocator: Allocator, instructions: *Instructions, label: TAC.Label) void {
+        instructions.append(allocator, .{ .Label = .{ .id = label.identifier } }) catch std.process.exit(1);
+    }
+};
 
 const OperandType = enum {
     Imm,
@@ -374,3 +516,6 @@ pub const Operand = union(OperandType) {
 
 const Reg = enum { rax, rcx, rdx, r10, r11};
 
+const Identifier = []const u8;
+
+const ConditionCode = enum { E, G, GE, L, LE, NE, };

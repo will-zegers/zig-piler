@@ -158,7 +158,7 @@ const InstructionTag = enum {
     JumpIfNotZero,
     Label,
 };
-const Instruction = union(InstructionTag) {
+pub const Instruction = union(InstructionTag) {
     Binary: Binary,
     Return: Return,
     Unary: Unary,
@@ -174,13 +174,17 @@ pub const Return = struct {
 };
 
 pub const Unary = struct {
-    operator: Parser.Unary.Operator,
+    pub const Operator = Parser.Unary.Operator;
+
+    operator: Operator,
     src: Val,
     dst: Val,
 };
 
 pub const Binary = struct {
-    operator: Parser.Binary.Operator,
+    pub const Operator = Parser.Binary.Operator;
+
+    operator: Operator,
     src1: Val,
     src2: Val,
     dst: Val,
