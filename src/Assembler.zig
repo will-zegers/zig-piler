@@ -348,14 +348,23 @@ pub const Unary = struct {
             .Var => |pseudo| .{ .Pseudo = pseudo},
         };
         const dst: Operand = .{ .Pseudo = unary.dst.Var };
-
-        instructions.appendSlice(
-            allocator, 
-            &.{
-                .{ .Mov = .{.src = src, .dst = .{ .Pseudo = unary.dst.Var } } },
-                .{ .Unary = .{.operator = unary.operator, .operand = dst } },
+        const instrSlice = switch (unary.operator) {
+            .Not => blk: {
+                break :blk allocator.dupe(Instruction, &.{
+                    .{ .Cmp = .{.arg1 = .{ .Imm = "0" }, .arg2 = src } },
+                    .{ .Mov = .{.src = .{ .Imm = "0" }, .dst = dst } },
+                    .{ .SetCC = .{ .condition = .E, .operand = dst } },
+                }) catch std.process.exit(1);
             },
-        ) catch std.process.exit(0);
+            else => blk: {
+                break :blk allocator.dupe(Instruction, &.{
+                    .{ .Mov = .{.src = src, .dst = .{ .Pseudo = unary.dst.Var } } },
+                    .{ .Unary = .{.operator = unary.operator, .operand = dst } },
+                }) catch std.process.exit(1);
+            },
+        };
+        defer allocator.free(instrSlice);
+        instructions.appendSlice(allocator, instrSlice) catch std.process.exit(1);
     }
 };
 
@@ -514,7 +523,32 @@ pub const Operand = union(OperandType) {
     }
 };
 
-const Reg = enum { rax, rcx, rdx, r10, r11};
+pub const Reg = enum {
+    rax,
+    al,
+    rcx,
+    cl,
+    rdx,
+    dl,
+    r10,
+    r10b,
+    r11,
+    r11b,
+
+    pub fn toByteRegister(operand: Assembler.Operand) Assembler.Operand {
+        return switch (operand) {
+            .Reg => |reg| switch(reg) {
+                .rax => .{ .Reg = .al},
+                .rcx => .{ .Reg = .cl},
+                .rdx => .{ .Reg = .dl},
+                .r10 => .{ .Reg = .r10b},
+                .r11 => .{ .Reg = .r11b},
+                else => operand,
+            },
+            else => operand,
+        };
+    }
+};
 
 const Identifier = []const u8;
 

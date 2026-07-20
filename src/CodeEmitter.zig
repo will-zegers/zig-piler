@@ -23,6 +23,10 @@ pub fn init(allocator: Allocator, ast: Assembler.AST) !CodeEmitter {
     ;
 
     const functionDefinition = try std.fmt.allocPrint(allocator, functionDefTemplate, .{ast.function.name});
+    const localPrefix = switch (builtin.os.tag) {
+        .linux => ".L",
+        else => unreachable, // only running this on linux atm
+    };
 
     try instructions.append(allocator, functionDefinition);
 
@@ -62,7 +66,7 @@ pub fn init(allocator: Allocator, ast: Assembler.AST) !CodeEmitter {
                 const operator = switch (unary.operator) {
                     .Complement => "notq",
                     .Negate => "negq",
-                    .Not => "foo",
+                    .Not => "notl",
                 };
                 const operand = try getOperandString(allocator, unary.operand);
                 defer allocator.free(operand);
@@ -109,7 +113,70 @@ pub fn init(allocator: Allocator, ast: Assembler.AST) !CodeEmitter {
                 const instr = try std.fmt.allocPrint(allocator, template, .{operand});
                 try instructions.append(allocator, instr);
             },
-            else => unreachable,
+            .Cmp => |cmp| {
+                const template =
+                    \\  cmpq    {s}, {s}
+                ;
+                const arg1 = try getOperandString(allocator, cmp.arg1);
+                defer allocator.free(arg1);
+                const arg2 = try getOperandString(allocator, cmp.arg2);
+                defer allocator.free(arg2);
+
+                const instr = try std.fmt.allocPrint(allocator, template, .{arg1, arg2});
+                try instructions.append(allocator, instr);
+            },
+            .Jmp => |jmp| {
+                const template =
+                    \\  jmp    {s}{s}
+                ;
+
+                const instr = try std.fmt.allocPrint(allocator, template, .{localPrefix, jmp.target});
+                try instructions.append(allocator, instr);
+            },
+            .JmpCC => |jmp| {
+                const template =
+                    \\  j{s}    {s}{s}
+                ;
+                const condCode = switch (jmp.condition) {
+                    .E => "e",
+                    .NE => "ne",
+                    else => unreachable,
+                };
+
+                const instr = try std.fmt.allocPrint(allocator, template, .{condCode, localPrefix, jmp.target});
+                try instructions.append(allocator, instr);
+            },
+            .SetCC => |*set| {
+                const template =
+                    \\  set{s}   {s}
+                ;
+                const condCode = switch (set.condition) {
+                    .E => "e",
+                    .G => "g",
+                    .GE => "ge",
+                    .L => "l",
+                    .LE => "le",
+                    .NE => "ne",
+                };
+                const byteOperand = if (set.operand == .Reg)
+                    Assembler.Reg.toByteRegister(set.operand)
+                else
+                    set.operand;
+
+                const operand = try getOperandString(allocator, byteOperand);
+                defer allocator.free(operand);
+
+                const instr = try std.fmt.allocPrint(allocator, template, .{condCode, operand});
+                try instructions.append(allocator, instr);
+
+            },
+            .Label => |label| {
+                const template =
+                    \\{s}{s}:
+                ;
+                const instr = try std.fmt.allocPrint(allocator, template, .{localPrefix, label.id});
+                try instructions.append(allocator, instr);
+            },
         }
     }
 

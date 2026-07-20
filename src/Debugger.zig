@@ -163,7 +163,7 @@ pub fn printAssemblerAST(ast: Assembler.AST) void {
     for (function.instructions.items) |instr| {
         print("      {s} (", .{@tagName(instr)});
         switch (instr) {
-            .Ret => std.debug.print(")\n", .{}),
+            .Ret, .Cqo => print(")", .{}),
             .Mov => |mov| {
                 switch (mov.src) {
                     .Imm => |imm| print("src=Imm({s}) ", .{imm}),
@@ -228,9 +228,8 @@ pub fn printAssemblerAST(ast: Assembler.AST) void {
             .Label => |label| {
                 std.debug.print("id={s}", .{label.id});
             },
-            else => std.debug.print("\n", .{}),
         }
-        print(")\n", .{});
+        print("\n", .{});
     }
 
     print("    ]\n", .{});
