@@ -16,12 +16,15 @@ pub fn printParserAST(ast: Parser.AST) void {
     const program = ast;
     const function = program.function;
     const body = function.body;
-    const expr = body.expr;
     print("{any} (\n", .{@TypeOf(program)});
     print(". {any} (\n", .{@TypeOf(function)});
-    print(". . {any} (\n", .{body.tag});
-    print(". . . expr=\n", .{});
-    printExpression(expr, 8) catch {};
+    print(". . {any} (\n", .{@TypeOf(body)});
+    switch (body) {
+        .Return => |ret| {
+            print(". . . expr=\n", .{});
+            printExpression(ret.expr, 8) catch {};
+        },
+    }
     print(". . )\n", .{});
     print(". )\n", .{});
     print(")\n", .{});

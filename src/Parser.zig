@@ -56,35 +56,37 @@ pub const Function = struct {
         expect(.CloseParenthesis, tokens.next());
 
         expect(.OpenBrace, tokens.next());
-        const body = Statement.Return(allocator, tokens);
+        const body: Statement = .{ .Return = Return.init(allocator, tokens) };
         expect(.CloseBrace, tokens.next());
 
         return .{ .allocator = allocator, .name = name.?.symbol, .body = body };
     }
 
     pub fn deinit(self: *Function) void {
-        self.body.deinit();
+        switch (self.body) {
+            .Return => self.body.Return.deinit(),
+        }
     }
 };
 
-pub const Statement = struct {
-    const Tag = enum {
-        Return,
-    };
+const StatementTag = enum { Return };
+pub const Statement = union(StatementTag) {
+    Return: Return,
+};
 
+pub const Return = struct {
     allocator: Allocator,
     expr: Expression,
-    tag: Tag,
 
-    pub fn Return(allocator: Allocator, tokens: *TokenIterator) Statement {
+    pub fn init(allocator: Allocator, tokens: *TokenIterator) Return {
         expect(.Return, tokens.next());
         const expr = Expression.parse(allocator, tokens, 0);
         expect(.Semicolon, tokens.next());
 
-        return .{ .allocator = allocator, .expr = expr, .tag = .Return };
+        return .{ .allocator = allocator, .expr = expr };
     }
 
-    pub fn deinit(self: *Statement) void {
+    pub fn deinit(self: *Return) void {
         switch (self.expr) {
             .Factor => switch (self.expr.Factor) {
                 .Constant => {},

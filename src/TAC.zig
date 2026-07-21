@@ -53,8 +53,12 @@ pub const Function = struct {
             .labels = .empty,
         };
 
-        const val = function.emitTac(ast.function.body.expr) catch allocError();
-        function.body.append(allocator, .{ .Return = .{ .val = val } }) catch allocError();
+        switch (ast.function.body) {
+            .Return => |ret| {
+                const val = function.emitTac(ret.expr) catch allocError();
+                function.body.append(allocator, .{ .Return = .{ .val = val } }) catch allocError();
+            },
+        }
 
         return function;
     }
