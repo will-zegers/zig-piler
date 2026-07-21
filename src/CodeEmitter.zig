@@ -13,7 +13,11 @@ allocator: Allocator,
 instructions: ArrayList([]const u8),
 
 pub fn init(allocator: Allocator, ast: Assembler.AST) !CodeEmitter {
-    var instructions: ArrayList([]const u8) = .empty;
+    const assembly = ast.function.instructions.items;
+
+    // Assembly instructions will be 1:1 with the []const u8 entries in the emitted code, plus
+    // a few bookkeeping and prelude/epilogue instructions
+    var instructions = try ArrayList([]const u8).initCapacity(allocator, assembly.len + 16);
 
     const functionDefTemplate =
         \\  .globl {0s}
@@ -28,36 +32,34 @@ pub fn init(allocator: Allocator, ast: Assembler.AST) !CodeEmitter {
         else => unreachable, // only running this on linux atm
     };
 
-    try instructions.append(allocator, functionDefinition);
+    instructions.appendAssumeCapacity(functionDefinition);
 
-    for (ast.function.instructions.items) |instruction| {
-        switch (instruction) {
+    for (assembly) |instruction| {
+        const code = code: switch (instruction) {
             .AllocStack => |allocStack| {
                 const template =
                     \\  subq    ${d}, %rsp
                 ;
-                const instr = try std.fmt.allocPrint(allocator, template, .{allocStack.stackPointer});
-                try instructions.append(allocator, instr);
+                break :code std.fmt.allocPrint(allocator, template, .{allocStack.stackPointer});
             },
             .Mov => |mov| {
                 const template =
                     \\  movq    {s}, {s}
                 ;
-                const src = try getOperandString(allocator, mov.src);
+                const src = getOperandString(allocator, mov.src);
                 defer allocator.free(src);
-                const dst = try getOperandString(allocator, mov.dst);
+                const dst = getOperandString(allocator, mov.dst);
                 defer allocator.free(dst);
 
-                const instr = try std.fmt.allocPrint(allocator, template, .{src, dst});
-                try instructions.append(allocator, instr);
+                break :code std.fmt.allocPrint(allocator, template, .{src, dst});
             },
-            .Ret => {
+            .Ret =>  {
                 const instr =
                     \\  movq    %rbp, %rsp
                     \\  popq    %rbp
                     \\  ret
                 ;
-                try instructions.append(allocator, try allocator.dupe(u8, instr));
+                break :code allocator.dupe(u8, instr);
             },
             .Unary => |unary| {
                 const template =
@@ -66,13 +68,12 @@ pub fn init(allocator: Allocator, ast: Assembler.AST) !CodeEmitter {
                 const operator = switch (unary.operator) {
                     .Complement => "notq",
                     .Negate => "negq",
-                    .Not => "notl",
+                    .Not => unreachable, // implemented as x == 0
                 };
-                const operand = try getOperandString(allocator, unary.operand);
+                const operand = getOperandString(allocator, unary.operand);
                 defer allocator.free(operand);
 
-                const instr = try std.fmt.allocPrint(allocator, template, .{operator, operand});
-                try instructions.append(allocator, instr);
+                break :code std.fmt.allocPrint(allocator, template, .{operator, operand});
             },
             .Binary => |binary| {
                 const template =
@@ -89,49 +90,45 @@ pub fn init(allocator: Allocator, ast: Assembler.AST) !CodeEmitter {
                     .SAR => "sarq",
                     else => unreachable,
                 };
-                const src = try getOperandString(allocator, binary.src);
+                const src = getOperandString(allocator, binary.src);
                 defer allocator.free(src);
-                const dst = try getOperandString(allocator, binary.dst);
+                const dst = getOperandString(allocator, binary.dst);
                 defer allocator.free(dst);
 
-                const instr = try std.fmt.allocPrint(allocator, template, .{operator, src, dst});
-                try instructions.append(allocator, instr);
+                break :code std.fmt.allocPrint(allocator, template, .{operator, src, dst});
             },
-            .Cqo => {
+            .Cqo =>  {
                 const instr =
                     \\  cqo
                 ;
-                try instructions.append(allocator, try allocator.dupe(u8, instr));
+                break :code allocator.dupe(u8, instr);
             },
             .Idiv => |idiv| {
                 const template =
                     \\  idivq    {s}
                 ;
-                const operand = try getOperandString(allocator, idiv.operand);
+                const operand = getOperandString(allocator, idiv.operand);
                 defer allocator.free(operand);
 
-                const instr = try std.fmt.allocPrint(allocator, template, .{operand});
-                try instructions.append(allocator, instr);
+                break :code std.fmt.allocPrint(allocator, template, .{operand});
             },
             .Cmp => |cmp| {
                 const template =
                     \\  cmpq    {s}, {s}
                 ;
-                const arg1 = try getOperandString(allocator, cmp.arg1);
+                const arg1 = getOperandString(allocator, cmp.arg1);
                 defer allocator.free(arg1);
-                const arg2 = try getOperandString(allocator, cmp.arg2);
+                const arg2 = getOperandString(allocator, cmp.arg2);
                 defer allocator.free(arg2);
 
-                const instr = try std.fmt.allocPrint(allocator, template, .{arg1, arg2});
-                try instructions.append(allocator, instr);
+                break :code std.fmt.allocPrint(allocator, template, .{arg1, arg2});
             },
             .Jmp => |jmp| {
                 const template =
                     \\  jmp    {s}{s}
                 ;
 
-                const instr = try std.fmt.allocPrint(allocator, template, .{localPrefix, jmp.target});
-                try instructions.append(allocator, instr);
+                break :code std.fmt.allocPrint(allocator, template, .{localPrefix, jmp.target});
             },
             .JmpCC => |jmp| {
                 const template =
@@ -143,8 +140,7 @@ pub fn init(allocator: Allocator, ast: Assembler.AST) !CodeEmitter {
                     else => unreachable,
                 };
 
-                const instr = try std.fmt.allocPrint(allocator, template, .{condCode, localPrefix, jmp.target});
-                try instructions.append(allocator, instr);
+                break :code std.fmt.allocPrint(allocator, template, .{condCode, localPrefix, jmp.target});
             },
             .SetCC => |*set| {
                 const template =
@@ -163,39 +159,38 @@ pub fn init(allocator: Allocator, ast: Assembler.AST) !CodeEmitter {
                 else
                     set.operand;
 
-                const operand = try getOperandString(allocator, byteOperand);
+                const operand = getOperandString(allocator, byteOperand);
                 defer allocator.free(operand);
 
-                const instr = try std.fmt.allocPrint(allocator, template, .{condCode, operand});
-                try instructions.append(allocator, instr);
+                break :code std.fmt.allocPrint(allocator, template, .{condCode, operand});
 
             },
             .Label => |label| {
                 const template =
                     \\{s}{s}:
                 ;
-                const instr = try std.fmt.allocPrint(allocator, template, .{localPrefix, label.id});
-                try instructions.append(allocator, instr);
+                break :code std.fmt.allocPrint(allocator, template, .{localPrefix, label.id});
             },
-        }
+        } catch @panic("Out of memory");
+        instructions.appendAssumeCapacity(code);
     }
 
     switch (builtin.os.tag) {
-        .linux => try instructions.append(allocator, try allocator.dupe(u8, ".section .note.GNU-stack,\"\",@progbits")),
+        .linux => instructions.appendAssumeCapacity(try allocator.dupe(u8, ".section .note.GNU-stack,\"\",@progbits")),
         else => unreachable, // only running this on linux atm
     }
-    try instructions.append(allocator, try allocator.dupe(u8, "\n")); // need newline at end of file
+    instructions.appendAssumeCapacity(try allocator.dupe(u8, "\n")); // need newline at end of file
 
     return .{ .allocator = allocator, .instructions = instructions };
 }
 
-fn getOperandString(allocator: Allocator, operand: Assembler.Operand) ![]const u8 {
+fn getOperandString(allocator: Allocator, operand: Assembler.Operand) []const u8 {
     return switch(operand) {
-        .Imm => |op|   try std.fmt.allocPrint(allocator, "{c}{s}", .{'$', op}),
-        .Reg => |op|   try std.fmt.allocPrint(allocator, "{c}{s}", .{'%', @tagName(op)}),
-        .Stack => |op| try std.fmt.allocPrint(allocator, "{d}{s}", .{op, "(%rbp)"}),
+        .Imm => |op|   std.fmt.allocPrint(allocator, "{c}{s}", .{'$', op}),
+        .Reg => |op|   std.fmt.allocPrint(allocator, "{c}{s}", .{'%', @tagName(op)}),
+        .Stack => |op| std.fmt.allocPrint(allocator, "{d}{s}", .{op, "(%rbp)"}),
         .Pseudo => unreachable,
-    };
+    } catch @panic("Out of memory");
 }
 
 pub fn writeToFile(self: CodeEmitter, io: Io, outputPath: []const u8) !void {
