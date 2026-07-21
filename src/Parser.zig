@@ -100,9 +100,9 @@ pub const BlockItem = union(BlockItemTag) {
     pub fn parse(allocator: Allocator, tokens: *TokenIterator) BlockItem {
         const nextToken = tokens.peek() orelse unexpectedEOF();
         if (.Int == nextToken.type) {
-            return .{ .Declaration = Declaration.init(allocator, tokens) };
+            return .{ .Declaration = .init(allocator, tokens) };
         }
-        return .{ .Statement = Statement.parse(allocator, tokens) };
+        return .{ .Statement = .parse(allocator, tokens) };
     }
 };
 
@@ -110,18 +110,15 @@ const StatementTag = enum { Expression, Return, Null };
 pub const Statement = union(StatementTag) {
     Expression: Expression,
     Return: Return,
-    Null: void,
+    Null: void, // needed to represent empty semicolon statements (for later?)
 
     pub fn parse(allocator: Allocator, tokens: *TokenIterator) Statement {
         const nextToken = tokens.peek() orelse unexpectedEOF();
-        if (.Return == nextToken.type) {
-            return .{ .Return = Return.init(allocator, tokens) };
-        } else if (.Semicolon == nextToken.type) {
-            _ = tokens.next(); // consome the semicolon token
-            return .{ .Null = {} };
-        } else {
-            return .{ .Expression = Expression.parse(allocator, tokens, 0) };
-        }
+        return switch (nextToken.type) {
+            .Return => .{ .Return = .init(allocator, tokens) },
+            .Semicolon => .{ .Null = tokens.skip() },
+            else => .{ .Expression = .parse(allocator, tokens, 0) },
+        };
     }
 };
 
@@ -137,7 +134,7 @@ pub const Declaration = struct {
         var initialize: ?Expression = null;
         if (tokens.peek()) |nextToken| {
             if (mem.eql(u8, "=", nextToken.symbol)) {
-                _ = tokens.next(); // discard the assignment operator
+                tokens.skip(); // discard the assignment operator
                 initialize = Expression.parse(allocator, tokens, 0);
             }
         }
@@ -160,15 +157,7 @@ pub const Return = struct {
     }
 
     pub fn deinit(self: *Return) void {
-        switch (self.expr) {
-            .Factor => switch (self.expr.Factor) {
-                .Constant, .Var => {},
-                .Unary => |*unary| unary.deinit(),
-                .Parantheses => |*parantheses| parantheses.deinit(),
-            },
-            .Binary => |*binary| binary.deinit(),
-            .Assignment => |*assign| assign.deinit(),
-        }
+        Expression.deinit(&self.expr);
     }
 };
 

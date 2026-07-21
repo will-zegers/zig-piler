@@ -43,4 +43,8 @@ pub const Iterator = struct {
         }
         return null;
     }
+
+    pub fn skip(self: *Iterator) void {
+        self.index += 1;
+    }
 };

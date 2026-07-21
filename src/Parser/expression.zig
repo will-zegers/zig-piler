@@ -22,18 +22,19 @@ pub const Expression = union(ExpressionTag) {
 
     /// Evaluates expression from left-to-right with precedence climbing
     pub fn parse(allocator: Allocator, tokens: *TokenIterator, minPrecedence: usize) Expression {
-        var left: Expression = .{ .Factor = Factor.factory(allocator, tokens) };
+        var left: Expression = .{ .Factor = .factory(allocator, tokens) };
 
         var nextToken = tokens.peek() orelse unexpectedEOF();
         while (nextToken.type == .BinaryOp and nextToken.precedence >= minPrecedence) {
             if (mem.eql(u8, "=", nextToken.symbol)) {
                 _ = tokens.next(); // consome the assignment operator
-                const right = Expression.parse(allocator, tokens, nextToken.precedence);
+                const right = parse(allocator, tokens, nextToken.precedence);
+
                 const temp = Assignment.init(allocator, left, right);
                 left = .{ .Assignment = temp };
             } else {
                 const operator = tokens.next() orelse unexpectedEOF();
-                const right = Expression.parse(allocator, tokens, nextToken.precedence + 1);
+                const right = parse(allocator, tokens, nextToken.precedence + 1);
 
                 const temp = Binary.init(allocator, operator, left, right);
                 left = .{ .Binary = temp };
@@ -119,25 +120,8 @@ pub const Binary = struct {
         defer self.allocator.destroy(self.left);
         defer self.allocator.destroy(self.right);
 
-        switch (self.left.*) {
-            .Factor => switch (self.left.*.Factor) {
-                .Constant, .Var => {},
-                .Unary => |*unary| unary.deinit(),
-                .Parantheses => |*parantheses| parantheses.deinit(),
-            },
-            .Binary => |*binary| binary.deinit(),
-            .Assignment => |*assign| assign.deinit(),
-        }
-
-        switch (self.right.*) {
-            .Factor => switch (self.right.*.Factor) {
-                .Constant, .Var => {},
-                .Unary => |*unary| unary.deinit(),
-                .Parantheses => |*parantheses| parantheses.deinit(),
-            },
-            .Binary => |*binary| binary.deinit(),
-            .Assignment => |*assign| assign.deinit(),
-        }
+        Expression.deinit(&self.left.*);
+        Expression.deinit(&self.right.*);
     }
 };
 
@@ -222,15 +206,7 @@ pub const Parantheses = struct {
     pub fn deinit(self: *Parantheses) void {
         defer self.allocator.destroy(self.expr);
 
-        switch (self.expr.*) {
-            .Factor => switch (self.expr.*.Factor) {
-                .Constant, .Var => {},
-                .Unary => |*unary| unary.deinit(),
-                .Parantheses => |*parantheses| parantheses.deinit(),
-            },
-            .Binary => self.expr.*.Binary.deinit(),
-            .Assignment => self.expr.*.Assignment.deinit(),
-        }
+        Expression.deinit(&self.expr.*);
     }
 };
 
@@ -253,25 +229,8 @@ pub const Assignment = struct {
         defer self.allocator.destroy(self.left);
         defer self.allocator.destroy(self.right);
 
-        switch (self.left.*) {
-            .Factor => switch (self.left.*.Factor) {
-                .Constant, .Var => {},
-                .Unary => |*unary| unary.deinit(),
-                .Parantheses => |*parantheses| parantheses.deinit(),
-            },
-            .Binary => |*binary| binary.deinit(),
-            .Assignment => |*assign| assign.deinit(),
-        }
-
-        switch (self.right.*) {
-            .Factor => switch (self.right.*.Factor) {
-                .Constant, .Var => {},
-                .Unary => |*unary| unary.deinit(),
-                .Parantheses => |*parantheses| parantheses.deinit(),
-            },
-            .Binary => |*binary| binary.deinit(),
-            .Assignment => |*assign| assign.deinit(),
-        }
+        Expression.deinit(&self.left.*);
+        Expression.deinit(&self.right.*);
     }
 };
 
