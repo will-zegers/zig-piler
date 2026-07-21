@@ -57,14 +57,14 @@ const Function = struct {
         // First pass to build Assembly AST
         for (function.body.items) |instr| {
             const assembly = switch (instr) {
-                .Unary => |unary| Unary.assembly(allocator, unary),
-                .Return => |ret| Ret.assembly(allocator, ret),
-                .Binary => |binary| Binary.assembly(allocator, binary),
-                .Copy => |copy| Mov.assembly(allocator, copy),
-                .Jump => |jmp| Jmp.assembly(allocator, jmp),
-                .JumpIfZero => JmpCC.assembly(allocator, instr),
-                .JumpIfNotZero => JmpCC.assembly(allocator, instr),
-                .Label => |label| Label.assembly(allocator, label),
+                .Unary => |unary| Unary.toAssembly(allocator, unary),
+                .Return => |ret| Ret.toAssembly(allocator, ret),
+                .Binary => |binary| Binary.toAssembly(allocator, binary),
+                .Copy => |copy| Mov.toAssembly(allocator, copy),
+                .Jump => |jmp| Jmp.toAssembly(allocator, jmp),
+                .JumpIfZero => JmpCC.toAssembly(allocator, instr),
+                .JumpIfNotZero => JmpCC.toAssembly(allocator, instr),
+                .Label => |label| Label.toAssembly(allocator, label),
             };
             defer allocator.free(assembly);
 

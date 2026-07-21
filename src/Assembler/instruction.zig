@@ -38,7 +38,7 @@ pub const Mov = struct {
     src: Operand,
     dst: Operand,
 
-    pub fn assembly(allocator: Allocator, copy: TAC.Copy) []Instruction {
+    pub fn toAssembly(allocator: Allocator, copy: TAC.Copy) []Instruction {
         const src: Operand = switch (copy.src) {
             .Constant => |constant| .{ .Imm = constant },
             .Var => |pseudo| .{ .Pseudo = pseudo },
@@ -52,7 +52,7 @@ pub const Mov = struct {
 };
 
 pub const Ret = struct {
-    pub fn assembly(allocator: Allocator, ret: TAC.Return) []Instruction {
+    pub fn toAssembly(allocator: Allocator, ret: TAC.Return) []Instruction {
         const val: Operand = switch (ret.val) {
             .Constant => |constant| .{ .Imm = constant },
             .Var => |pseudo| .{ .Pseudo = pseudo },
@@ -71,7 +71,7 @@ pub const Unary = struct {
     operator: Operator,
     operand: Operand,
 
-    pub fn assembly(allocator: Allocator, unary: TAC.Unary) []Instruction {
+    pub fn toAssembly(allocator: Allocator, unary: TAC.Unary) []Instruction {
         const src: Operand = switch (unary.src) {
             .Constant => |constant| .{ .Imm = constant },
             .Var => |pseudo| .{ .Pseudo = pseudo },
@@ -106,7 +106,7 @@ pub const Binary = struct {
     src: Operand,
     dst: Operand,
 
-    pub fn assembly(allocator: Allocator, binary: TAC.Binary) []Instruction {
+    pub fn toAssembly(allocator: Allocator, binary: TAC.Binary) []Instruction {
         const src1: Operand = switch (binary.src1) {
             .Constant => |constant| .{ .Imm = constant },
             .Var => |pseudo| .{ .Pseudo = pseudo },
@@ -170,7 +170,7 @@ pub const Cmp = struct {
 pub const Jmp = struct {
     target: Identifier,
 
-    pub fn assembly(allocator: Allocator, jmp: TAC.Jump) []Instruction {
+    pub fn toAssembly(allocator: Allocator, jmp: TAC.Jump) []Instruction {
         return allocator.dupe(Instruction, &.{.{ .Jmp = .{ .target = jmp.target } }}) catch allocError();
     }
 };
@@ -179,7 +179,7 @@ pub const JmpCC = struct {
     condition: ConditionCode,
     target: Identifier,
 
-    pub fn assembly(allocator: Allocator, jmpInstr: TAC.Instruction) []Instruction {
+    pub fn toAssembly(allocator: Allocator, jmpInstr: TAC.Instruction) []Instruction {
         return switch (jmpInstr) {
             .JumpIfZero => |jz| blk: {
                 const arg2: Operand = switch (jz.condition) {
@@ -211,7 +211,7 @@ pub const SetCC = struct { condition: ConditionCode, operand: Operand };
 pub const Label = struct {
     id: Identifier,
 
-    pub fn assembly(allocator: Allocator, label: TAC.Label) []Instruction {
+    pub fn toAssembly(allocator: Allocator, label: TAC.Label) []Instruction {
         return allocator.dupe(Instruction, &.{.{ .Label = .{ .id = label.identifier } }}) catch allocError();
     }
 };
