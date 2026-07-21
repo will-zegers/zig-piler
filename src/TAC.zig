@@ -53,11 +53,17 @@ pub const Function = struct {
             .labels = .empty,
         };
 
-        switch (ast.function.body) {
-            .Return => |ret| {
-                const val = function.emitTac(ret.expr) catch allocError();
-                function.body.append(allocator, .{ .Return = .{ .val = val } }) catch allocError();
-            },
+        for (ast.function.body.items) |blockItem| {
+            switch (blockItem) {
+                .Statement => switch (blockItem.Statement) {
+                    .Return => |ret| {
+                        const val = function.emitTac(ret.expr) catch allocError();
+                        function.body.append(allocator, .{ .Return = .{ .val = val } }) catch allocError();
+                    },
+                    else => {},
+                },
+                else => {},
+            }
         }
 
         return function;
@@ -80,6 +86,7 @@ pub const Function = struct {
         switch (expr) {
             .Factor => |factor| switch (factor) {
                 .Constant => return .{ .Constant = factor.Constant },
+                .Var => return .{ .Var = factor.Var },
                 .Unary => |unary| {
                     const unaryExpr: Parser.Expression = .{ .Factor = unary.factor.* };
                     const src = try self.emitTac(unaryExpr);
@@ -146,6 +153,7 @@ pub const Function = struct {
                     },
                 }
             },
+            .Assignment => unreachable,
         }
     }
 

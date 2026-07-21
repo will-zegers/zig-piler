@@ -135,7 +135,7 @@ pub fn tokenize(self: *Lexer, text: [:0]const u8) ![]Token {
             '=' => {
                 token = switch (remainingText[1]) {
                     '=' => .{ .type = .BinaryOp, .symbol = "==", .precedence = 100 },
-                    else => badToken(remainingText, lineNumber),
+                    else => .{ .type = .BinaryOp, .symbol = "=", .precedence = 30 },
                 };
             },
             '<' => { // shift left, less-than

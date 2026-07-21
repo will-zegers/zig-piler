@@ -15,17 +15,22 @@ pub fn printLexerTokens(tokens: []Token) void {
 pub fn printParserAST(ast: Parser.AST) void {
     const program = ast;
     const function = program.function;
-    const body = function.body;
     print("{any} (\n", .{@TypeOf(program)});
     print(". {any} (\n", .{@TypeOf(function)});
-    print(". . {any} (\n", .{@TypeOf(body)});
-    switch (body) {
-        .Return => |ret| {
-            print(". . . expr=\n", .{});
-            printExpression(ret.expr, 8) catch {};
-        },
-    }
-    print(". . )\n", .{});
+    // for (function.body.items) |blockItem| {
+    //     print(". . {any} (\n", .{@TypeOf(blockItem)});
+    //     switch (blockItem) {
+    //         .Statement => switch (blockItem) {
+    //             .Return => |ret| {
+    //                 print(". . . expr=\n", .{});
+    //                 printExpression(ret.expr, 8) catch {};
+    //             },
+    //             else => print("\n", .{}),
+    //         },
+    //         .Declaration => print("\n"),
+    //     }
+    //     print(". . )\n", .{});
+    // }
     print(". )\n", .{});
     print(")\n", .{});
 }
@@ -73,6 +78,7 @@ fn printFactor(factor: Parser.Factor, indent: usize) !void {
         .Parantheses => |para| {
             std.debug.print("{any}\n", .{para.expr.*});
         },
+        .Var => print("{s}\n", .{factor.Var}),
     }
     print("{s})\n", .{indentStr});
 }

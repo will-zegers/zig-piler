@@ -1,16 +1,22 @@
 const std = @import("std");
+const mem = std.mem;
 const fatal = std.process.fatal;
 const Allocator = std.mem.Allocator;
 
 const Token = @import("../Lexer.zig").Token;
 const TokenIterator = Token.Iterator;
 
+const identifier = []const u8;
+const int = []const u8;
+
 pub const ExpressionTag = enum {
+    Assignment,
     Binary,
     Factor,
 };
 
 pub const Expression = union(ExpressionTag) {
+    Assignment: Assignment,
     Binary: Binary,
     Factor: Factor,
 
@@ -20,15 +26,33 @@ pub const Expression = union(ExpressionTag) {
 
         var nextToken = tokens.peek() orelse unexpectedEOF();
         while (nextToken.type == .BinaryOp and nextToken.precedence >= minPrecedence) {
-            const operator = tokens.next() orelse unexpectedEOF();
-            const right = Expression.parse(allocator, tokens, nextToken.precedence + 1);
+            if (mem.eql(u8, "=", nextToken.symbol)) {
+                _ = tokens.next(); // consome the assignment operator
+                const right = Expression.parse(allocator, tokens, nextToken.precedence);
+                const temp = Assignment.init(allocator, left, right);
+                left = .{ .Assignment = temp };
+            } else {
+                const operator = tokens.next() orelse unexpectedEOF();
+                const right = Expression.parse(allocator, tokens, nextToken.precedence + 1);
 
-            const temp = Binary.init(allocator, operator, left, right);
-            left = .{ .Binary = temp };
-
+                const temp = Binary.init(allocator, operator, left, right);
+                left = .{ .Binary = temp };
+            }
             nextToken = tokens.peek() orelse unexpectedEOF();
         }
         return left;
+    }
+
+    pub fn deinit(expr: *Expression) void {
+        switch (expr.*) {
+            .Factor => switch (expr.*.Factor) {
+                .Constant, .Var => {},
+                .Unary => |*unary| unary.deinit(),
+                .Parantheses => |*parantheses| parantheses.deinit(),
+            },
+            .Binary => |*binary| binary.deinit(),
+            .Assignment => |*assign| assign.deinit(),
+        }
     }
 };
 
@@ -97,31 +121,35 @@ pub const Binary = struct {
 
         switch (self.left.*) {
             .Factor => switch (self.left.*.Factor) {
-                .Constant => {},
+                .Constant, .Var => {},
                 .Unary => |*unary| unary.deinit(),
                 .Parantheses => |*parantheses| parantheses.deinit(),
             },
             .Binary => |*binary| binary.deinit(),
+            .Assignment => |*assign| assign.deinit(),
         }
 
         switch (self.right.*) {
             .Factor => switch (self.right.*.Factor) {
-                .Constant => {},
+                .Constant, .Var => {},
                 .Unary => |*unary| unary.deinit(),
                 .Parantheses => |*parantheses| parantheses.deinit(),
             },
             .Binary => |*binary| binary.deinit(),
+            .Assignment => |*assign| assign.deinit(),
         }
     }
 };
 
 pub const FactorTag = enum {
     Constant,
+    Var,
     Unary,
     Parantheses,
 };
 pub const Factor = union(FactorTag) {
     Constant: Constant,
+    Var: Var,
     Unary: Unary,
     Parantheses: Parantheses,
 
@@ -131,12 +159,15 @@ pub const Factor = union(FactorTag) {
             .Constant => .{ .Constant = token.symbol },
             .UnaryOp => .{ .Unary = .init(allocator, token.symbol, tokens) },
             .OpenParenthesis => .{ .Parantheses = .init(allocator, tokens) },
+            .Identifier => .{ .Var = token.symbol },
             else => unexpectedToken(token),
         };
     }
 };
 
-pub const Constant = []const u8;
+pub const Constant = int;
+
+pub const Var = identifier;
 
 pub const Unary = struct {
     pub const Operator = enum {
@@ -193,11 +224,53 @@ pub const Parantheses = struct {
 
         switch (self.expr.*) {
             .Factor => switch (self.expr.*.Factor) {
-                .Constant => {},
+                .Constant, .Var => {},
                 .Unary => |*unary| unary.deinit(),
                 .Parantheses => |*parantheses| parantheses.deinit(),
             },
             .Binary => self.expr.*.Binary.deinit(),
+            .Assignment => self.expr.*.Assignment.deinit(),
+        }
+    }
+};
+
+pub const Assignment = struct {
+    allocator: Allocator,
+    left: *Expression,
+    right: *Expression,
+
+    pub fn init(allocator: Allocator, left: Expression, right: Expression) Assignment {
+        const leftPtr = allocator.create(Expression) catch allocationError(Binary);
+        leftPtr.* = left;
+
+        const rightPtr = allocator.create(Expression) catch allocationError(Binary);
+        rightPtr.* = right;
+
+        return .{ .allocator = allocator, .left = leftPtr, .right = rightPtr };
+    }
+
+    pub fn deinit(self: Assignment) void {
+        defer self.allocator.destroy(self.left);
+        defer self.allocator.destroy(self.right);
+
+        switch (self.left.*) {
+            .Factor => switch (self.left.*.Factor) {
+                .Constant, .Var => {},
+                .Unary => |*unary| unary.deinit(),
+                .Parantheses => |*parantheses| parantheses.deinit(),
+            },
+            .Binary => |*binary| binary.deinit(),
+            .Assignment => |*assign| assign.deinit(),
+        }
+
+        switch (self.right.*) {
+            .Factor => switch (self.right.*.Factor) {
+                .Constant, .Var => {},
+                .Unary => |*unary| unary.deinit(),
+                .Parantheses => |*parantheses| parantheses.deinit(),
+            },
+            .Binary => |*binary| binary.deinit(),
+            .Assignment => |*assign| assign.deinit(),
         }
     }
 };
