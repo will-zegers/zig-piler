@@ -38,7 +38,7 @@ pub const Mov = struct {
     src: Operand,
     dst: Operand,
 
-    pub fn append(allocator: Allocator, instructions: *Instructions, copy: TAC.Copy) void {
+    pub fn assembly(allocator: Allocator, copy: TAC.Copy) []Instruction {
         const src: Operand = switch (copy.src) {
             .Constant => |constant| .{ .Imm = constant },
             .Var => |pseudo| .{ .Pseudo = pseudo },
@@ -47,24 +47,21 @@ pub const Mov = struct {
             .Constant => |constant| .{ .Imm = constant },
             .Var => |pseudo| .{ .Pseudo = pseudo },
         };
-        instructions.append(allocator, .{ .Mov = .{ .src = src, .dst = dst } }) catch std.process.exit(1);
+        return allocator.dupe(Instruction, &.{.{ .Mov = .{ .src = src, .dst = dst } }}) catch allocError();
     }
 };
 
 pub const Ret = struct {
-    pub fn append(allocator: Allocator, instructions: *Instructions, ret: TAC.Return) void {
+    pub fn assembly(allocator: Allocator, ret: TAC.Return) []Instruction {
         const val: Operand = switch (ret.val) {
             .Constant => |constant| .{ .Imm = constant },
             .Var => |pseudo| .{ .Pseudo = pseudo },
         };
 
-        instructions.appendSlice(
-            allocator,
-            &.{
-                .{ .Mov = .{ .src = val, .dst = .{ .Reg = .rax } } },
-                .{ .Ret = .{} },
-            },
-        ) catch std.process.exit(1);
+        return allocator.dupe(Instruction, &.{
+            .{ .Mov = .{ .src = val, .dst = .{ .Reg = .rax } } },
+            .{ .Ret = .{} },
+        }) catch allocError();
     }
 };
 
@@ -74,37 +71,31 @@ pub const Unary = struct {
     operator: Operator,
     operand: Operand,
 
-    pub fn append(allocator: Allocator, instructions: *Instructions, unary: TAC.Unary) void {
+    pub fn assembly(allocator: Allocator, unary: TAC.Unary) []Instruction {
         const src: Operand = switch (unary.src) {
             .Constant => |constant| .{ .Imm = constant },
             .Var => |pseudo| .{ .Pseudo = pseudo },
         };
         const dst: Operand = .{ .Pseudo = unary.dst.Var };
-        const instrSlice = switch (unary.operator) {
-            .Not => blk: {
-                break :blk allocator.dupe(Instruction, &.{
-                    .{ .Cmp = .{ .arg1 = .{ .Imm = "0" }, .arg2 = src } },
-                    .{ .Mov = .{ .src = .{ .Imm = "0" }, .dst = dst } },
-                    .{ .SetCC = .{ .condition = .E, .operand = dst } },
-                }) catch std.process.exit(1);
-            },
-            else => blk: {
-                break :blk allocator.dupe(Instruction, &.{
-                    .{ .Mov = .{ .src = src, .dst = .{ .Pseudo = unary.dst.Var } } },
-                    .{ .Unary = .{ .operator = unary.operator, .operand = dst } },
-                }) catch std.process.exit(1);
-            },
-        };
-        defer allocator.free(instrSlice);
-        instructions.appendSlice(allocator, instrSlice) catch std.process.exit(1);
+        return switch (unary.operator) {
+            .Not => allocator.dupe(Instruction, &.{
+                .{ .Cmp = .{ .arg1 = .{ .Imm = "0" }, .arg2 = src } },
+                .{ .Mov = .{ .src = .{ .Imm = "0" }, .dst = dst } },
+                .{ .SetCC = .{ .condition = .E, .operand = dst } },
+            }),
+            else => allocator.dupe(Instruction, &.{
+                .{ .Mov = .{ .src = src, .dst = .{ .Pseudo = unary.dst.Var } } },
+                .{ .Unary = .{ .operator = unary.operator, .operand = dst } },
+            }),
+        } catch allocError();
     }
 };
 
 pub const AllocStack = struct {
     stackPointer: isize,
 
-    pub fn prepend(allocator: Allocator, stackPointer: isize, instructions: *Instructions) void {
-        instructions.insert(allocator, 0, .{ .AllocStack = .{ .stackPointer = stackPointer } }) catch std.process.exit(0);
+    pub fn prepend(allocator: Allocator, stackPointer: isize) []Instruction {
+        return allocator.dupe(Instruction, .{.{ .AllocStack = .{ .stackPointer = stackPointer } }}) catch std.process.exit(0);
     }
 };
 
@@ -115,7 +106,7 @@ pub const Binary = struct {
     src: Operand,
     dst: Operand,
 
-    pub fn append(allocator: Allocator, instructions: *Instructions, binary: TAC.Binary) void {
+    pub fn assembly(allocator: Allocator, binary: TAC.Binary) []Instruction {
         const src1: Operand = switch (binary.src1) {
             .Constant => |constant| .{ .Imm = constant },
             .Var => |pseudo| .{ .Pseudo = pseudo },
@@ -126,7 +117,7 @@ pub const Binary = struct {
         };
         const dst: Operand = .{ .Pseudo = binary.dst.Var };
 
-        const instruction = switch (binary.operator) {
+        return switch (binary.operator) {
             .Div,
             .Mod,
             => blk: {
@@ -140,7 +131,7 @@ pub const Binary = struct {
                     .{ .Cqo = .{} },
                     .{ .Idiv = .{ .operand = src2 } },
                     .{ .Mov = .{ .src = sourceReg, .dst = dst } },
-                }) catch std.process.exit(1);
+                });
             },
             .Eq, .Gt, .Gte, .Lt, .Lte, .Neq => |op| blk: {
                 const cCode: ConditionCode = switch (op) {
@@ -156,19 +147,14 @@ pub const Binary = struct {
                     .{ .Cmp = .{ .arg1 = src2, .arg2 = src1 } },
                     .{ .Mov = .{ .src = .{ .Imm = "0" }, .dst = dst } },
                     .{ .SetCC = .{ .condition = cCode, .operand = dst } },
-                }) catch std.process.exit(1);
+                });
             },
             .AndL, .OrL => unreachable, // logical AND and OR should not have a binary instruction
-            else => blk: {
-                break :blk allocator.dupe(Instruction, &.{
-                    .{ .Mov = .{ .src = src1, .dst = dst } },
-                    .{ .Binary = .{ .operator = binary.operator, .src = src2, .dst = dst } },
-                }) catch std.process.exit(1);
-            },
-        };
-        defer allocator.free(instruction);
-
-        instructions.appendSlice(allocator, instruction) catch std.process.exit(1);
+            else => allocator.dupe(Instruction, &.{
+                .{ .Mov = .{ .src = src1, .dst = dst } },
+                .{ .Binary = .{ .operator = binary.operator, .src = src2, .dst = dst } },
+            }),
+        } catch allocError();
     }
 };
 
@@ -184,8 +170,8 @@ pub const Cmp = struct {
 pub const Jmp = struct {
     target: Identifier,
 
-    pub fn append(allocator: Allocator, instructions: *Instructions, jmp: TAC.Jump) void {
-        instructions.append(allocator, .{ .Jmp = .{ .target = jmp.target } }) catch std.process.exit(1);
+    pub fn assembly(allocator: Allocator, jmp: TAC.Jump) []Instruction {
+        return allocator.dupe(Instruction, &.{.{ .Jmp = .{ .target = jmp.target } }}) catch allocError();
     }
 };
 
@@ -193,30 +179,30 @@ pub const JmpCC = struct {
     condition: ConditionCode,
     target: Identifier,
 
-    pub fn append(allocator: Allocator, instructions: *Instructions, jmpInstr: TAC.Instruction) void {
-        switch (jmpInstr) {
-            .JumpIfZero => |jz| {
+    pub fn assembly(allocator: Allocator, jmpInstr: TAC.Instruction) []Instruction {
+        return switch (jmpInstr) {
+            .JumpIfZero => |jz| blk: {
                 const arg2: Operand = switch (jz.condition) {
                     .Constant => |constant| .{ .Imm = constant },
                     .Var => |pseudo| .{ .Pseudo = pseudo },
                 };
-                instructions.appendSlice(allocator, &.{
+                break :blk allocator.dupe(Instruction, &.{
                     .{ .Cmp = .{ .arg1 = .{ .Imm = "0" }, .arg2 = arg2 } },
                     .{ .JmpCC = .{ .condition = .E, .target = jz.target } },
-                }) catch std.process.exit(1);
+                }) catch allocError();
             },
-            .JumpIfNotZero => |jnz| {
+            .JumpIfNotZero => |jnz| blk: {
                 const arg2: Operand = switch (jnz.condition) {
                     .Constant => |constant| .{ .Imm = constant },
                     .Var => |pseudo| .{ .Pseudo = pseudo },
                 };
-                instructions.appendSlice(allocator, &.{
+                break :blk allocator.dupe(Instruction, &.{
                     .{ .Cmp = .{ .arg1 = .{ .Imm = "0" }, .arg2 = arg2 } },
                     .{ .JmpCC = .{ .condition = .NE, .target = jnz.target } },
-                }) catch std.process.exit(1);
+                }) catch allocError();
             },
             else => unreachable,
-        }
+        };
     }
 };
 
@@ -225,8 +211,8 @@ pub const SetCC = struct { condition: ConditionCode, operand: Operand };
 pub const Label = struct {
     id: Identifier,
 
-    pub fn append(allocator: Allocator, instructions: *Instructions, label: TAC.Label) void {
-        instructions.append(allocator, .{ .Label = .{ .id = label.identifier } }) catch std.process.exit(1);
+    pub fn assembly(allocator: Allocator, label: TAC.Label) []Instruction {
+        return allocator.dupe(Instruction, &.{.{ .Label = .{ .id = label.identifier } }}) catch allocError();
     }
 };
 
@@ -241,18 +227,6 @@ pub const Operand = union(OperandType) {
     Reg: Reg,
     Pseudo: []const u8,
     Stack: isize,
-
-    pub fn isPseudo(self: Operand) bool {
-        return self == Operand.Pseudo;
-    }
-
-    pub fn isStack(self: Operand) bool {
-        return self == Operand.Stack;
-    }
-
-    pub fn isImm(self: Operand) bool {
-        return self == Operand.Imm;
-    }
 };
 
 pub const Reg = enum {
@@ -292,3 +266,7 @@ const ConditionCode = enum {
     LE,
     NE,
 };
+
+fn allocError() noreturn {
+    @panic("Memory allocation error");
+}

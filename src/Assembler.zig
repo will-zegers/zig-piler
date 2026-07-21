@@ -56,16 +56,19 @@ const Function = struct {
 
         // First pass to build Assembly AST
         for (function.body.items) |instr| {
-            switch (instr) {
-                .Unary => |unary| Unary.append(allocator, &instructions, unary),
-                .Return => |ret| Ret.append(allocator, &instructions, ret),
-                .Binary => |binary| Binary.append(allocator, &instructions, binary),
-                .Copy => |copy| Mov.append(allocator, &instructions, copy),
-                .Jump => |jmp| Jmp.append(allocator, &instructions, jmp),
-                .JumpIfZero => JmpCC.append(allocator, &instructions, instr),
-                .JumpIfNotZero => JmpCC.append(allocator, &instructions, instr),
-                .Label => |label| Label.append(allocator, &instructions, label),
-            }
+            const assembly = switch (instr) {
+                .Unary => |unary| Unary.assembly(allocator, unary),
+                .Return => |ret| Ret.assembly(allocator, ret),
+                .Binary => |binary| Binary.assembly(allocator, binary),
+                .Copy => |copy| Mov.assembly(allocator, copy),
+                .Jump => |jmp| Jmp.assembly(allocator, jmp),
+                .JumpIfZero => JmpCC.assembly(allocator, instr),
+                .JumpIfNotZero => JmpCC.assembly(allocator, instr),
+                .Label => |label| Label.assembly(allocator, label),
+            };
+            defer allocator.free(assembly);
+
+            instructions.appendSlice(allocator, assembly) catch allocError();
         }
 
         // Second pass, replace Pseudo registers with stack locations and prepend the prelude
@@ -108,14 +111,15 @@ const Function = struct {
                 else => {},
             }
         }
-        AllocStack.prepend(allocator, stackPointer, instructions);
+
+        instructions.insert(allocator, 0, .{ .AllocStack = .{ .stackPointer = stackPointer } }) catch allocError();
     }
 
     fn replaceIfPseudo(map: *std.StringHashMap(isize), stackPointer: *isize, operand: *Operand) void {
-        if (operand.*.isPseudo()) {
+        if (operand.* == .Pseudo) {
             const key = operand.*.Pseudo;
             if (map.get(key) == null) {
-                map.put(key, stackPointer.*) catch std.process.exit(1);
+                map.put(key, stackPointer.*) catch allocError();
                 stackPointer.* -= WORD_SIZE;
             }
             const value = map.get(key).?;
@@ -127,3 +131,7 @@ const Function = struct {
         defer self.instructions.deinit(self.allocator);
     }
 };
+
+fn allocError() noreturn {
+    @panic("Memory allocation error");
+}

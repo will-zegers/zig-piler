@@ -56,12 +56,12 @@ pub fn patchInstructions(allocator: Allocator, unpatched: *Instructions) Instruc
                     .{ .Mov = .{ .src = instr.Binary.src, .dst = .{ .Reg = .rcx } } },
                     .{ .Binary = .{ .operator = instr.Binary.operator, .src = .{ .Reg = .rcx }, .dst = instr.Binary.dst } },
                 }),
-            } catch std.process.exit(1);
+            } catch allocError();
             defer allocator.free(patch);
 
-            patched.appendSlice(allocator, patch) catch std.process.exit(1);
+            patched.appendSlice(allocator, patch) catch allocError();
         } else {
-            patched.append(allocator, instr) catch std.process.exit(1);
+            patched.append(allocator, instr) catch allocError();
         }
     }
     unpatched.deinit(allocator);
@@ -119,4 +119,8 @@ fn isIllegalCmpOperands(cmp: Cmp) bool {
 // Add and sub must not have memory as both its source and destination
 fn isIllegalCmpImmDst(cmp: Cmp) bool {
     return cmp.arg2 == .Imm;
+}
+
+fn allocError() noreturn {
+    @panic("Memory allocation error");
 }

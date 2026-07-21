@@ -53,8 +53,8 @@ pub const Function = struct {
             .labels = .empty,
         };
 
-        const val = function.emitTac(ast.function.body.expr) catch std.process.exit(1);
-        function.body.append(allocator, .{ .Return = .{ .val = val } }) catch std.process.exit(1);
+        const val = function.emitTac(ast.function.body.expr) catch allocError();
+        function.body.append(allocator, .{ .Return = .{ .val = val } }) catch allocError();
 
         return function;
     }
@@ -146,18 +146,18 @@ pub const Function = struct {
     }
 
     fn nextTag(self: *Function) []u8 {
-        const tag = std.fmt.allocPrint(self.allocator, "{s}.{d}", .{ self.name, self.tags.items.len }) catch allocationError(Function);
-        self.tags.append(self.allocator, tag) catch std.process.exit(1);
+        const tag = std.fmt.allocPrint(self.allocator, "{s}.{d}", .{ self.name, self.tags.items.len }) catch allocError();
+        self.tags.append(self.allocator, tag) catch allocError();
         return tag;
     }
 
     fn nextLabel(self: *Function, descr: []const u8) []u8 {
-        const label = std.fmt.allocPrint(self.allocator, "{s}.{s}.{d}", .{ self.name, descr, self.labels.items.len }) catch allocationError(Function);
-        self.labels.append(self.allocator, label) catch std.process.exit(1);
+        const label = std.fmt.allocPrint(self.allocator, "{s}.{s}.{d}", .{ self.name, descr, self.labels.items.len }) catch allocError();
+        self.labels.append(self.allocator, label) catch allocError();
         return label;
     }
 };
 
-fn allocationError(t: type) noreturn {
-    fatal("Allocation failed for struct {any}", .{t});
+fn allocError() noreturn {
+    @panic("Memory allocation error");
 }
