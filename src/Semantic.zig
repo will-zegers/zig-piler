@@ -4,6 +4,7 @@ const fatal = std.process.fatal;
 
 const Parser = @import("Parser.zig");
 const BlockItem = Parser.BlockItem;
+const Factor = Parser.Factor;
 const Declaration = Parser.Declaration;
 const Statement = Parser.Statement;
 const Return = Parser.Return;
@@ -88,16 +89,23 @@ fn resolveExpression(allocator: Allocator, expr: Expression, variableMap: *Varia
                 resolveExpression(allocator, binary.right.*, variableMap),
             ) };
         },
-        .Factor => |factor| ret: {
-            switch (factor) {
-                .Var => {
-                    if (!variableMap.contains(factor.Var)) {
-                        fatal("Use of undeclared identifier '{s}'", .{factor.Var});
-                    } else break :ret expr;
-                },
-                else => break :ret expr,
-            }
+        .Factor => |factor| .{ .Factor = resolveFactor(allocator, factor, variableMap) },
+    };
+}
+
+fn resolveFactor(allocator: Allocator, factor: Factor, variableMap: *VariableMap) Factor {
+    return switch (factor) {
+        .Var => ret: {
+            if (!variableMap.contains(factor.Var)) {
+                fatal("Use of undeclared identifier '{s}'", .{factor.Var});
+            } else break :ret factor;
         },
+        .Unary => |unary| .{ .Unary = .copy(
+            allocator,
+            unary.operator,
+            resolveFactor(allocator, unary.factor.*, variableMap),
+        ) },
+        else => factor,
     };
 }
 

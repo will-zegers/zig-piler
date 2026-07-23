@@ -182,6 +182,13 @@ pub const Unary = struct {
         return .{ .allocator = allocator, .operator = operator, .factor = factor };
     }
 
+    pub fn copy(allocator: Allocator, operator: Operator, factor: Factor) Unary {
+        const factorPtr = allocator.create(Factor) catch allocationError(Unary);
+        factorPtr.* = factor;
+
+        return .{ .allocator = allocator, .operator = operator, .factor = factorPtr };
+    }
+
     pub fn deinit(self: *Unary) void {
         defer self.allocator.destroy(self.factor);
 
