@@ -107,6 +107,10 @@ pub const Binary = struct {
 
     pub fn init(allocator: Allocator, token: Token, left: Expression, right: Expression) Binary {
         const operator: Operator = BinaryOpMap.get(token.symbol) orelse unexpectedToken(token);
+        return copy(allocator, operator, left, right);
+    }
+
+    pub fn copy(allocator: Allocator, operator: Operator, left: Expression, right: Expression) Binary {
         const leftPtr = allocator.create(Expression) catch allocationError(Binary);
         leftPtr.* = left;
 
@@ -223,6 +227,13 @@ pub const Assignment = struct {
         rightPtr.* = right;
 
         return .{ .allocator = allocator, .left = leftPtr, .right = rightPtr };
+    }
+
+    pub fn move(allocator: Allocator, other: Assignment) Assignment {
+        defer allocator.destroy(other.left);
+        defer allocator.destroy(other.right);
+
+        return init(allocator, other.left.*, other.right.*);
     }
 
     pub fn deinit(self: Assignment) void {

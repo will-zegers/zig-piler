@@ -8,11 +8,13 @@ const Token = @import("Lexer.zig").Token;
 const TokenIterator = Token.Iterator;
 
 const expression = @import("Parser/expression.zig");
+const Semantic = @import("Semantic.zig");
 pub const Expression = expression.Expression;
 pub const Binary = expression.Binary;
 pub const Unary = expression.Unary;
 pub const Factor = expression.Factor;
 pub const Constant = expression.Constant;
+pub const Assignment = expression.Assignment;
 
 const Parser = @This();
 
@@ -24,10 +26,15 @@ const int = []const u8;
 pub fn parse(allocator: Allocator, tokens: []Token) AST {
     var tokenIter = Token.iterate(tokens);
 
-    const ast = Program.init(allocator, &tokenIter);
+    var ast = Program.init(allocator, &tokenIter);
     if (tokenIter.next()) |token| {
         fatal("Unexpected token(s) at end of file: {s}", .{token.symbol});
     }
+    // _ = &ast;
+    for (ast.function.body.items) |item| {
+        std.debug.print("{any}\n", .{item});
+    }
+    Semantic.init(allocator, &ast);
 
     return ast;
 }
@@ -86,7 +93,11 @@ pub const Function = struct {
                         .Null => {},
                     }
                 },
-                .Declaration => {},
+                .Declaration => |*decl| {
+                    if (decl.*.initialize) |*initialize| {
+                        initialize.*.deinit();
+                    } else {}
+                },
             }
         }
     }
