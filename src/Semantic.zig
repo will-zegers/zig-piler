@@ -19,7 +19,7 @@ var sCounter: usize = 0;
 
 variableMap: VariableMap,
 
-pub fn init(allocator: Allocator, ast: *Parser.AST) void {
+pub fn resolve(allocator: Allocator, ast: *Parser.AST) void {
     var variableMap: VariableMap = .init(allocator);
     defer {
         var it = variableMap.valueIterator();
@@ -31,82 +31,60 @@ pub fn init(allocator: Allocator, ast: *Parser.AST) void {
 
     const bodyLen = ast.function.body.items.len;
     for (0..bodyLen) |i| {
-        const block = ast.function.body.items[i];
-        const blockItem: BlockItem = switch (block) {
-            .Declaration => |declaration| .{ .Declaration = resolveDeclaration(allocator, declaration, &variableMap) },
-            .Statement => |statement| .{ .Statement = resolveStatement(allocator, statement, &variableMap) },
-        };
-        ast.function.body.append(allocator, blockItem) catch @panic("OOM");
-        _ = ast.function.body.swapRemove(i);
+        var block = ast.function.body.items[i];
+        switch (block) {
+            .Declaration => |*declaration| resolveDeclaration(allocator, declaration, &variableMap),
+            .Statement => |*statement| resolveStatement(allocator, statement, &variableMap),
+        }
     }
 }
 
-fn resolveDeclaration(allocator: Allocator, declaration: Declaration, variableMap: *VariableMap) Declaration {
+fn resolveDeclaration(allocator: Allocator, declaration: *Declaration, variableMap: *VariableMap) void {
     const name = declaration.name;
     if (variableMap.contains(name)) {
         fatal("Redeclaration of '{s}'", .{name});
     }
     const uniqueName = generateUnique(allocator, name);
-    variableMap.put(name, uniqueName) catch @panic("OOM");
-    const initialize = if (declaration.initialize) |expr|
-        resolveExpression(allocator, expr, variableMap)
-    else
-        null;
-
-    return .{ .name = uniqueName, .initialize = initialize };
+    variableMap.put(name, uniqueName) catch @panic("Out of memory");
+    if (declaration.initialize) |*expr| {
+        resolveExpression(allocator, expr, variableMap);
+    }
 }
 
-fn resolveStatement(allocator: Allocator, statement: Statement, variableMap: *VariableMap) Statement {
-    return switch (statement) {
-        .Return => |ret| .{ .Return = .{ .allocator = allocator, .expr = resolveExpression(allocator, ret.expr, variableMap) } },
-        .Expression => |expr| .{ .Expression = resolveExpression(allocator, expr, variableMap) },
-        .Null => Statement.Null,
-    };
+fn resolveStatement(allocator: Allocator, statement: *Statement, variableMap: *VariableMap) void {
+    switch (statement.*) {
+        .Return => |*ret| resolveExpression(allocator, &ret.expr, variableMap),
+        .Expression => |*expr| resolveExpression(allocator, expr, variableMap),
+        .Null => {},
+    }
 }
 
-fn resolveExpression(allocator: Allocator, expr: Expression, variableMap: *VariableMap) Expression {
-    std.debug.print("{any}\n", .{expr});
-    return switch (expr) {
-        .Assignment => |assign| ret: {
-            defer allocator.destroy(assign.left);
-            defer allocator.destroy(assign.right);
-
+fn resolveExpression(allocator: Allocator, expr: *Expression, variableMap: *VariableMap) void {
+    switch (expr.*) {
+        .Assignment => |*assign| {
             if (assign.left.* != .Factor or assign.left.*.Factor != .Var) fatal("Expression is not an assignable lvalue", .{});
-            break :ret .{ .Assignment = .init(
-                allocator,
-                resolveExpression(allocator, assign.left.*, variableMap),
-                resolveExpression(allocator, assign.right.*, variableMap),
-            ) };
-        },
-        .Binary => |binary| ret: {
-            defer allocator.destroy(binary.left);
-            defer allocator.destroy(binary.right);
 
-            break :ret .{ .Binary = .copy(
-                allocator,
-                binary.operator,
-                resolveExpression(allocator, binary.left.*, variableMap),
-                resolveExpression(allocator, binary.right.*, variableMap),
-            ) };
+            resolveExpression(allocator, assign.left, variableMap);
+            resolveExpression(allocator, assign.right, variableMap);
         },
-        .Factor => |factor| .{ .Factor = resolveFactor(allocator, factor, variableMap) },
-    };
+        .Binary => |*binary| {
+            resolveExpression(allocator, binary.left, variableMap);
+            resolveExpression(allocator, binary.right, variableMap);
+        },
+        .Factor => |*factor| resolveFactor(allocator, factor, variableMap),
+    }
 }
 
-fn resolveFactor(allocator: Allocator, factor: Factor, variableMap: *VariableMap) Factor {
-    return switch (factor) {
-        .Var => ret: {
-            if (!variableMap.contains(factor.Var)) {
-                fatal("Use of undeclared identifier '{s}'", .{factor.Var});
-            } else break :ret factor;
+fn resolveFactor(allocator: Allocator, factor: *Factor, variableMap: *VariableMap) void {
+    switch (factor.*) {
+        .Var => {
+            if (variableMap.get(factor.Var)) |unique| {
+                factor.Var = unique;
+            } else fatal("Use of undeclared identifier '{s}'", .{factor.Var});
         },
-        .Unary => |unary| .{ .Unary = .copy(
-            allocator,
-            unary.operator,
-            resolveFactor(allocator, unary.factor.*, variableMap),
-        ) },
-        else => factor,
-    };
+        .Unary => |unary| resolveFactor(allocator, unary.operand, variableMap),
+        else => {},
+    }
 }
 
 fn generateUnique(allocator: Allocator, name: []const u8) []u8 {

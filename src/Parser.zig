@@ -30,11 +30,8 @@ pub fn parse(allocator: Allocator, tokens: []Token) AST {
     if (tokenIter.next()) |token| {
         fatal("Unexpected token(s) at end of file: {s}", .{token.symbol});
     }
-    // _ = &ast;
-    for (ast.function.body.items) |item| {
-        std.debug.print("{any}\n", .{item});
-    }
-    Semantic.init(allocator, &ast);
+
+    Semantic.resolve(allocator, &ast);
 
     return ast;
 }

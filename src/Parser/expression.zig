@@ -166,11 +166,11 @@ pub const Unary = struct {
 
     allocator: Allocator,
     operator: Operator,
-    factor: *Factor,
+    operand: *Factor,
 
     pub fn init(allocator: Allocator, symbol: []const u8, tokens: *TokenIterator) Unary {
-        const factor = allocator.create(Factor) catch allocationError(Unary);
-        factor.* = Factor.factory(allocator, tokens);
+        const operand = allocator.create(Factor) catch allocationError(Unary);
+        operand.* = Factor.factory(allocator, tokens);
 
         const operator: Operator = switch (symbol[0]) {
             '~' => .Complement,
@@ -179,21 +179,14 @@ pub const Unary = struct {
             else => unreachable,
         };
 
-        return .{ .allocator = allocator, .operator = operator, .factor = factor };
-    }
-
-    pub fn copy(allocator: Allocator, operator: Operator, factor: Factor) Unary {
-        const factorPtr = allocator.create(Factor) catch allocationError(Unary);
-        factorPtr.* = factor;
-
-        return .{ .allocator = allocator, .operator = operator, .factor = factorPtr };
+        return .{ .allocator = allocator, .operator = operator, .operand = operand };
     }
 
     pub fn deinit(self: *Unary) void {
-        defer self.allocator.destroy(self.factor);
+        defer self.allocator.destroy(self.operand);
 
-        switch (self.factor.*) {
-            .Unary => |*factor| factor.deinit(),
+        switch (self.operand.*) {
+            .Unary => |*operand| operand.deinit(),
             .Parantheses => |*parantheses| parantheses.deinit(),
             else => {},
         }
