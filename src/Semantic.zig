@@ -14,80 +14,83 @@ const Assignment = Parser.Assignment;
 const Semantic = @This();
 
 const VariableMap = std.StringHashMap([]const u8);
+const AST = Parser.AST;
 
-var sCounter: usize = 0;
-
+sCounter: usize = 0,
+allocator: Allocator,
 variableMap: VariableMap,
 
-pub fn resolve(allocator: Allocator, ast: *Parser.AST) void {
-    var variableMap: VariableMap = .init(allocator);
-    defer {
-        var it = variableMap.valueIterator();
-        while (it.next()) |value| {
-            allocator.free(value.*);
-        }
-        variableMap.deinit();
-    }
+pub fn init(allocator: Allocator) Semantic {
+    return .{ .allocator = allocator, .variableMap = .init(allocator) };
+}
 
-    const bodyLen = ast.function.body.items.len;
-    for (0..bodyLen) |i| {
-        var block = ast.function.body.items[i];
-        switch (block) {
-            .Declaration => |*declaration| resolveDeclaration(allocator, declaration, &variableMap),
-            .Statement => |*statement| resolveStatement(allocator, statement, &variableMap),
+pub fn deinit(self: *Semantic) void {
+    var it = self.variableMap.valueIterator();
+    while (it.next()) |value| {
+        self.allocator.free(value.*);
+    }
+    self.variableMap.deinit();
+}
+
+pub fn resolve(self: *Semantic, ast: *AST) void {
+    const body = ast.function.body.items;
+    for (body) |*block| {
+        switch (block.*) {
+            .Declaration => |*declaration| self.resolveDeclaration(declaration),
+            .Statement => |*statement| self.resolveStatement(statement),
         }
     }
 }
 
-fn resolveDeclaration(allocator: Allocator, declaration: *Declaration, variableMap: *VariableMap) void {
+fn resolveDeclaration(self: *Semantic, declaration: *Declaration) void {
     const name = declaration.name;
-    if (variableMap.contains(name)) {
+    if (self.variableMap.contains(name)) {
         fatal("Redeclaration of '{s}'", .{name});
     }
-    const uniqueName = generateUnique(allocator, name);
-    variableMap.put(name, uniqueName) catch @panic("Out of memory");
-    if (declaration.initialize) |*expr| {
-        resolveExpression(allocator, expr, variableMap);
-    }
+    const uniqueName = self.generateUnique(name);
+    self.variableMap.put(name, uniqueName) catch @panic("Out of memory");
+    self.resolveExpression(&declaration.initialize);
 }
 
-fn resolveStatement(allocator: Allocator, statement: *Statement, variableMap: *VariableMap) void {
+fn resolveStatement(self: Semantic, statement: *Statement) void {
     switch (statement.*) {
-        .Return => |*ret| resolveExpression(allocator, &ret.expr, variableMap),
-        .Expression => |*expr| resolveExpression(allocator, expr, variableMap),
+        .Return => |*ret| self.resolveExpression(&ret.expr),
+        .Expression => |*expr| self.resolveExpression(expr),
         .Null => {},
     }
 }
 
-fn resolveExpression(allocator: Allocator, expr: *Expression, variableMap: *VariableMap) void {
+fn resolveExpression(self: Semantic, expr: *Expression) void {
     switch (expr.*) {
         .Assignment => |*assign| {
-            if (assign.left.* != .Factor or assign.left.*.Factor != .Var) fatal("Expression is not an assignable lvalue", .{});
+            if (assign.left.* != .Factor or assign.left.*.Factor != .Var) {
+                fatal("Expression is not an assignable lvalue", .{});
+            }
 
-            resolveExpression(allocator, assign.left, variableMap);
-            resolveExpression(allocator, assign.right, variableMap);
+            self.resolveExpression(assign.left);
+            self.resolveExpression(assign.right);
         },
         .Binary => |*binary| {
-            resolveExpression(allocator, binary.left, variableMap);
-            resolveExpression(allocator, binary.right, variableMap);
+            self.resolveExpression(binary.left);
+            self.resolveExpression(binary.right);
         },
-        .Factor => |*factor| resolveFactor(allocator, factor, variableMap),
+        .Factor => |*factor| self.resolveFactor(factor),
     }
 }
 
-fn resolveFactor(allocator: Allocator, factor: *Factor, variableMap: *VariableMap) void {
+fn resolveFactor(self: Semantic, factor: *Factor) void {
     switch (factor.*) {
         .Var => {
-            if (variableMap.get(factor.Var)) |unique| {
+            if (self.variableMap.get(factor.Var)) |unique| {
                 factor.Var = unique;
             } else fatal("Use of undeclared identifier '{s}'", .{factor.Var});
         },
-        .Unary => |unary| resolveFactor(allocator, unary.operand, variableMap),
+        .Unary => |unary| self.resolveFactor(unary.operand),
         else => {},
     }
 }
 
-fn generateUnique(allocator: Allocator, name: []const u8) []u8 {
-    defer sCounter += 1;
-    return std.fmt.allocPrint(allocator, "{s}.{d}", .{ name, sCounter }) catch @panic("Out of memory");
+fn generateUnique(self: *Semantic, name: []const u8) []u8 {
+    defer self.sCounter += 1;
+    return std.fmt.allocPrint(self.allocator, "{s}.{d}", .{ name, self.sCounter }) catch @panic("Out of memory");
 }

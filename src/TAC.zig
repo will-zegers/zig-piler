@@ -60,9 +60,10 @@ pub const Function = struct {
                         const val = function.emitTac(ret.expr) catch allocError();
                         function.body.append(allocator, .{ .Return = .{ .val = val } }) catch allocError();
                     },
-                    else => {},
+                    .Expression => |expr| _ = function.emitTac(expr) catch allocError(),
+                    .Null => {},
                 },
-                else => {},
+                .Declaration => |decl| _ = function.emitTac(decl.initialize) catch allocError(),
             }
         }
 
@@ -153,7 +154,12 @@ pub const Function = struct {
                     },
                 }
             },
-            .Assignment => unreachable,
+            .Assignment => |assign| {
+                const result = try self.emitTac(assign.right.*);
+                const dst: Val = try self.emitTac(assign.left.*);
+                try self.body.append(self.allocator, .{ .Copy = .{ .src = result, .dst = dst } });
+                return dst;
+            },
         }
     }
 

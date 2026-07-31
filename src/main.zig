@@ -8,6 +8,7 @@ const TAC = @import("TAC.zig");
 const Assembler = @import("Assembler.zig");
 const CodeEmitter = @import("CodeEmitter.zig");
 const Debugger = @import("Debugger.zig");
+const Semantic = @import("Semantic.zig");
 
 pub fn main(init: std.process.Init) !void {
     var args = try init.minimal.args.iterateAllocator(init.gpa);
@@ -18,6 +19,7 @@ pub fn main(init: std.process.Init) !void {
 
     var lex: bool = false;
     var parse: bool = false;
+    var validate: bool = false;
     var tacky: bool = false;
     var codegen: bool = false;
     var all: bool = true; // run all by default
@@ -29,6 +31,9 @@ pub fn main(init: std.process.Init) !void {
             all = false;
         } else if (mem.eql(u8, "--parse", arg)) {
             parse = true;
+            all = false;
+        } else if (mem.eql(u8, "--validate", arg)) {
+            validate = true;
             all = false;
         } else if (mem.eql(u8, "--tacky", arg)) {
             tacky = true;
@@ -86,6 +91,10 @@ pub fn main(init: std.process.Init) !void {
                 std.debug.print("-------parsed-------\n", .{});
                 Debugger.printParserAST(ast);
             }
+
+            var semantic = Semantic.init(init.gpa);
+            defer semantic.deinit();
+            semantic.resolve(&ast);
 
             if (all or tacky or codegen) {
                 std.log.info("Generating Tacky...", .{});

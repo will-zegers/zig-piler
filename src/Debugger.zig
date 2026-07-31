@@ -16,29 +16,38 @@ pub fn printParserAST(ast: Parser.AST) void {
     const program = ast;
     const function = program.function;
     print("{any} (\n", .{@TypeOf(program)});
-    print(". {any} (\n", .{@TypeOf(function)});
-    // for (function.body.items) |blockItem| {
-    //     print(". . {any} (\n", .{@TypeOf(blockItem)});
-    //     switch (blockItem) {
-    //         .Statement => switch (blockItem) {
-    //             .Return => |ret| {
-    //                 print(". . . expr=\n", .{});
-    //                 printExpression(ret.expr, 8) catch {};
-    //             },
-    //             else => print("\n", .{}),
-    //         },
-    //         .Declaration => print("\n"),
-    //     }
-    //     print(". . )\n", .{});
-    // }
-    print(". )\n", .{});
+    print("  {any} (\n", .{@TypeOf(function)});
+    for (function.body.items) |blockItem| {
+        print("    {any} (\n", .{@TypeOf(blockItem)});
+        switch (blockItem) {
+            .Statement => |statement| switch (statement) {
+                .Expression => |expr| {
+                    print("      {any} (\n", .{@TypeOf(statement)});
+                    printExpression(expr, 8);
+                },
+                .Return => |ret| {
+                    print("      {any} (\n", .{@TypeOf(statement)});
+                    print("        {any} (expr=\n", .{@TypeOf(ret)});
+                    printExpression(ret.expr, 10);
+                },
+                .Null => |nul| print("      {any} ()\n", .{@TypeOf(nul)}),
+            },
+            .Declaration => |decl| {
+                print("      {any} (\n", .{@TypeOf(decl)});
+                print("        {s}\n", .{decl.name});
+                printExpression(decl.initialize, 8);
+            },
+        }
+        print("    )\n", .{});
+    }
+    print("  )\n", .{});
     print(")\n", .{});
 }
 
-fn printExpression(expr: Parser.Expression, indent: usize) !void {
-    const indentStr = try std.heap.page_allocator.alloc(u8, indent);
+fn printExpression(expr: Parser.Expression, indent: usize) void {
+    const indentStr = std.heap.page_allocator.alloc(u8, indent) catch @panic("Out of memory");
     for (indentStr, 0..) |_, i| {
-        indentStr[i] = if (i % 2 == 0) '.' else ' ';
+        indentStr[i] = ' ';
     }
     defer std.heap.page_allocator.free(indentStr);
 
@@ -48,39 +57,44 @@ fn printExpression(expr: Parser.Expression, indent: usize) !void {
             try printFactor(expr.Factor, indent + 2);
         },
         .Binary => |binary| {
-            print("{s}. left=\n", .{indentStr});
-            try printExpression(expr.Binary.left.*, indent + 6);
-            print("{s}. operator={s}\n", .{ indentStr, @tagName(binary.operator) });
-            print("{s}. right=\n", .{indentStr});
-            try printExpression(expr.Binary.right.*, indent + 6);
+            print("{s}  left=\n", .{indentStr});
+            printExpression(expr.Binary.left.*, indent + 4);
+            print("{s}  operator={s}\n", .{ indentStr, @tagName(binary.operator) });
+            print("{s}  right=\n", .{indentStr});
+            printExpression(expr.Binary.right.*, indent + 4);
+        },
+        .Assignment => |assign| {
+            std.debug.print("{s}  lhs=\n", .{indentStr});
+            printExpression(assign.left.*, indent + 4);
+            std.debug.print("{s}  rhs=\n", .{indentStr});
+            printExpression(assign.right.*, indent + 4);
         },
     }
     print("{s})\n", .{indentStr});
 }
 
 fn printFactor(factor: Parser.Factor, indent: usize) !void {
-    const indentStr = try std.heap.page_allocator.alloc(u8, indent);
+    const indentStr = std.heap.page_allocator.alloc(u8, indent) catch @panic("Out of memory");
     for (indentStr, 0..) |_, i| {
-        indentStr[i] = if (i % 2 == 0) '.' else ' ';
+        indentStr[i] = ' ';
     }
     defer std.heap.page_allocator.free(indentStr);
 
-    print("{s}{s} (\n", .{ indentStr, @tagName(factor) });
+    print("{s}{s} (", .{ indentStr, @tagName(factor) });
     switch (factor) {
         .Constant => |constant| {
-            print("{s}. int={s})\n", .{ indentStr, constant });
+            print("{s})\n", .{constant});
         },
         .Unary => |unary| {
-            print("{s}. operation={s})\n", .{ indentStr, @tagName(unary.operator) });
-            print("{s}. factor=", .{indentStr});
-            try printFactor(unary.factor.*, indent + 2);
+            print("\n{s}  operation={s}", .{ indentStr, @tagName(unary.operator) });
+            print("\n{s}  factor=\n", .{indentStr});
+            try printFactor(unary.operand.*, indent + 4);
         },
         .Parantheses => |para| {
             std.debug.print("{any}\n", .{para.expr.*});
         },
-        .Var => print("{s}\n", .{factor.Var}),
+        .Var => print("{s})\n", .{factor.Var}),
     }
-    print("{s})\n", .{indentStr});
 }
 
 pub fn printTAC(ir: TAC.IR) void {
@@ -115,26 +129,26 @@ pub fn printTAC(ir: TAC.IR) void {
             .Binary => |binary| {
                 print("operator={any}, ", .{binary.operator});
                 switch (binary.src1) {
-                    .Constant => |src1| print("src1={any}({s}) ", .{ @TypeOf(src1), src1 }),
+                    .Constant => |src1| print("src1={s} ", .{src1}),
                     .Var => |src1| print("src1={s} ", .{src1}),
                 }
                 switch (binary.src2) {
-                    .Constant => |src2| print("right={any}({s}) ", .{ @TypeOf(src2), src2 }),
-                    .Var => |src2| print("right={s} ", .{src2}),
+                    .Constant => |src2| print("src2={s} ", .{src2}),
+                    .Var => |src2| print("src2={s} ", .{src2}),
                 }
                 switch (binary.dst) {
-                    .Constant => |dst| print("dst={any}({s})", .{ @TypeOf(dst), dst }),
+                    .Constant => |dst| print("dst={s}", .{dst}),
                     .Var => |dst| print("dst={s}", .{dst}),
                 }
                 print(")\n", .{});
             },
             .Copy => |copy| {
                 switch (copy.src) {
-                    .Constant => |src| print("src={any}({s}) ", .{ @TypeOf(src), src }),
+                    .Constant => |src| print("src={s} ", .{src}),
                     .Var => |src| print("src={s} ", .{src}),
                 }
                 switch (copy.dst) {
-                    .Constant => |dst| print("dst={any}({s})", .{ @TypeOf(dst), dst }),
+                    .Constant => |dst| print("dst={s}", .{dst}),
                     .Var => |dst| print("dst={s}", .{dst}),
                 }
                 print(")\n", .{});
@@ -152,7 +166,13 @@ pub fn printTAC(ir: TAC.IR) void {
                 }
                 print("label={s})\n", .{jump.target});
             },
-            else => std.debug.print("\n", .{}),
+            .JumpIfNotZero => |jump| {
+                switch (jump.condition) {
+                    .Constant => |cond| print("cond={any}({s}) ", .{ @TypeOf(cond), cond }),
+                    .Var => |cond| print("cond={s} ", .{cond}),
+                }
+                print("label={s})\n", .{jump.target});
+            },
         }
     }
     print("    )\n", .{});

@@ -4,17 +4,16 @@ const Allocator = mem.Allocator;
 const fatal = std.process.fatal;
 const ArrayList = std.ArrayList;
 
-const Token = @import("Lexer.zig").Token;
-const TokenIterator = Token.Iterator;
-
 const expression = @import("Parser/expression.zig");
-const Semantic = @import("Semantic.zig");
 pub const Expression = expression.Expression;
 pub const Binary = expression.Binary;
 pub const Unary = expression.Unary;
 pub const Factor = expression.Factor;
 pub const Constant = expression.Constant;
 pub const Assignment = expression.Assignment;
+const Semantic = @import("Semantic.zig");
+const Token = @import("Lexer.zig").Token;
+const TokenIterator = Token.Iterator;
 
 const Parser = @This();
 
@@ -26,12 +25,10 @@ const int = []const u8;
 pub fn parse(allocator: Allocator, tokens: []Token) AST {
     var tokenIter = Token.iterate(tokens);
 
-    var ast = Program.init(allocator, &tokenIter);
+    const ast = Program.init(allocator, &tokenIter);
     if (tokenIter.next()) |token| {
         fatal("Unexpected token(s) at end of file: {s}", .{token.symbol});
     }
-
-    Semantic.resolve(allocator, &ast);
 
     return ast;
 }
@@ -91,9 +88,7 @@ pub const Function = struct {
                     }
                 },
                 .Declaration => |*decl| {
-                    if (decl.*.initialize) |*initialize| {
-                        initialize.*.deinit();
-                    } else {}
+                    decl.initialize.deinit();
                 },
             }
         }
@@ -132,20 +127,14 @@ pub const Statement = union(StatementTag) {
 
 pub const Declaration = struct {
     name: identifier,
-    initialize: ?Expression = null,
+    initialize: Expression,
 
     pub fn init(allocator: Allocator, tokens: *TokenIterator) Declaration {
         expect(.Int, tokens.next());
-        const name = tokens.next() orelse unexpectedEOF();
+        const name = tokens.peek() orelse unexpectedEOF();
         expect(.Identifier, name);
 
-        var initialize: ?Expression = null;
-        if (tokens.peek()) |nextToken| {
-            if (mem.eql(u8, "=", nextToken.symbol)) {
-                tokens.skip(); // discard the assignment operator
-                initialize = Expression.parse(allocator, tokens, 0);
-            }
-        }
+        const initialize = Expression.parse(allocator, tokens, 0);
         expect(.Semicolon, tokens.next());
 
         return .{ .name = name.symbol, .initialize = initialize };
