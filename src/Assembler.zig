@@ -24,7 +24,7 @@ const Assembler = @This();
 
 pub const AST = Program;
 
-const WORD_SIZE: usize = 8;
+const WORD_SIZE: isize = 8;
 
 pub fn codeGen(allocator: Allocator, ast: TAC.IR) AST {
     return .init(allocator, ast);
@@ -83,7 +83,7 @@ const Function = struct {
     fn setupStack(allocator: Allocator, instructions: *Instructions) void {
         var pseudoMap: std.StringHashMap(isize) = .init(allocator);
         defer pseudoMap.deinit();
-        var stackPointer: isize = -4;
+        var stackPointer: isize = -WORD_SIZE;
 
         for (instructions.items) |*instr| {
             switch (instr.*) {

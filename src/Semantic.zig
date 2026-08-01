@@ -42,14 +42,17 @@ pub fn resolve(self: *Semantic, ast: *AST) void {
     }
 }
 
-fn resolveDeclaration(self: *Semantic, declaration: *Declaration) void {
-    const name = declaration.name;
+fn resolveDeclaration(self: *Semantic, decl: *Declaration) void {
+    const name = decl.name;
     if (self.variableMap.contains(name)) {
         fatal("Redeclaration of '{s}'", .{name});
     }
     const uniqueName = self.generateUnique(name);
     self.variableMap.put(name, uniqueName) catch @panic("Out of memory");
-    self.resolveExpression(&declaration.initialize);
+
+    if (decl.initialize) |*initExpr| {
+        self.resolveExpression(initExpr);
+    }
 }
 
 fn resolveStatement(self: Semantic, statement: *Statement) void {

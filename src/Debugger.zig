@@ -34,7 +34,9 @@ pub fn printParserAST(ast: Parser.AST) void {
             },
             .Declaration => |decl| {
                 print("      {any} (\n", .{@TypeOf(decl)});
-                printExpression(decl.initialize, 8);
+                if (decl.initialize) |init| {
+                    printExpression(init, 8);
+                }
             },
         }
         print("    )\n", .{});
@@ -201,7 +203,7 @@ pub fn printAssemblerAST(ast: Assembler.AST) void {
                 }
             },
             .AllocStack => |allocStack| {
-                print("int={d}", .{allocStack.stackPointer});
+                print("int={d})", .{allocStack.stackPointer});
             },
             .Binary => |binary| {
                 print("operator={s} ", .{@tagName(binary.operator)});

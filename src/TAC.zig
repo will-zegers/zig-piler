@@ -63,7 +63,11 @@ pub const Function = struct {
                     .Expression => |expr| _ = function.emitTac(expr) catch allocError(),
                     .Null => {},
                 },
-                .Declaration => |decl| _ = function.emitTac(decl.initialize) catch allocError(),
+                .Declaration => |decl| {
+                    if (decl.initialize) |initExpr| {
+                        _ = function.emitTac(initExpr) catch allocError();
+                    }
+                },
             }
         }
         function.body.append(allocator, .{ .Return = .{ .val = .{ .Constant = "0" } } }) catch allocError();

@@ -185,6 +185,17 @@ pub const Assignment = struct {
         Expression.deinit(&self.lhs.*);
         Expression.deinit(&self.rhs.*);
     }
+
+    pub fn parse(allocator: Allocator, tokens: *TokenIterator) ?Expression {
+        const lhs = parseFactor(allocator, tokens);
+
+        const nextToken = tokens.peek() orelse unexpectedEOF();
+        return if (mem.eql(u8, "=", nextToken.symbol)) blk: {
+            tokens.skip();
+            const rhs = Expression.parse(allocator, tokens, 0);
+            break :blk .{ .Assignment = .init(allocator, lhs, rhs) };
+        } else null;
+    }
 };
 
 fn parseFactor(allocator: Allocator, tokens: *TokenIterator) Expression {

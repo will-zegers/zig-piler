@@ -11,6 +11,7 @@ pub const Unary = expression.Unary;
 pub const Factor = expression.Factor;
 pub const Constant = expression.Constant;
 pub const Assignment = expression.Assignment;
+
 const Semantic = @import("Semantic.zig");
 const Token = @import("Lexer.zig").Token;
 const TokenIterator = Token.Iterator;
@@ -26,7 +27,7 @@ pub fn parse(allocator: Allocator, tokens: []Token) AST {
     var tokenIter = Token.iterate(tokens);
 
     const ast = Program.init(allocator, &tokenIter);
-    if (tokenIter.next()) |token| {
+    if (tokenIter.peek()) |token| {
         fatal("Unexpected token(s) at end of file: {s}", .{token.symbol});
     }
 
@@ -88,7 +89,9 @@ pub const Function = struct {
                     }
                 },
                 .Declaration => |*decl| {
-                    decl.initialize.deinit();
+                    if (decl.initialize) |*initExpr| {
+                        Expression.deinit(initExpr);
+                    }
                 },
             }
         }
@@ -127,14 +130,14 @@ pub const Statement = union(StatementTag) {
 
 pub const Declaration = struct {
     name: identifier,
-    initialize: Expression,
+    initialize: ?Expression,
 
     pub fn init(allocator: Allocator, tokens: *TokenIterator) Declaration {
         expect(.Int, tokens.next());
         const name = tokens.peek() orelse unexpectedEOF();
         expect(.Identifier, name);
 
-        const initialize = Expression.parse(allocator, tokens, 0);
+        const initialize = Assignment.parse(allocator, tokens);
         expect(.Semicolon, tokens.next());
 
         return .{ .name = name.symbol, .initialize = initialize };
