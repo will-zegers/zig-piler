@@ -151,8 +151,8 @@ pub const Function = struct {
                 }
             },
             .Assignment => |assign| {
-                const result = try self.emitTac(assign.right.*);
-                const dst: Val = try self.emitTac(assign.left.*);
+                const result = try self.emitTac(assign.rhs.*);
+                const dst: Val = try self.emitTac(assign.lhs.*);
                 try self.body.append(self.allocator, .{ .Copy = .{ .src = result, .dst = dst } });
                 return dst;
             },

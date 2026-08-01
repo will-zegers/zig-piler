@@ -32,7 +32,7 @@ pub const Expression = union(ExpressionTag) {
         var nextToken = tokens.peek() orelse unexpectedEOF();
         while (nextToken.type == .BinaryOp and nextToken.precedence >= minPrecedence) {
             if (mem.eql(u8, "=", nextToken.symbol)) {
-                _ = tokens.next(); // consome the assignment operator
+                tokens.skip(); // consome the assignment operator
                 const right = parse(allocator, tokens, nextToken.precedence);
 
                 const temp = Assignment.init(allocator, left, right);
@@ -165,25 +165,25 @@ pub const Binary = struct {
 
 pub const Assignment = struct {
     allocator: Allocator,
-    left: *Expression,
-    right: *Expression,
+    lhs: *Expression,
+    rhs: *Expression,
 
-    pub fn init(allocator: Allocator, left: Expression, right: Expression) Assignment {
-        const leftPtr = allocator.create(Expression) catch allocationError(Binary);
-        leftPtr.* = left;
+    pub fn init(allocator: Allocator, lhs: Expression, rhs: Expression) Assignment {
+        const lhsPtr = allocator.create(Expression) catch allocationError(Binary);
+        lhsPtr.* = lhs;
 
-        const rightPtr = allocator.create(Expression) catch allocationError(Binary);
-        rightPtr.* = right;
+        const rhsPtr = allocator.create(Expression) catch allocationError(Binary);
+        rhsPtr.* = rhs;
 
-        return .{ .allocator = allocator, .left = leftPtr, .right = rightPtr };
+        return .{ .allocator = allocator, .lhs = lhsPtr, .rhs = rhsPtr };
     }
 
     pub fn deinit(self: Assignment) void {
-        defer self.allocator.destroy(self.left);
-        defer self.allocator.destroy(self.right);
+        defer self.allocator.destroy(self.lhs);
+        defer self.allocator.destroy(self.rhs);
 
-        Expression.deinit(&self.left.*);
-        Expression.deinit(&self.right.*);
+        Expression.deinit(&self.lhs.*);
+        Expression.deinit(&self.rhs.*);
     }
 };
 

@@ -63,12 +63,12 @@ fn resolveStatement(self: Semantic, statement: *Statement) void {
 fn resolveExpression(self: Semantic, expr: *Expression) void {
     switch (expr.*) {
         .Assignment => |*assign| {
-            if (assign.left.* != .Var) {
+            if (assign.lhs.* != .Var) {
                 fatal("Expression is not an assignable lvalue", .{});
             }
 
-            self.resolveExpression(assign.left);
-            self.resolveExpression(assign.right);
+            self.resolveExpression(assign.lhs);
+            self.resolveExpression(assign.rhs);
         },
         .Binary => |*binary| {
             self.resolveExpression(binary.left);

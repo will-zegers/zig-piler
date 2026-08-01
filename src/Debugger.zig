@@ -73,9 +73,9 @@ fn printExpression(expr: Parser.Expression, indent: usize) void {
         .Assignment => |assign| {
             print("\n", .{});
             std.debug.print("{s}  lhs=\n", .{indentStr});
-            printExpression(assign.left.*, indent + 4);
+            printExpression(assign.lhs.*, indent + 4);
             std.debug.print("{s}  rhs=\n", .{indentStr});
-            printExpression(assign.right.*, indent + 4);
+            printExpression(assign.rhs.*, indent + 4);
             print("{s})\n", .{indentStr});
         },
     }
