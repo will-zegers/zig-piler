@@ -34,7 +34,6 @@ pub fn printParserAST(ast: Parser.AST) void {
             },
             .Declaration => |decl| {
                 print("      {any} (\n", .{@TypeOf(decl)});
-                print("        {s}\n", .{decl.name});
                 printExpression(decl.initialize, 8);
             },
         }
@@ -51,49 +50,34 @@ fn printExpression(expr: Parser.Expression, indent: usize) void {
     }
     defer std.heap.page_allocator.free(indentStr);
 
-    print("{s}{s} (\n", .{ indentStr, @tagName(expr) });
+    print("{s}{s} (", .{ indentStr, @tagName(expr) });
     switch (expr) {
-        .Factor => {
-            try printFactor(expr.Factor, indent + 2);
+        .Constant => print("{s})\n", .{expr.Constant}),
+        .Var => print("{s})\n", .{expr.Var}),
+        .Unary => |unary| {
+            print("\n", .{});
+            print("\n{s}  operation={s}", .{ indentStr, @tagName(unary.operator) });
+            print("\n{s}  factor=\n", .{indentStr});
+            printExpression(unary.operand.*, indent + 4);
+            print("{s})\n", .{indentStr});
         },
         .Binary => |binary| {
+            print("\n", .{});
             print("{s}  left=\n", .{indentStr});
             printExpression(expr.Binary.left.*, indent + 4);
             print("{s}  operator={s}\n", .{ indentStr, @tagName(binary.operator) });
             print("{s}  right=\n", .{indentStr});
             printExpression(expr.Binary.right.*, indent + 4);
+            print("{s})\n", .{indentStr});
         },
         .Assignment => |assign| {
+            print("\n", .{});
             std.debug.print("{s}  lhs=\n", .{indentStr});
             printExpression(assign.left.*, indent + 4);
             std.debug.print("{s}  rhs=\n", .{indentStr});
             printExpression(assign.right.*, indent + 4);
+            print("{s})\n", .{indentStr});
         },
-    }
-    print("{s})\n", .{indentStr});
-}
-
-fn printFactor(factor: Parser.Factor, indent: usize) !void {
-    const indentStr = std.heap.page_allocator.alloc(u8, indent) catch @panic("Out of memory");
-    for (indentStr, 0..) |_, i| {
-        indentStr[i] = ' ';
-    }
-    defer std.heap.page_allocator.free(indentStr);
-
-    print("{s}{s} (", .{ indentStr, @tagName(factor) });
-    switch (factor) {
-        .Constant => |constant| {
-            print("{s})\n", .{constant});
-        },
-        .Unary => |unary| {
-            print("\n{s}  operation={s}", .{ indentStr, @tagName(unary.operator) });
-            print("\n{s}  factor=\n", .{indentStr});
-            try printFactor(unary.operand.*, indent + 4);
-        },
-        .Parantheses => |para| {
-            std.debug.print("{any}\n", .{para.expr.*});
-        },
-        .Var => print("{s})\n", .{factor.Var}),
     }
 }
 

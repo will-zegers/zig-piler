@@ -12,17 +12,22 @@ const int = []const u8;
 pub const ExpressionTag = enum {
     Assignment,
     Binary,
-    Factor,
+    Constant,
+    Unary,
+    Var,
 };
 
 pub const Expression = union(ExpressionTag) {
     Assignment: Assignment,
     Binary: Binary,
-    Factor: Factor,
+    Constant: Constant,
+    Unary: Unary,
+    Var: Var,
 
-    /// Evaluates expression from left-to-right with precedence climbing
+    /// Evaluates expression from left-to-right for arithmetic, or right-to-left for assignment, operators.
+    /// This is a recursive descent parser that uses the precedence climbing algorithm.
     pub fn parse(allocator: Allocator, tokens: *TokenIterator, minPrecedence: usize) Expression {
-        var left: Expression = .{ .Factor = .factory(allocator, tokens) };
+        var left = parseFactor(allocator, tokens);
 
         var nextToken = tokens.peek() orelse unexpectedEOF();
         while (nextToken.type == .BinaryOp and nextToken.precedence >= minPrecedence) {
@@ -46,14 +51,47 @@ pub const Expression = union(ExpressionTag) {
 
     pub fn deinit(expr: *Expression) void {
         switch (expr.*) {
-            .Factor => switch (expr.*.Factor) {
-                .Constant, .Var => {},
-                .Unary => |*unary| unary.deinit(),
-                .Parantheses => |*parantheses| parantheses.deinit(),
-            },
+            .Constant, .Var => {},
+            .Unary => |*unary| unary.deinit(),
             .Binary => |*binary| binary.deinit(),
             .Assignment => |*assign| assign.deinit(),
         }
+    }
+};
+
+pub const Constant = int;
+
+pub const Var = identifier;
+
+pub const Unary = struct {
+    pub const Operator = enum {
+        Complement,
+        Negate,
+        Not,
+    };
+
+    allocator: Allocator,
+    operator: Operator,
+    operand: *Expression,
+
+    pub fn init(allocator: Allocator, symbol: []const u8, tokens: *TokenIterator) Unary {
+        const operand = allocator.create(Expression) catch allocationError(Unary);
+        operand.* = parseFactor(allocator, tokens);
+
+        const operator: Operator = switch (symbol[0]) {
+            '~' => .Complement,
+            '-' => .Negate,
+            '!' => .Not,
+            else => unreachable,
+        };
+
+        return .{ .allocator = allocator, .operator = operator, .operand = operand };
+    }
+
+    pub fn deinit(self: *Unary) void {
+        defer self.allocator.destroy(self.operand);
+
+        Expression.deinit(&self.operand.*);
     }
 };
 
@@ -107,10 +145,6 @@ pub const Binary = struct {
 
     pub fn init(allocator: Allocator, token: Token, left: Expression, right: Expression) Binary {
         const operator: Operator = BinaryOpMap.get(token.symbol) orelse unexpectedToken(token);
-        return copy(allocator, operator, left, right);
-    }
-
-    pub fn copy(allocator: Allocator, operator: Operator, left: Expression, right: Expression) Binary {
         const leftPtr = allocator.create(Expression) catch allocationError(Binary);
         leftPtr.* = left;
 
@@ -129,91 +163,6 @@ pub const Binary = struct {
     }
 };
 
-pub const FactorTag = enum {
-    Constant,
-    Var,
-    Unary,
-    Parantheses,
-};
-pub const Factor = union(FactorTag) {
-    Constant: Constant,
-    Var: Var,
-    Unary: Unary,
-    Parantheses: Parantheses,
-
-    pub fn factory(allocator: Allocator, tokens: *TokenIterator) Factor {
-        const token = tokens.next() orelse unexpectedEOF();
-        return switch (token.type) {
-            .Constant => .{ .Constant = token.symbol },
-            .UnaryOp => .{ .Unary = .init(allocator, token.symbol, tokens) },
-            .OpenParenthesis => .{ .Parantheses = .init(allocator, tokens) },
-            .Identifier => .{ .Var = token.symbol },
-            else => unexpectedToken(token),
-        };
-    }
-};
-
-pub const Constant = int;
-
-pub const Var = identifier;
-
-pub const Unary = struct {
-    pub const Operator = enum {
-        Complement,
-        Negate,
-        Not,
-    };
-
-    allocator: Allocator,
-    operator: Operator,
-    operand: *Factor,
-
-    pub fn init(allocator: Allocator, symbol: []const u8, tokens: *TokenIterator) Unary {
-        const operand = allocator.create(Factor) catch allocationError(Unary);
-        operand.* = Factor.factory(allocator, tokens);
-
-        const operator: Operator = switch (symbol[0]) {
-            '~' => .Complement,
-            '-' => .Negate,
-            '!' => .Not,
-            else => unreachable,
-        };
-
-        return .{ .allocator = allocator, .operator = operator, .operand = operand };
-    }
-
-    pub fn deinit(self: *Unary) void {
-        defer self.allocator.destroy(self.operand);
-
-        switch (self.operand.*) {
-            .Unary => |*operand| operand.deinit(),
-            .Parantheses => |*parantheses| parantheses.deinit(),
-            else => {},
-        }
-    }
-};
-
-pub const Parantheses = struct {
-    allocator: Allocator,
-    expr: *Expression,
-
-    pub fn init(allocator: Allocator, tokens: *TokenIterator) Parantheses {
-        const expr = allocator.create(Expression) catch allocationError(Parantheses);
-        expr.* = Expression.parse(allocator, tokens, 0);
-
-        const token = tokens.next() orelse unexpectedEOF();
-        if (token.type != .CloseParenthesis) unexpectedToken(token);
-
-        return .{ .allocator = allocator, .expr = expr };
-    }
-
-    pub fn deinit(self: *Parantheses) void {
-        defer self.allocator.destroy(self.expr);
-
-        Expression.deinit(&self.expr.*);
-    }
-};
-
 pub const Assignment = struct {
     allocator: Allocator,
     left: *Expression,
@@ -229,13 +178,6 @@ pub const Assignment = struct {
         return .{ .allocator = allocator, .left = leftPtr, .right = rightPtr };
     }
 
-    pub fn move(allocator: Allocator, other: Assignment) Assignment {
-        defer allocator.destroy(other.left);
-        defer allocator.destroy(other.right);
-
-        return init(allocator, other.left.*, other.right.*);
-    }
-
     pub fn deinit(self: Assignment) void {
         defer self.allocator.destroy(self.left);
         defer self.allocator.destroy(self.right);
@@ -244,6 +186,23 @@ pub const Assignment = struct {
         Expression.deinit(&self.right.*);
     }
 };
+
+fn parseFactor(allocator: Allocator, tokens: *TokenIterator) Expression {
+    const token = tokens.next() orelse unexpectedEOF();
+    return switch (token.type) {
+        .Constant => .{ .Constant = token.symbol },
+        .UnaryOp => .{ .Unary = .init(allocator, token.symbol, tokens) },
+        .Identifier => .{ .Var = token.symbol },
+        .OpenParenthesis => blk: {
+            defer {
+                const next = tokens.next() orelse unexpectedEOF();
+                if (next.type != .CloseParenthesis) unexpectedToken(token);
+            }
+            break :blk Expression.parse(allocator, tokens, 0);
+        },
+        else => unexpectedToken(token),
+    };
+}
 
 fn unexpectedEOF() noreturn {
     fatal("Unexpected end of file", .{});

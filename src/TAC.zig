@@ -86,19 +86,14 @@ pub const Function = struct {
 
     fn emitTac(self: *Function, expr: Parser.Expression) !Val {
         switch (expr) {
-            .Factor => |factor| switch (factor) {
-                .Constant => return .{ .Constant = factor.Constant },
-                .Var => return .{ .Var = factor.Var },
-                .Unary => |unary| {
-                    const unaryExpr: Parser.Expression = .{ .Factor = unary.operand.* };
-                    const src = try self.emitTac(unaryExpr);
-                    const dst: Val = .{ .Var = self.nextTag() };
-                    try self.body.append(self.allocator, .{ .Unary = .{ .operator = unary.operator, .src = src, .dst = dst } });
-                    return dst;
-                },
-                .Parantheses => |parantheses| {
-                    return self.emitTac(parantheses.expr.*);
-                },
+            .Constant => return .{ .Constant = expr.Constant },
+            .Var => return .{ .Var = expr.Var },
+            .Unary => |unary| {
+                const unaryExpr: Parser.Expression = unary.operand.*;
+                const src = try self.emitTac(unaryExpr);
+                const dst: Val = .{ .Var = self.nextTag() };
+                try self.body.append(self.allocator, .{ .Unary = .{ .operator = unary.operator, .src = src, .dst = dst } });
+                return dst;
             },
             .Binary => |binary| {
                 switch (binary.operator) {

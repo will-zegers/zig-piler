@@ -63,7 +63,7 @@ fn resolveStatement(self: Semantic, statement: *Statement) void {
 fn resolveExpression(self: Semantic, expr: *Expression) void {
     switch (expr.*) {
         .Assignment => |*assign| {
-            if (assign.left.* != .Factor or assign.left.*.Factor != .Var) {
+            if (assign.left.* != .Var) {
                 fatal("Expression is not an assignable lvalue", .{});
             }
 
@@ -74,19 +74,13 @@ fn resolveExpression(self: Semantic, expr: *Expression) void {
             self.resolveExpression(binary.left);
             self.resolveExpression(binary.right);
         },
-        .Factor => |*factor| self.resolveFactor(factor),
-    }
-}
-
-fn resolveFactor(self: Semantic, factor: *Factor) void {
-    switch (factor.*) {
-        .Var => {
-            if (self.variableMap.get(factor.Var)) |unique| {
-                factor.Var = unique;
-            } else fatal("Use of undeclared identifier '{s}'", .{factor.Var});
+        .Var => |*v| {
+            if (self.variableMap.get(v.*)) |unique| {
+                v.* = unique;
+            } else fatal("Use of undeclared identifier '{s}'", .{v.*});
         },
-        .Unary => |unary| self.resolveFactor(unary.operand),
-        else => {},
+        .Unary => |unary| self.resolveExpression(unary.operand),
+        .Constant => {},
     }
 }
 
