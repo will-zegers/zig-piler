@@ -92,10 +92,10 @@ pub fn tokenize(self: *Lexer, text: [:0]const u8) ![]Token {
                         continue;
                     },
                     '=' => { // division assignment operator
-                        token = .{ .type = .Assign, .symbol = "/=", .precedence = 30 };
+                        token = .{ .type = .BinaryOp, .symbol = "/=", .precedence = 30, .associativity = .Right };
                     },
                     else => { // division binary operator
-                        token = .{ .type = .BinaryOp, .symbol = "/", .precedence = 140 };
+                        token = .{ .type = .BinaryOp, .symbol = "/", .precedence = 140, .associativity = .Left };
                     },
                 }
             },
@@ -104,82 +104,82 @@ pub fn tokenize(self: *Lexer, text: [:0]const u8) ![]Token {
             },
             '!' => {
                 token = switch (remainingText[1]) {
-                    '=' => .{ .type = .BinaryOp, .symbol = "!=", .precedence = 100 }, // not equal
-                    else => .{ .type = .UnaryOp, .symbol = "!", .precedence = 150 }, // logical NOT
+                    '=' => .{ .type = .BinaryOp, .symbol = "!=", .precedence = 100, .associativity = .Left }, // not equal
+                    else => .{ .type = .UnaryOp, .symbol = "!", .precedence = 150, .associativity = .Left }, // logical NOT
                 };
             },
             '-' => { // negation or subtraction
                 token = switch (remainingText[1]) {
-                    '=' => .{ .type = .Assign, .symbol = "-=", .precedence = 30 }, // subtraction assignment
+                    '=' => .{ .type = .BinaryOp, .symbol = "-=", .precedence = 30, .associativity = .Right }, // subtraction assignment
                     else => switch (prevToken.type) {
-                        .Constant, .Identifier, .CloseParenthesis => .{ .type = .BinaryOp, .symbol = "-", .precedence = 130 }, // subtract
-                        else => .{ .type = .UnaryOp, .symbol = "-", .precedence = 150 }, // unary negation
+                        .Constant, .Identifier, .CloseParenthesis => .{ .type = .BinaryOp, .symbol = "-", .precedence = 130, .associativity = .Left }, // subtract
+                        else => .{ .type = .UnaryOp, .symbol = "-", .precedence = 150, .associativity = .Left }, // unary negation
                     },
                 };
             },
             '%' => { // modulo operator
                 token = switch (remainingText[1]) {
-                    '=' => .{ .type = .Assign, .symbol = "%=", .precedence = 30 }, // modulo assignment
-                    else => .{ .type = .BinaryOp, .symbol = "%", .precedence = 140 }, // modulo
+                    '=' => .{ .type = .BinaryOp, .symbol = "%=", .precedence = 30, .associativity = .Right }, // modulo assignment
+                    else => .{ .type = .BinaryOp, .symbol = "%", .precedence = 140, .associativity = .Left }, // modulo
                 };
             },
             '*' => { // multiplication operator
                 token = switch (remainingText[1]) {
-                    '=' => .{ .type = .Assign, .symbol = "*=", .precedence = 30 }, // multiplication assignment
-                    else => .{ .type = .BinaryOp, .symbol = "*", .precedence = 140 }, // multiplication
+                    '=' => .{ .type = .BinaryOp, .symbol = "*=", .precedence = 30, .associativity = .Right }, // multiplication assignment
+                    else => .{ .type = .BinaryOp, .symbol = "*", .precedence = 140, .associativity = .Left }, // multiplication
                 };
             },
             '+' => { // addition operator
                 token = switch (remainingText[1]) {
-                    '=' => .{ .type = .Assign, .symbol = "+=", .precedence = 30 }, // addition assignment
-                    else => .{ .type = .BinaryOp, .symbol = "+", .precedence = 130 }, // addition
+                    '=' => .{ .type = .BinaryOp, .symbol = "+=", .precedence = 30, .associativity = .Right }, // addition assignment
+                    else => .{ .type = .BinaryOp, .symbol = "+", .precedence = 130, .associativity = .Left }, // addition
                 };
             },
             '^' => { // XOR operator
                 token = switch (remainingText[1]) {
-                    '=' => .{ .type = .Assign, .symbol = "^=", .precedence = 30 }, // bitwise XOR assignment
-                    else => .{ .type = .BinaryOp, .symbol = "^", .precedence = 80 }, // bitwise XOR
+                    '=' => .{ .type = .BinaryOp, .symbol = "^=", .precedence = 30, .associativity = .Right }, // bitwise XOR assignment
+                    else => .{ .type = .BinaryOp, .symbol = "^", .precedence = 80, .associativity = .Left }, // bitwise XOR
                 };
             },
             '&' => {
                 token = switch (remainingText[1]) {
-                    '&' => .{ .type = .BinaryOp, .symbol = "&&", .precedence = 60 }, // logical AND
-                    '=' => .{ .type = .Assign, .symbol = "&=", .precedence = 30 }, // bitwise AND assignment
-                    else => .{ .type = .BinaryOp, .symbol = "&", .precedence = 90 }, // bitwise AND
+                    '=' => .{ .type = .BinaryOp, .symbol = "&=", .precedence = 30, .associativity = .Right }, // bitwise AND assignment
+                    '&' => .{ .type = .BinaryOp, .symbol = "&&", .precedence = 60, .associativity = .Left }, // logical AND
+                    else => .{ .type = .BinaryOp, .symbol = "&", .precedence = 90, .associativity = .Left }, // bitwise AND
                 };
             },
             '|' => {
                 token = switch (remainingText[1]) {
-                    '|' => .{ .type = .BinaryOp, .symbol = "||", .precedence = 50 }, // logical OR
-                    '=' => .{ .type = .Assign, .symbol = "|=", .precedence = 30 },
-                    else => .{ .type = .BinaryOp, .symbol = "|", .precedence = 70 }, // bitwise OR
+                    '=' => .{ .type = .BinaryOp, .symbol = "|=", .precedence = 30, .associativity = .Right }, // bitwise OR assignment
+                    '|' => .{ .type = .BinaryOp, .symbol = "||", .precedence = 50, .associativity = .Left }, // logical OR
+                    else => .{ .type = .BinaryOp, .symbol = "|", .precedence = 70, .associativity = .Left }, // bitwise OR
                 };
             },
             '=' => {
                 token = switch (remainingText[1]) {
-                    '=' => .{ .type = .BinaryOp, .symbol = "==", .precedence = 100 },
-                    else => .{ .type = .Assign, .symbol = "=", .precedence = 30 },
+                    '=' => .{ .type = .BinaryOp, .symbol = "==", .precedence = 100, .associativity = .Left },
+                    else => .{ .type = .BinaryOp, .symbol = "=", .precedence = 30, .associativity = .Right },
                 };
             },
             '<' => { // shift left, less-than
                 token = switch (remainingText[1]) {
                     '<' => switch (remainingText[2]) {
-                        '=' => .{ .type = .Assign, .symbol = "<<=", .precedence = 30 }, // bit-shift left assignment
-                        else => .{ .type = .BinaryOp, .symbol = "<<", .precedence = 120 }, // bit-shift left
+                        '=' => .{ .type = .BinaryOp, .symbol = "<<=", .precedence = 30, .associativity = .Right }, // bit-shift left assignment
+                        else => .{ .type = .BinaryOp, .symbol = "<<", .precedence = 120, .associativity = .Left }, // bit-shift left
                     },
-                    '=' => .{ .type = .BinaryOp, .symbol = "<=", .precedence = 110 }, // LTE
-                    else => .{ .type = .BinaryOp, .symbol = "<", .precedence = 110 }, // LT
+                    '=' => .{ .type = .BinaryOp, .symbol = "<=", .precedence = 110, .associativity = .Left }, // LTE
+                    else => .{ .type = .BinaryOp, .symbol = "<", .precedence = 110, .associativity = .Left }, // LT
                 };
             },
             '>' => { // shift right, greater-than
                 token = switch (remainingText[1]) {
                     //'>' => .{ .type = .BinaryOp, .symbol = ">>", .precedence = 120 }, // bit-shift right
                     '>' => switch (remainingText[2]) {
-                        '=' => .{ .type = .Assign, .symbol = ">>=", .precedence = 30 }, // bit-shift right assignment
-                        else => .{ .type = .BinaryOp, .symbol = ">>", .precedence = 120 }, // bit-shift right
+                        '=' => .{ .type = .BinaryOp, .symbol = ">>=", .precedence = 30, .associativity = .Right }, // bit-shift right assignment
+                        else => .{ .type = .BinaryOp, .symbol = ">>", .precedence = 120, .associativity = .Left }, // bit-shift right
                     },
-                    '=' => .{ .type = .BinaryOp, .symbol = ">=", .precedence = 110 }, // GTE
-                    else => .{ .type = .BinaryOp, .symbol = ">", .precedence = 110 }, // GT
+                    '=' => .{ .type = .BinaryOp, .symbol = ">=", .precedence = 110, .associativity = .Left }, // GTE
+                    else => .{ .type = .BinaryOp, .symbol = ">", .precedence = 110, .associativity = .Left }, // GT
                 };
             },
             else => {

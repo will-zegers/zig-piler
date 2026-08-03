@@ -30,8 +30,8 @@ pub const Expression = union(ExpressionTag) {
         var left = parseFactor(allocator, tokens);
 
         var nextToken = tokens.peek() orelse unexpectedEOF();
-        if (nextToken.precedence >= minPrecedence) {
-            while (nextToken.type == .Assign) {
+        while (nextToken.associativity != .None and nextToken.precedence >= minPrecedence) {
+            if (nextToken.associativity == .Right) {
                 const operator = tokens.next() orelse unexpectedEOF();
                 const right = parse(allocator, tokens, nextToken.precedence);
 
@@ -39,7 +39,7 @@ pub const Expression = union(ExpressionTag) {
                 left = .{ .Assignment = temp };
                 nextToken = tokens.peek() orelse unexpectedEOF();
             }
-            while (nextToken.type == .BinaryOp) {
+            if (nextToken.associativity == .Left) {
                 const operator = tokens.next() orelse unexpectedEOF();
                 const right = parse(allocator, tokens, nextToken.precedence + 1);
 

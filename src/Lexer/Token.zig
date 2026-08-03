@@ -5,9 +5,9 @@ const Token = @This();
 type: Type,
 symbol: []const u8,
 precedence: usize = 0,
+associativity: enum { Left, Right, None } = .None,
 
 pub const Type = enum {
-    Assign,
     BinaryOp,
     CloseBrace,
     CloseParenthesis,
