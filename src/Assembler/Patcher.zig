@@ -26,40 +26,37 @@ pub fn patchInstructions(allocator: Allocator, unpatched: *Instructions) Instruc
 
     for (unpatched.items) |instr| {
         if (Patcher.detectIllegal(instr)) |illegal| {
-            const patch = switch (illegal) {
-                .Ill_Binary_Operands => allocator.dupe(Instruction, &.{
+            patched.appendSlice(allocator, switch (illegal) {
+                .Ill_Binary_Operands => &.{
                     .{ .Mov = .{ .src = instr.Binary.src, .dst = .{ .Reg = .r10 } } },
                     .{ .Binary = .{ .operator = instr.Binary.operator, .src = .{ .Reg = .r10 }, .dst = instr.Binary.dst } },
-                }),
-                .Ill_Cmp_Imm_Dst => allocator.dupe(Instruction, &.{
+                },
+                .Ill_Cmp_Imm_Dst => &.{
                     .{ .Mov = .{ .src = instr.Cmp.arg2, .dst = .{ .Reg = .r11 } } },
                     .{ .Cmp = .{ .arg1 = instr.Cmp.arg1, .arg2 = .{ .Reg = .r11 } } },
-                }),
-                .Ill_Cmp_Operands => allocator.dupe(Instruction, &.{
+                },
+                .Ill_Cmp_Operands => &.{
                     .{ .Mov = .{ .src = instr.Cmp.arg1, .dst = .{ .Reg = .r10 } } },
                     .{ .Cmp = .{ .arg1 = .{ .Reg = .r10 }, .arg2 = instr.Cmp.arg2 } },
-                }),
-                .Ill_Mov_Operands => allocator.dupe(Instruction, &.{
+                },
+                .Ill_Mov_Operands => &.{
                     .{ .Mov = .{ .src = instr.Mov.src, .dst = .{ .Reg = .r10 } } },
                     .{ .Mov = .{ .src = .{ .Reg = .r10 }, .dst = instr.Mov.dst } },
-                }),
-                .Ill_Mul_Mem_Dst => allocator.dupe(Instruction, &.{
+                },
+                .Ill_Mul_Mem_Dst => &.{
                     .{ .Mov = .{ .src = instr.Binary.dst, .dst = .{ .Reg = .r11 } } },
                     .{ .Binary = .{ .operator = instr.Binary.operator, .src = instr.Binary.src, .dst = .{ .Reg = .r11 } } },
                     .{ .Mov = .{ .src = .{ .Reg = .r11 }, .dst = instr.Binary.dst } },
-                }),
-                .Ill_Idiv_Operand => allocator.dupe(Instruction, &.{
+                },
+                .Ill_Idiv_Operand => &.{
                     .{ .Mov = .{ .src = instr.Idiv.operand, .dst = .{ .Reg = .r10 } } },
                     .{ .Idiv = .{ .operand = .{ .Reg = .r10 } } },
-                }),
-                .Ill_Shift_Rcx => allocator.dupe(Instruction, &.{
+                },
+                .Ill_Shift_Rcx => &.{
                     .{ .Mov = .{ .src = instr.Binary.src, .dst = .{ .Reg = .rcx } } },
                     .{ .Binary = .{ .operator = instr.Binary.operator, .src = .{ .Reg = .rcx }, .dst = instr.Binary.dst } },
-                }),
-            } catch allocError();
-            defer allocator.free(patch);
-
-            patched.appendSlice(allocator, patch) catch allocError();
+                },
+            }) catch allocError();
         } else {
             patched.append(allocator, instr) catch allocError();
         }
