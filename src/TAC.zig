@@ -156,8 +156,15 @@ pub const Function = struct {
             },
             .Assignment => |assign| {
                 const result = try self.emitTac(assign.rhs.*);
-                const dst: Val = try self.emitTac(assign.lhs.*);
-                try self.body.append(self.allocator, .{ .Copy = .{ .src = result, .dst = dst } });
+                const dst = try self.emitTac(assign.lhs.*);
+
+                // If this is a compound assignment, we need to emit a binary instruction.
+                // Otherwise, for simple assignments we just emit a copy.
+                try self.body.append(self.allocator, if (assign.operator) |op|
+                    .{ .Binary = .{ .operator = op, .src1 = dst, .src2 = result, .dst = dst } }
+                else
+                    .{ .Copy = .{ .src = result, .dst = dst } });
+
                 return dst;
             },
         }

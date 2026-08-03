@@ -10,19 +10,19 @@ const identifier = []const u8;
 const int = []const u8;
 
 pub const ExpressionTag = enum {
-    Assignment,
-    Binary,
     Constant,
-    Unary,
     Var,
+    Unary,
+    Binary,
+    Assignment,
 };
 
 pub const Expression = union(ExpressionTag) {
-    Assignment: Assignment,
-    Binary: Binary,
     Constant: Constant,
-    Unary: Unary,
     Var: Var,
+    Unary: Unary,
+    Binary: Binary,
+    Assignment: Assignment,
 
     /// Evaluates expression from left-to-right for arithmetic, or right-to-left for assignment, operators.
     /// This is a recursive descent parser that uses the precedence climbing algorithm.
@@ -30,22 +30,25 @@ pub const Expression = union(ExpressionTag) {
         var left = parseFactor(allocator, tokens);
 
         var nextToken = tokens.peek() orelse unexpectedEOF();
-        while (nextToken.type == .BinaryOp and nextToken.precedence >= minPrecedence) {
-            if (mem.eql(u8, "=", nextToken.symbol)) {
-                tokens.skip(); // consome the assignment operator
+        if (nextToken.precedence >= minPrecedence) {
+            while (nextToken.type == .Assign) {
+                const operator = tokens.next() orelse unexpectedEOF();
                 const right = parse(allocator, tokens, nextToken.precedence);
 
-                const temp = Assignment.init(allocator, left, right);
+                const temp = Assignment.init(allocator, operator, left, right);
                 left = .{ .Assignment = temp };
-            } else {
+                nextToken = tokens.peek() orelse unexpectedEOF();
+            }
+            while (nextToken.type == .BinaryOp) {
                 const operator = tokens.next() orelse unexpectedEOF();
                 const right = parse(allocator, tokens, nextToken.precedence + 1);
 
                 const temp = Binary.init(allocator, operator, left, right);
                 left = .{ .Binary = temp };
+                nextToken = tokens.peek() orelse unexpectedEOF();
             }
-            nextToken = tokens.peek() orelse unexpectedEOF();
         }
+
         return left;
     }
 
@@ -96,27 +99,6 @@ pub const Unary = struct {
 };
 
 pub const Binary = struct {
-    const BinaryOpMap = std.StaticStringMap(Operator).initComptime(.{
-        .{ "+", .Add },
-        .{ "&", .AndB },
-        .{ "&&", .AndL },
-        .{ "/", .Div },
-        .{ "==", .Eq },
-        .{ ">", .Gt },
-        .{ ">=", .Gte },
-        .{ "<", .Lt },
-        .{ "<=", .Lte },
-        .{ "%", .Mod },
-        .{ "*", .Mul },
-        .{ "!=", .Neq },
-        .{ "|", .OrB },
-        .{ "||", .OrL },
-        .{ "<<", .SAL },
-        .{ ">>", .SAR },
-        .{ "-", .Sub },
-        .{ "^", .Xor },
-    });
-
     pub const Operator = enum {
         Add,
         AndB,
@@ -138,13 +120,35 @@ pub const Binary = struct {
         Xor,
     };
 
+    const OperatorMap = std.StaticStringMap(Operator).initComptime(.{
+        .{ "+", .Add },
+        .{ "&", .AndB },
+        .{ "&&", .AndL },
+        .{ "/", .Div },
+        .{ "==", .Eq },
+        .{ ">", .Gt },
+        .{ ">=", .Gte },
+        .{ "<", .Lt },
+        .{ "<=", .Lte },
+        .{ "%", .Mod },
+        .{ "*", .Mul },
+        .{ "!=", .Neq },
+        .{ "|", .OrB },
+        .{ "||", .OrL },
+        .{ "<<", .SAL },
+        .{ ">>", .SAR },
+        .{ "-", .Sub },
+        .{ "^", .Xor },
+    });
+
     allocator: Allocator,
     operator: Operator,
     left: *Expression,
     right: *Expression,
 
     pub fn init(allocator: Allocator, token: Token, left: Expression, right: Expression) Binary {
-        const operator: Operator = BinaryOpMap.get(token.symbol) orelse unexpectedToken(token);
+        const operator = OperatorMap.get(token.symbol) orelse unexpectedToken(token);
+
         const leftPtr = allocator.create(Expression) catch allocationError(Binary);
         leftPtr.* = left;
 
@@ -164,18 +168,37 @@ pub const Binary = struct {
 };
 
 pub const Assignment = struct {
+    const OperatorMap = std.StaticStringMap(Binary.Operator).initComptime(.{
+        .{ "+=", Binary.Operator.Add },
+        .{ "&=", Binary.Operator.AndB },
+        .{ "/=", Binary.Operator.Div },
+        .{ "%=", Binary.Operator.Mod },
+        .{ "*=", Binary.Operator.Mul },
+        .{ "|=", Binary.Operator.OrB },
+        .{ "<<=", Binary.Operator.SAL },
+        .{ ">>=", Binary.Operator.SAR },
+        .{ "-=", Binary.Operator.Sub },
+        .{ "^=", Binary.Operator.Xor },
+    });
+
     allocator: Allocator,
+    operator: ?Binary.Operator,
     lhs: *Expression,
     rhs: *Expression,
 
-    pub fn init(allocator: Allocator, lhs: Expression, rhs: Expression) Assignment {
+    pub fn init(allocator: Allocator, token: Token, lhs: Expression, rhs: Expression) Assignment {
+        const operator = if (mem.eql(u8, "=", token.symbol))
+            null
+        else
+            OperatorMap.get(token.symbol) orelse unexpectedToken(token);
+
         const lhsPtr = allocator.create(Expression) catch allocationError(Binary);
         lhsPtr.* = lhs;
 
         const rhsPtr = allocator.create(Expression) catch allocationError(Binary);
         rhsPtr.* = rhs;
 
-        return .{ .allocator = allocator, .lhs = lhsPtr, .rhs = rhsPtr };
+        return .{ .allocator = allocator, .operator = operator, .lhs = lhsPtr, .rhs = rhsPtr };
     }
 
     pub fn deinit(self: Assignment) void {
@@ -188,12 +211,11 @@ pub const Assignment = struct {
 
     pub fn parse(allocator: Allocator, tokens: *TokenIterator) ?Expression {
         const lhs = parseFactor(allocator, tokens);
-
         const nextToken = tokens.peek() orelse unexpectedEOF();
         return if (mem.eql(u8, "=", nextToken.symbol)) blk: {
-            tokens.skip();
+            const operator = tokens.next() orelse unexpectedEOF();
             const rhs = Expression.parse(allocator, tokens, 0);
-            break :blk .{ .Assignment = .init(allocator, lhs, rhs) };
+            break :blk .{ .Assignment = .init(allocator, operator, lhs, rhs) };
         } else null;
     }
 };
