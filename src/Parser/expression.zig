@@ -1,4 +1,5 @@
 const std = @import("std");
+const fmt = std.fmt;
 const mem = std.mem;
 const fatal = std.process.fatal;
 const Allocator = std.mem.Allocator;
@@ -31,22 +32,26 @@ pub const Expression = union(ExpressionTag) {
 
         var nextToken = tokens.peek() orelse unexpectedEOF();
         while (nextToken.associativity != .None and nextToken.precedence >= minPrecedence) {
+            const operator = tokens.next() orelse unexpectedEOF();
             if (nextToken.associativity == .Right) {
-                const operator = tokens.next() orelse unexpectedEOF();
                 const right = parse(allocator, tokens, nextToken.precedence);
-
                 const temp = Assignment.init(allocator, operator, left, right);
                 left = .{ .Assignment = temp };
-                nextToken = tokens.peek() orelse unexpectedEOF();
+            } else if (nextToken.associativity == .Left) {
+                left = switch (nextToken.type) {
+                    .UnaryOp => blk: {
+                        const temp = Unary.initPost(allocator, operator.symbol, left);
+                        break :blk .{ .Unary = temp };
+                    },
+                    .BinaryOp => blk: {
+                        const right = parse(allocator, tokens, nextToken.precedence + 1);
+                        const temp = Binary.init(allocator, operator, left, right);
+                        break :blk .{ .Binary = temp };
+                    },
+                    else => unreachable,
+                };
             }
-            if (nextToken.associativity == .Left) {
-                const operator = tokens.next() orelse unexpectedEOF();
-                const right = parse(allocator, tokens, nextToken.precedence + 1);
-
-                const temp = Binary.init(allocator, operator, left, right);
-                left = .{ .Binary = temp };
-                nextToken = tokens.peek() orelse unexpectedEOF();
-            }
+            nextToken = tokens.peek() orelse unexpectedEOF();
         }
 
         return left;
@@ -71,24 +76,37 @@ pub const Unary = struct {
         Complement,
         Negate,
         Not,
+        Inc,
+        Dec,
     };
+
+    const OperatorMap = std.StaticStringMap(Operator).initComptime(.{
+        .{ "~", .Complement },
+        .{ "-", .Negate },
+        .{ "!", .Not },
+        .{ "++", .Inc },
+        .{ "--", .Dec },
+    });
 
     allocator: Allocator,
     operator: Operator,
     operand: *Expression,
+    type: enum { Pre, Post },
 
-    pub fn init(allocator: Allocator, symbol: []const u8, tokens: *TokenIterator) Unary {
+    pub fn initPost(allocator: Allocator, symbol: []const u8, right: Expression) Unary {
         const operand = allocator.create(Expression) catch allocationError(Unary);
-        operand.* = parseFactor(allocator, tokens);
+        operand.* = right;
 
-        const operator: Operator = switch (symbol[0]) {
-            '~' => .Complement,
-            '-' => .Negate,
-            '!' => .Not,
-            else => unreachable,
-        };
+        const operator: Operator = OperatorMap.get(symbol) orelse unreachable;
+        return .{ .allocator = allocator, .operator = operator, .operand = operand, .type = .Post };
+    }
 
-        return .{ .allocator = allocator, .operator = operator, .operand = operand };
+    pub fn initPre(allocator: Allocator, symbol: []const u8, left: Expression) Unary {
+        const operand = allocator.create(Expression) catch allocationError(Unary);
+        operand.* = left;
+
+        const operator: Operator = OperatorMap.get(symbol) orelse unreachable;
+        return .{ .allocator = allocator, .operator = operator, .operand = operand, .type = .Pre };
     }
 
     pub fn deinit(self: *Unary) void {
@@ -211,6 +229,7 @@ pub const Assignment = struct {
 
     pub fn parse(allocator: Allocator, tokens: *TokenIterator) ?Expression {
         const lhs = parseFactor(allocator, tokens);
+        if (lhs != .Var) fatal("Expression type {any} is not an assignable lvalue", .{lhs});
         const nextToken = tokens.peek() orelse unexpectedEOF();
         return if (mem.eql(u8, "=", nextToken.symbol)) blk: {
             const operator = tokens.next() orelse unexpectedEOF();
@@ -222,19 +241,30 @@ pub const Assignment = struct {
 
 fn parseFactor(allocator: Allocator, tokens: *TokenIterator) Expression {
     const token = tokens.next() orelse unexpectedEOF();
-    return switch (token.type) {
+    const expr: Expression = switch (token.type) {
         .Constant => .{ .Constant = token.symbol },
-        .UnaryOp => .{ .Unary = .init(allocator, token.symbol, tokens) },
+        .UnaryOp => blk: {
+            const right = parseFactor(allocator, tokens);
+            break :blk .{ .Unary = .initPre(allocator, token.symbol, right) };
+        },
         .Identifier => .{ .Var = token.symbol },
         .OpenParenthesis => blk: {
             defer {
                 const next = tokens.next() orelse unexpectedEOF();
                 if (next.type != .CloseParenthesis) unexpectedToken(token);
             }
-            break :blk Expression.parse(allocator, tokens, 0);
+            const expr = Expression.parse(allocator, tokens, 0);
+            break :blk expr;
         },
         else => unexpectedToken(token),
     };
+
+    const nextToken = tokens.peek() orelse unexpectedEOF();
+    if (nextToken.type == .UnaryOp) {
+        return .{ .Unary = .initPost(allocator, tokens.next().?.symbol, expr) };
+    }
+
+    return expr;
 }
 
 fn unexpectedEOF() noreturn {

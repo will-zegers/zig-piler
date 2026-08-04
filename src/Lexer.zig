@@ -100,17 +100,21 @@ pub fn tokenize(self: *Lexer, text: [:0]const u8) ![]Token {
                 }
             },
             '~' => { // bitwise NOT operator (complement)
-                token = .{ .type = .UnaryOp, .symbol = "~" }; //
+                token = .{ .type = .UnaryOp, .symbol = "~", .associativity = .Right }; //
             },
             '!' => {
                 token = switch (remainingText[1]) {
                     '=' => .{ .type = .BinaryOp, .symbol = "!=", .precedence = 100, .associativity = .Left }, // not equal
-                    else => .{ .type = .UnaryOp, .symbol = "!", .precedence = 150, .associativity = .Left }, // logical NOT
+                    else => .{ .type = .UnaryOp, .symbol = "!", .precedence = 150, .associativity = .Right }, // logical NOT
                 };
             },
             '-' => { // negation or subtraction
                 token = switch (remainingText[1]) {
                     '=' => .{ .type = .BinaryOp, .symbol = "-=", .precedence = 30, .associativity = .Right }, // subtraction assignment
+                    '-' => switch (prevToken.type) {
+                        .Identifier, .CloseParenthesis => .{ .type = .UnaryOp, .symbol = "--", .precedence = 160, .associativity = .Left },
+                        else => .{ .type = .UnaryOp, .symbol = "--", .precedence = 150, .associativity = .Right },
+                    },
                     else => switch (prevToken.type) {
                         .Constant, .Identifier, .CloseParenthesis => .{ .type = .BinaryOp, .symbol = "-", .precedence = 130, .associativity = .Left }, // subtract
                         else => .{ .type = .UnaryOp, .symbol = "-", .precedence = 150, .associativity = .Left }, // unary negation
@@ -132,6 +136,10 @@ pub fn tokenize(self: *Lexer, text: [:0]const u8) ![]Token {
             '+' => { // addition operator
                 token = switch (remainingText[1]) {
                     '=' => .{ .type = .BinaryOp, .symbol = "+=", .precedence = 30, .associativity = .Right }, // addition assignment
+                    '+' => switch (prevToken.type) {
+                        .Identifier, .CloseParenthesis => .{ .type = .UnaryOp, .symbol = "++", .precedence = 160, .associativity = .Left },
+                        else => .{ .type = .UnaryOp, .symbol = "++", .precedence = 150, .associativity = .Right },
+                    },
                     else => .{ .type = .BinaryOp, .symbol = "+", .precedence = 130, .associativity = .Left }, // addition
                 };
             },

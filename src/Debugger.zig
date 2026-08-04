@@ -238,13 +238,18 @@ pub fn printAssemblerAST(ast: Assembler.AST) void {
                 std.debug.print("condition={s}, target={s}", .{ @tagName(jmp.condition), jmp.target });
             },
             .SetCC => |set| {
-                std.debug.print("condition={s}, target={s}", .{ @tagName(set.condition), @tagName(set.operand) });
+                switch (set.operand) {
+                    .Imm => std.debug.print("condition={s}, target=Imm({d})", .{ @tagName(set.condition), set.operand.Stack }),
+                    .Pseudo => std.debug.print("condition={s}, target=Pseudo({d})", .{ @tagName(set.condition), set.operand.Stack }),
+                    .Reg => std.debug.print("condition={s}, target=Reg({d})", .{ @tagName(set.condition), set.operand.Stack }),
+                    .Stack => std.debug.print("condition={s}, target=Stack({d})", .{ @tagName(set.condition), set.operand.Stack }),
+                }
             },
             .Label => |label| {
                 std.debug.print("id={s}", .{label.id});
             },
         }
-        print("\n", .{});
+        print(")\n", .{});
     }
 
     print("    ]\n", .{});

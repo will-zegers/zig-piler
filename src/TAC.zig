@@ -96,7 +96,23 @@ pub const Function = struct {
                 const unaryExpr: Parser.Expression = unary.operand.*;
                 const src = try self.emitTac(unaryExpr);
                 const dst: Val = .{ .Var = self.nextTag() };
-                try self.body.append(self.allocator, .{ .Unary = .{ .operator = unary.operator, .src = src, .dst = dst } });
+                switch (unary.operator) {
+                    .Inc, .Dec => {
+                        self.body.appendSlice(self.allocator, switch (unary.type) {
+                            .Pre => &.{
+                                .{ .Unary = .{ .operator = unary.operator, .src = src, .dst = src } },
+                                .{ .Copy = .{ .src = src, .dst = dst } },
+                            },
+                            .Post => &.{
+                                .{ .Copy = .{ .src = src, .dst = dst } },
+                                .{ .Unary = .{ .operator = unary.operator, .src = src, .dst = src } },
+                            },
+                        }) catch allocError();
+                    },
+                    else => {
+                        try self.body.append(self.allocator, .{ .Unary = .{ .operator = unary.operator, .src = src, .dst = dst } });
+                    },
+                }
                 return dst;
             },
             .Binary => |binary| {

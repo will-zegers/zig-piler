@@ -77,17 +77,20 @@ pub const Unary = struct {
             .Var => |pseudo| .{ .Pseudo = pseudo },
         };
         const dst: Operand = .{ .Pseudo = unary.dst.Var };
-        return switch (unary.operator) {
-            .Not => allocator.dupe(Instruction, &.{
+        return allocator.dupe(Instruction, switch (unary.operator) {
+            .Not => &.{
                 .{ .Cmp = .{ .arg1 = .{ .Imm = "0" }, .arg2 = src } },
                 .{ .Mov = .{ .src = .{ .Imm = "0" }, .dst = dst } },
                 .{ .SetCC = .{ .condition = .E, .operand = dst } },
-            }),
-            else => allocator.dupe(Instruction, &.{
+            },
+            .Negate, .Complement => &.{
                 .{ .Mov = .{ .src = src, .dst = .{ .Pseudo = unary.dst.Var } } },
                 .{ .Unary = .{ .operator = unary.operator, .operand = dst } },
-            }),
-        } catch allocError();
+            },
+            .Dec, .Inc => &.{
+                .{ .Unary = .{ .operator = unary.operator, .operand = src } },
+            },
+        }) catch allocError();
     }
 };
 

@@ -82,7 +82,17 @@ fn resolveExpression(self: Semantic, expr: *Expression) void {
                 v.* = unique;
             } else fatal("Use of undeclared identifier '{s}'", .{v.*});
         },
-        .Unary => |unary| self.resolveExpression(unary.operand),
+        .Unary => |unary| {
+            switch (unary.operator) {
+                .Inc, .Dec => {
+                    if (unary.operand.* != .Var) {
+                        fatal("Expression is not an assignable lvalue", .{});
+                    }
+                },
+                else => {},
+            }
+            self.resolveExpression(unary.operand);
+        },
         .Constant => {},
     }
 }
