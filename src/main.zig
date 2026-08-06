@@ -71,20 +71,34 @@ pub fn main(init: std.process.Init) !void {
     defer init.gpa.free(textZ);
     init.gpa.free(text);
 
+    var list: std.ArrayList([]const u8) = .empty;
+
+    var it = std.mem.splitScalar(u8, textZ, '\n');
+    while (it.next()) |line| {
+        try list.append(init.gpa, line);
+    }
+    const lines = try list.toOwnedSlice(init.gpa);
+    defer init.gpa.free(lines);
+
     if (all or lex or parse or tacky or codegen) {
         std.log.info("Running lexer...", .{});
         var lexer = try Lexer.init(init.gpa);
         defer lexer.deinit();
 
-        const tokens = try lexer.tokenize(textZ);
+        var tokens = try lexer.tokenize(textZ);
         if (lex and debug) {
             std.debug.print("-------tokens-------\n", .{});
-            Debugger.printLexerTokens(tokens);
+            Debugger.printLexerTokens(&tokens);
+            tokens.reset();
         }
 
         if (all or parse or tacky or codegen) {
             std.log.info("Running parser...", .{});
-            var ast = Parser.parse(init.gpa, tokens);
+            var ast = Parser.parse(init.gpa, &tokens) catch {
+                const index = tokens.lineIndex;
+                std.log.err(" {d} | {s}", .{ index, lines[index] });
+                std.process.exit(1);
+            };
             defer ast.deinit();
 
             if (parse and debug) {
@@ -95,6 +109,19 @@ pub fn main(init: std.process.Init) !void {
             var semantic = Semantic.init(init.gpa);
             defer semantic.deinit();
             semantic.resolve(&ast);
+            if (semantic.errors.capacity > 0) {
+                for (semantic.errors.items) |err| {
+                    switch (err.type) {
+                        .NotAssignable => std.log.err("Expression is not an assignable lvalue", .{}),
+                        .Redeclaration => std.log.err("Redeclaration of '{s}'", .{err.name.?}),
+                        .UndeclaredIdentifier => std.log.err("Use of undeclared identifier '{s}'", .{err.name.?}),
+                    }
+                    const index = err.lineIndex;
+                    std.log.err(" {d} | {s}", .{ index, lines[index] });
+                }
+
+                std.process.exit(1);
+            }
 
             if (all or tacky or codegen) {
                 std.log.info("Generating Tacky...", .{});

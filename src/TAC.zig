@@ -91,7 +91,7 @@ pub const Function = struct {
     fn emitTac(self: *Function, expr: Parser.Expression) !Val {
         switch (expr) {
             .Constant => return .{ .Constant = expr.Constant },
-            .Var => return .{ .Var = expr.Var },
+            .Var => return .{ .Var = expr.Var.name },
             .Unary => |unary| {
                 const unaryExpr: Parser.Expression = unary.operand.*;
                 const src = try self.emitTac(unaryExpr);
@@ -200,5 +200,6 @@ pub const Function = struct {
 };
 
 fn allocError() noreturn {
-    @panic("Memory allocation error");
+    std.log.err("Memory allocation error", .{});
+    std.process.exit(1);
 }

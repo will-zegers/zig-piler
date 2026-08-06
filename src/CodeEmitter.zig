@@ -173,7 +173,7 @@ pub fn init(allocator: Allocator, ast: Assembler.AST) !CodeEmitter {
                 ;
                 break :code std.fmt.allocPrint(allocator, template, .{localPrefix, label.id});
             },
-        } catch @panic("Out of memory");
+        } catch allocError();
         instructions.appendAssumeCapacity(code);
     }
 
@@ -192,7 +192,7 @@ fn getOperandString(allocator: Allocator, operand: Assembler.Operand) []const u8
         .Reg => |op|   std.fmt.allocPrint(allocator, "{c}{s}", .{'%', @tagName(op)}),
         .Stack => |op| std.fmt.allocPrint(allocator, "{d}{s}", .{op, "(%rbp)"}),
         .Pseudo => unreachable,
-    } catch @panic("Out of memory");
+    } catch allocError();
 }
 
 pub fn writeToFile(self: CodeEmitter, io: Io, outputPath: []const u8) !void {
@@ -210,4 +210,9 @@ pub fn deinit(self: *CodeEmitter) void {
         self.allocator.free(instruction);
     }
     self.instructions.deinit(self.allocator);
+}
+
+fn allocError() noreturn {
+    std.log.err("Memory allocation error", .{});
+    std.process.exit(1);
 }

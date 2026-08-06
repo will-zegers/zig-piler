@@ -5,9 +5,10 @@ const Parser = @import("Parser.zig");
 const Assembler = @import("Assembler.zig");
 const TAC = @import("TAC.zig");
 const Token = @import("Lexer.zig").Token;
+const TokenIterator = Token.Iterator;
 
-pub fn printLexerTokens(tokens: []Token) void {
-    for (tokens) |token| {
+pub fn printLexerTokens(tokens: *TokenIterator) void {
+    while (tokens.next()) |token| {
         std.debug.print("{any}: {s}\n", .{ token.type, token.symbol });
     }
 }
@@ -46,7 +47,7 @@ pub fn printParserAST(ast: Parser.AST) void {
 }
 
 fn printExpression(expr: Parser.Expression, indent: usize) void {
-    const indentStr = std.heap.page_allocator.alloc(u8, indent) catch @panic("Out of memory");
+    const indentStr = std.heap.page_allocator.alloc(u8, indent) catch allocError();
     for (indentStr, 0..) |_, i| {
         indentStr[i] = ' ';
     }
@@ -55,7 +56,7 @@ fn printExpression(expr: Parser.Expression, indent: usize) void {
     print("{s}{s} (", .{ indentStr, @tagName(expr) });
     switch (expr) {
         .Constant => print("{s})\n", .{expr.Constant}),
-        .Var => print("{s})\n", .{expr.Var}),
+        .Var => print("{s})\n", .{expr.Var.name}),
         .Unary => |unary| {
             print("\n", .{});
             print("\n{s}  operation={s}", .{ indentStr, @tagName(unary.operator) });
@@ -255,4 +256,9 @@ pub fn printAssemblerAST(ast: Assembler.AST) void {
     print("    ]\n", .{});
     print("  )\n", .{});
     print(")\n", .{});
+}
+
+fn allocError() noreturn {
+    std.log.err("Memory allocation error", .{});
+    std.process.exit(1);
 }

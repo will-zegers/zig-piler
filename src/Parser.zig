@@ -11,6 +11,7 @@ pub const Unary = expression.Unary;
 pub const Factor = expression.Factor;
 pub const Constant = expression.Constant;
 pub const Assignment = expression.Assignment;
+pub const ParsingError = expression.ParsingError;
 
 const Semantic = @import("Semantic.zig");
 const Token = @import("Lexer.zig").Token;
@@ -23,11 +24,9 @@ pub const AST = Program;
 const identifier = []const u8;
 const int = []const u8;
 
-pub fn parse(allocator: Allocator, tokens: []Token) AST {
-    var tokenIter = Token.iterate(tokens);
-
-    const ast = Program.init(allocator, &tokenIter);
-    if (tokenIter.peek()) |token| {
+pub fn parse(allocator: Allocator, tokens: *TokenIterator) ParsingError!AST {
+    const ast = try Program.init(allocator, tokens);
+    if (tokens.peek()) |token| {
         fatal("Unexpected token(s) at end of file: {s}", .{token.symbol});
     }
 
@@ -38,11 +37,12 @@ pub const Program = struct {
     allocator: Allocator,
     function: Function,
 
-    pub fn init(allocator: Allocator, tokens: *TokenIterator) Program {
-        return .{ .allocator = allocator, .function = .init(allocator, tokens) };
+    pub fn init(allocator: Allocator, tokens: *TokenIterator) ParsingError!Program {
+        return .{ .allocator = allocator, .function = try .init(allocator, tokens) };
     }
 
     pub fn deinit(self: *Program) void {
+        std.debug.print("deinit called\n", .{});
         self.function.deinit();
     }
 };
@@ -52,28 +52,28 @@ pub const Function = struct {
     name: identifier,
     body: std.ArrayList(BlockItem),
 
-    pub fn init(allocator: Allocator, tokens: *TokenIterator) Function {
+    pub fn init(allocator: Allocator, tokens: *TokenIterator) ParsingError!Function {
         var body: ArrayList(BlockItem) = .empty;
 
-        expect(.Int, tokens.next());
+        try expect(.Int, tokens.next());
 
-        const name = tokens.next();
-        expect(.Identifier, name);
+        const token = tokens.next() orelse unexpectedEOF();
+        try expect(.Identifier, token);
 
-        expect(.OpenParenthesis, tokens.next());
-        expect(.Void, tokens.next());
-        expect(.CloseParenthesis, tokens.next());
+        try expect(.OpenParenthesis, tokens.next());
+        try expect(.Void, tokens.next());
+        try expect(.CloseParenthesis, tokens.next());
 
-        expect(.OpenBrace, tokens.next());
+        try expect(.OpenBrace, tokens.next());
         while (tokens.peek()) |nextToken| {
             if (.CloseBrace == nextToken.type) break;
 
-            const blockItem = BlockItem.parse(allocator, tokens);
-            body.append(allocator, blockItem) catch @panic("OOM");
+            const blockItem = try BlockItem.parse(allocator, tokens);
+            body.append(allocator, blockItem) catch allocError();
         }
-        expect(.CloseBrace, tokens.next());
+        try expect(.CloseBrace, tokens.next());
 
-        return .{ .allocator = allocator, .name = name.?.symbol, .body = body };
+        return .{ .allocator = allocator, .name = token.symbol, .body = body };
     }
 
     pub fn deinit(self: *Function) void {
@@ -103,12 +103,12 @@ pub const BlockItem = union(BlockItemTag) {
     Declaration: Declaration,
     Statement: Statement,
 
-    pub fn parse(allocator: Allocator, tokens: *TokenIterator) BlockItem {
+    pub fn parse(allocator: Allocator, tokens: *TokenIterator) ParsingError!BlockItem {
         const nextToken = tokens.peek() orelse unexpectedEOF();
-        if (.Int == nextToken.type) {
-            return .{ .Declaration = .init(allocator, tokens) };
-        }
-        return .{ .Statement = .parse(allocator, tokens) };
+        return if (.Int == nextToken.type)
+            .{ .Declaration = try .init(allocator, tokens) }
+        else
+            .{ .Statement = try .parse(allocator, tokens) };
     }
 };
 
@@ -118,12 +118,12 @@ pub const Statement = union(StatementTag) {
     Return: Return,
     Null: void, // needed to represent empty semicolon statements (for later?)
 
-    pub fn parse(allocator: Allocator, tokens: *TokenIterator) Statement {
+    pub fn parse(allocator: Allocator, tokens: *TokenIterator) ParsingError!Statement {
         const nextToken = tokens.peek() orelse unexpectedEOF();
         return switch (nextToken.type) {
-            .Return => .{ .Return = .init(allocator, tokens) },
+            .Return => .{ .Return = try .init(allocator, tokens) },
             .Semicolon => .{ .Null = tokens.skip() },
-            else => .{ .Expression = .parse(allocator, tokens, 0) },
+            else => .{ .Expression = try .parse(allocator, tokens, 0) },
         };
     }
 };
@@ -131,16 +131,17 @@ pub const Statement = union(StatementTag) {
 pub const Declaration = struct {
     name: identifier,
     initialize: ?Expression,
+    lineIndex: usize,
 
-    pub fn init(allocator: Allocator, tokens: *TokenIterator) Declaration {
-        expect(.Int, tokens.next());
-        const name = tokens.peek() orelse unexpectedEOF();
-        expect(.Identifier, name);
+    pub fn init(allocator: Allocator, tokens: *TokenIterator) ParsingError!Declaration {
+        try expect(.Int, tokens.next());
+        const token = tokens.peek() orelse unexpectedEOF();
+        try expect(.Identifier, token);
 
-        const initialize = Assignment.parse(allocator, tokens);
-        expect(.Semicolon, tokens.next());
+        const initialize = try Assignment.parse(allocator, tokens);
+        try expect(.Semicolon, tokens.next());
 
-        return .{ .name = name.symbol, .initialize = initialize };
+        return .{ .name = token.symbol, .initialize = initialize, .lineIndex = token.lineIndex };
     }
 };
 
@@ -148,10 +149,10 @@ pub const Return = struct {
     allocator: Allocator,
     expr: Expression,
 
-    pub fn init(allocator: Allocator, tokens: *TokenIterator) Return {
-        expect(.Return, tokens.next());
-        const expr = Expression.parse(allocator, tokens, 0);
-        expect(.Semicolon, tokens.next());
+    pub fn init(allocator: Allocator, tokens: *TokenIterator) ParsingError!Return {
+        try expect(.Return, tokens.next());
+        const expr = try Expression.parse(allocator, tokens, 0);
+        try expect(.Semicolon, tokens.next());
 
         return .{ .allocator = allocator, .expr = expr };
     }
@@ -161,16 +162,24 @@ pub const Return = struct {
     }
 };
 
-fn expect(expected: Token.Type, token: ?Token) void {
+fn expect(expected: Token.Type, token: ?Token) ParsingError!void {
     if (token == null) {
-        fatal("Unexpected end of file", .{});
+        std.log.err("Unexpected end of file", .{});
+        return ParsingError.Syntax;
     }
 
     if (expected != token.?.type) {
-        fatal("Got unexpected token {s} of type {any}; expected type {any}", .{ token.?.symbol, token.?.type, expected });
+        std.log.err("Got unexpected {any} token '{s}'. Expected type {any}", .{ token.?.type, token.?.symbol, expected });
+        return ParsingError.Syntax;
     }
 }
 
 fn unexpectedEOF() noreturn {
-    fatal("Unexpected end of file", .{});
+    std.log.err("Unexpected end of file", .{});
+    std.process.exit(1);
+}
+
+fn allocError() noreturn {
+    std.log.err("Memory allocation error", .{});
+    std.process.exit(1);
 }

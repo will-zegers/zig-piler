@@ -19,6 +19,17 @@ const AST = Parser.AST;
 sCounter: usize = 0,
 allocator: Allocator,
 variableMap: VariableMap,
+errors: std.ArrayList(SemanticError) = .empty,
+
+const SemanticError = struct {
+    lineIndex: usize,
+    type: enum {
+        Redeclaration,
+        UndeclaredIdentifier,
+        NotAssignable,
+    },
+    name: ?[]const u8 = null,
+};
 
 pub fn init(allocator: Allocator) Semantic {
     return .{ .allocator = allocator, .variableMap = .init(allocator) };
@@ -45,17 +56,17 @@ pub fn resolve(self: *Semantic, ast: *AST) void {
 fn resolveDeclaration(self: *Semantic, decl: *Declaration) void {
     const name = decl.name;
     if (self.variableMap.contains(name)) {
-        fatal("Redeclaration of '{s}'", .{name});
+        self.errors.append(self.allocator, .{ .lineIndex = decl.lineIndex, .type = .Redeclaration, .name = name }) catch allocError();
     }
     const uniqueName = self.generateUnique(name);
-    self.variableMap.put(name, uniqueName) catch @panic("Out of memory");
+    self.variableMap.put(name, uniqueName) catch allocError();
 
     if (decl.initialize) |*initExpr| {
         self.resolveExpression(initExpr);
     }
 }
 
-fn resolveStatement(self: Semantic, statement: *Statement) void {
+fn resolveStatement(self: *Semantic, statement: *Statement) void {
     switch (statement.*) {
         .Return => |*ret| self.resolveExpression(&ret.expr),
         .Expression => |*expr| self.resolveExpression(expr),
@@ -63,11 +74,11 @@ fn resolveStatement(self: Semantic, statement: *Statement) void {
     }
 }
 
-fn resolveExpression(self: Semantic, expr: *Expression) void {
+fn resolveExpression(self: *Semantic, expr: *Expression) void {
     switch (expr.*) {
         .Assignment => |*assign| {
             if (assign.lhs.* != .Var) {
-                fatal("Expression is not an assignable lvalue", .{});
+                self.errors.append(self.allocator, .{ .lineIndex = assign.lineIndex, .type = .NotAssignable }) catch allocError();
             }
 
             self.resolveExpression(assign.lhs);
@@ -78,15 +89,17 @@ fn resolveExpression(self: Semantic, expr: *Expression) void {
             self.resolveExpression(binary.right);
         },
         .Var => |*v| {
-            if (self.variableMap.get(v.*)) |unique| {
-                v.* = unique;
-            } else fatal("Use of undeclared identifier '{s}'", .{v.*});
+            if (self.variableMap.get(v.*.name)) |unique| {
+                v.*.name = unique;
+            } else {
+                self.errors.append(self.allocator, .{ .lineIndex = v.*.lineIndex, .type = .UndeclaredIdentifier, .name = v.*.name }) catch allocError();
+            }
         },
         .Unary => |unary| {
             switch (unary.operator) {
                 .Inc, .Dec => {
                     if (unary.operand.* != .Var) {
-                        fatal("Expression is not an assignable lvalue", .{});
+                        self.errors.append(self.allocator, .{ .lineIndex = unary.lineIndex, .type = .NotAssignable }) catch allocError();
                     }
                 },
                 else => {},
@@ -99,5 +112,10 @@ fn resolveExpression(self: Semantic, expr: *Expression) void {
 
 fn generateUnique(self: *Semantic, name: []const u8) []u8 {
     defer self.sCounter += 1;
-    return std.fmt.allocPrint(self.allocator, "{s}.{d}", .{ name, self.sCounter }) catch @panic("Out of memory");
+    return std.fmt.allocPrint(self.allocator, "{s}.{d}", .{ name, self.sCounter }) catch allocError();
+}
+
+fn allocError() noreturn {
+    std.log.err("Memory allocation error", .{});
+    std.process.exit(1);
 }

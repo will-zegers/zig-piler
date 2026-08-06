@@ -10,6 +10,13 @@ const TokenIterator = Token.Iterator;
 const identifier = []const u8;
 const int = []const u8;
 
+pub const ParsingError = error{
+    EOF,
+    Lvalue,
+    Syntax,
+    Token,
+};
+
 pub const ExpressionTag = enum {
     Constant,
     Var,
@@ -27,31 +34,31 @@ pub const Expression = union(ExpressionTag) {
 
     /// Evaluates expression from left-to-right for arithmetic, or right-to-left for assignment, operators.
     /// This is a recursive descent parser that uses the precedence climbing algorithm.
-    pub fn parse(allocator: Allocator, tokens: *TokenIterator, minPrecedence: usize) Expression {
-        var left = parseFactor(allocator, tokens);
+    pub fn parse(allocator: Allocator, tokens: *TokenIterator, minPrecedence: usize) ParsingError!Expression {
+        var left = try parseFactor(allocator, tokens);
 
-        var nextToken = tokens.peek() orelse unexpectedEOF();
+        var nextToken = tokens.peek() orelse return unexpectedEOF();
         while (nextToken.associativity != .None and nextToken.precedence >= minPrecedence) {
-            const operator = tokens.next() orelse unexpectedEOF();
-            if (nextToken.associativity == .Right) {
-                const right = parse(allocator, tokens, nextToken.precedence);
-                const temp = Assignment.init(allocator, operator, left, right);
+            const operator = tokens.next() orelse return unexpectedEOF();
+            if (nextToken.associativity == .RightToLeft) {
+                const right = try parse(allocator, tokens, nextToken.precedence);
+                const temp = try Assignment.init(allocator, operator, left, right);
                 left = .{ .Assignment = temp };
-            } else if (nextToken.associativity == .Left) {
+            } else {
                 left = switch (nextToken.type) {
                     .UnaryOp => blk: {
-                        const temp = Unary.initPost(allocator, operator.symbol, left);
+                        const temp = Unary.initPost(allocator, operator, left);
                         break :blk .{ .Unary = temp };
                     },
                     .BinaryOp => blk: {
-                        const right = parse(allocator, tokens, nextToken.precedence + 1);
-                        const temp = Binary.init(allocator, operator, left, right);
+                        const right = try parse(allocator, tokens, nextToken.precedence + 1);
+                        const temp = try Binary.init(allocator, operator, left, right);
                         break :blk .{ .Binary = temp };
                     },
                     else => unreachable,
                 };
             }
-            nextToken = tokens.peek() orelse unexpectedEOF();
+            nextToken = tokens.peek() orelse return unexpectedEOF();
         }
 
         return left;
@@ -69,7 +76,10 @@ pub const Expression = union(ExpressionTag) {
 
 pub const Constant = int;
 
-pub const Var = identifier;
+pub const Var = struct {
+    name: identifier,
+    lineIndex: usize,
+};
 
 pub const Unary = struct {
     pub const Operator = enum {
@@ -92,21 +102,22 @@ pub const Unary = struct {
     operator: Operator,
     operand: *Expression,
     type: enum { Pre, Post },
+    lineIndex: usize,
 
-    pub fn initPost(allocator: Allocator, symbol: []const u8, right: Expression) Unary {
-        const operand = allocator.create(Expression) catch allocationError(Unary);
+    pub fn initPost(allocator: Allocator, token: Token, right: Expression) Unary {
+        const operand = allocator.create(Expression) catch allocError();
         operand.* = right;
 
-        const operator: Operator = OperatorMap.get(symbol) orelse unreachable;
-        return .{ .allocator = allocator, .operator = operator, .operand = operand, .type = .Post };
+        const operator: Operator = OperatorMap.get(token.symbol) orelse unreachable;
+        return .{ .allocator = allocator, .operator = operator, .operand = operand, .type = .Post, .lineIndex = token.lineIndex };
     }
 
-    pub fn initPre(allocator: Allocator, symbol: []const u8, left: Expression) Unary {
-        const operand = allocator.create(Expression) catch allocationError(Unary);
+    pub fn initPre(allocator: Allocator, token: Token, left: Expression) Unary {
+        const operand = allocator.create(Expression) catch allocError();
         operand.* = left;
 
-        const operator: Operator = OperatorMap.get(symbol) orelse unreachable;
-        return .{ .allocator = allocator, .operator = operator, .operand = operand, .type = .Pre };
+        const operator: Operator = OperatorMap.get(token.symbol) orelse unreachable;
+        return .{ .allocator = allocator, .operator = operator, .operand = operand, .type = .Pre, .lineIndex = token.lineIndex };
     }
 
     pub fn deinit(self: *Unary) void {
@@ -164,13 +175,13 @@ pub const Binary = struct {
     left: *Expression,
     right: *Expression,
 
-    pub fn init(allocator: Allocator, token: Token, left: Expression, right: Expression) Binary {
-        const operator = OperatorMap.get(token.symbol) orelse unexpectedToken(token);
+    pub fn init(allocator: Allocator, token: Token, left: Expression, right: Expression) ParsingError!Binary {
+        const operator = OperatorMap.get(token.symbol) orelse return unexpectedToken(token);
 
-        const leftPtr = allocator.create(Expression) catch allocationError(Binary);
+        const leftPtr = allocator.create(Expression) catch allocError();
         leftPtr.* = left;
 
-        const rightPtr = allocator.create(Expression) catch allocationError(Binary);
+        const rightPtr = allocator.create(Expression) catch allocError();
         rightPtr.* = right;
 
         return .{ .allocator = allocator, .operator = operator, .left = leftPtr, .right = rightPtr };
@@ -203,20 +214,21 @@ pub const Assignment = struct {
     operator: ?Binary.Operator,
     lhs: *Expression,
     rhs: *Expression,
+    lineIndex: usize,
 
-    pub fn init(allocator: Allocator, token: Token, lhs: Expression, rhs: Expression) Assignment {
+    pub fn init(allocator: Allocator, token: Token, lhs: Expression, rhs: Expression) ParsingError!Assignment {
         const operator = if (mem.eql(u8, "=", token.symbol))
             null
         else
-            OperatorMap.get(token.symbol) orelse unexpectedToken(token);
+            OperatorMap.get(token.symbol) orelse return unexpectedToken(token);
 
-        const lhsPtr = allocator.create(Expression) catch allocationError(Binary);
+        const lhsPtr = allocator.create(Expression) catch allocError();
         lhsPtr.* = lhs;
 
-        const rhsPtr = allocator.create(Expression) catch allocationError(Binary);
+        const rhsPtr = allocator.create(Expression) catch allocError();
         rhsPtr.* = rhs;
 
-        return .{ .allocator = allocator, .operator = operator, .lhs = lhsPtr, .rhs = rhsPtr };
+        return .{ .allocator = allocator, .operator = operator, .lhs = lhsPtr, .rhs = rhsPtr, .lineIndex = token.lineIndex };
     }
 
     pub fn deinit(self: Assignment) void {
@@ -227,54 +239,58 @@ pub const Assignment = struct {
         Expression.deinit(&self.rhs.*);
     }
 
-    pub fn parse(allocator: Allocator, tokens: *TokenIterator) ?Expression {
-        const lhs = parseFactor(allocator, tokens);
-        if (lhs != .Var) fatal("Expression type {any} is not an assignable lvalue", .{lhs});
-        const nextToken = tokens.peek() orelse unexpectedEOF();
+    pub fn parse(allocator: Allocator, tokens: *TokenIterator) ParsingError!?Expression {
+        const lhs = try parseFactor(allocator, tokens);
+        if (lhs != .Var) {
+            std.log.err("Expression type {any} is not an assignable lvalue", .{lhs});
+            return ParsingError.Lvalue;
+        }
+        const nextToken = tokens.peek() orelse return unexpectedEOF();
         return if (mem.eql(u8, "=", nextToken.symbol)) blk: {
-            const operator = tokens.next() orelse unexpectedEOF();
-            const rhs = Expression.parse(allocator, tokens, 0);
-            break :blk .{ .Assignment = .init(allocator, operator, lhs, rhs) };
+            const operator = tokens.next() orelse return unexpectedEOF();
+            const rhs = try Expression.parse(allocator, tokens, 0);
+            break :blk .{ .Assignment = try .init(allocator, operator, lhs, rhs) };
         } else null;
     }
 };
 
-fn parseFactor(allocator: Allocator, tokens: *TokenIterator) Expression {
-    const token = tokens.next() orelse unexpectedEOF();
+fn parseFactor(allocator: Allocator, tokens: *TokenIterator) ParsingError!Expression {
+    const token = tokens.next() orelse return unexpectedEOF();
     const expr: Expression = switch (token.type) {
         .Constant => .{ .Constant = token.symbol },
         .UnaryOp => blk: {
-            const right = parseFactor(allocator, tokens);
-            break :blk .{ .Unary = .initPre(allocator, token.symbol, right) };
+            const right = try parseFactor(allocator, tokens);
+            break :blk .{ .Unary = Unary.initPre(allocator, token, right) };
         },
-        .Identifier => .{ .Var = token.symbol },
+        .Identifier => .{ .Var = .{ .name = token.symbol, .lineIndex = token.lineIndex } },
         .OpenParenthesis => blk: {
-            defer {
-                const next = tokens.next() orelse unexpectedEOF();
-                if (next.type != .CloseParenthesis) unexpectedToken(token);
-            }
-            const expr = Expression.parse(allocator, tokens, 0);
+            const expr = try Expression.parse(allocator, tokens, 0);
+            const next = tokens.next() orelse return unexpectedEOF();
+            if (next.type != .CloseParenthesis) return unexpectedToken(token);
             break :blk expr;
         },
-        else => unexpectedToken(token),
+        else => return unexpectedToken(token),
     };
 
-    const nextToken = tokens.peek() orelse unexpectedEOF();
+    const nextToken = tokens.peek() orelse return unexpectedEOF();
     if (nextToken.type == .UnaryOp) {
-        return .{ .Unary = .initPost(allocator, tokens.next().?.symbol, expr) };
+        return .{ .Unary = .initPost(allocator, tokens.next().?, expr) };
     }
 
     return expr;
 }
 
-fn unexpectedEOF() noreturn {
-    fatal("Unexpected end of file", .{});
+fn unexpectedEOF() ParsingError {
+    std.log.err("Unexpected end of file", .{});
+    return ParsingError.EOF;
 }
 
-fn allocationError(t: type) noreturn {
-    fatal("Allocation failed for struct {any}", .{t});
+fn allocError() noreturn {
+    std.log.err("Memory allocation error", .{});
+    std.process.exit(1);
 }
 
-fn unexpectedToken(token: Token) noreturn {
-    fatal("Got unexpected token {s} of type {any}", .{ token.symbol, token.type });
+fn unexpectedToken(token: Token) ParsingError {
+    std.log.err("Got unexpected {any} token '{s}'", .{ token.type, token.symbol });
+    return ParsingError.Token;
 }

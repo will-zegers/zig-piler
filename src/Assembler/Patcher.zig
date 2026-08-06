@@ -119,5 +119,6 @@ fn isIllegalCmpImmDst(cmp: Cmp) bool {
 }
 
 fn allocError() noreturn {
-    @panic("Memory allocation error");
+    std.log.err("Memory allocation error", .{});
+    std.process.exit(1);
 }
