@@ -8,7 +8,9 @@ pub const Token = @import("Lexer/Token.zig");
 const TokenIterator = Token.Iterator;
 
 const KeywordMap = std.StaticStringMap(Token.Type).initComptime(.{
+    .{ "if", .If },
     .{ "int", .Int },
+    .{ "else", .Else },
     .{ "return", .Return },
     .{ "void", .Void },
 });
@@ -191,6 +193,8 @@ pub fn tokenize(self: *Lexer, text: [:0]const u8) !TokenIterator {
                     else => .{ .type = .BinaryOp, .symbol = ">", .precedence = 110, .associativity = .LeftToRight, .lineIndex = lineIndex }, // GT
                 };
             },
+            '?' => token = .{ .type = .TernaryOp, .symbol = "?", .precedence = 40, .associativity = .RightToLeft, .lineIndex = lineIndex },
+            ':' => token = .{ .type = .TernaryOp, .symbol = ":", .precedence = 40, .associativity = .RightToLeft, .lineIndex = lineIndex },
             else => {
                 badToken(remainingText, lineIndex);
             },
