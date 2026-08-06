@@ -21,18 +21,7 @@ pub fn printParserAST(ast: Parser.AST) void {
     for (function.body.items) |blockItem| {
         print("    {any} (\n", .{@TypeOf(blockItem)});
         switch (blockItem) {
-            .Statement => |statement| switch (statement) {
-                .Expression => |expr| {
-                    print("      {any} (\n", .{@TypeOf(statement)});
-                    printExpression(expr, 8);
-                },
-                .Return => |ret| {
-                    print("      {any} (\n", .{@TypeOf(statement)});
-                    print("        {any} (expr=\n", .{@TypeOf(ret)});
-                    printExpression(ret.expr, 10);
-                },
-                .Null => |nul| print("      {any} ()\n", .{@TypeOf(nul)}),
-            },
+            .Statement => |statement| printStatement(statement, 6),
             .Declaration => |decl| {
                 print("      {any} (\n", .{@TypeOf(decl)});
                 if (decl.initialize) |init| {
@@ -44,6 +33,38 @@ pub fn printParserAST(ast: Parser.AST) void {
     }
     print("  )\n", .{});
     print(")\n", .{});
+}
+
+fn printStatement(statement: Parser.Statement, indent: usize) void {
+    const indentStr = std.heap.page_allocator.alloc(u8, indent) catch allocError();
+    for (indentStr, 0..) |_, i| {
+        indentStr[i] = ' ';
+    }
+    defer std.heap.page_allocator.free(indentStr);
+
+    switch (statement) {
+        .Expression => |expr| {
+            print("{s}{any} (\n", .{ indentStr, @TypeOf(expr) });
+            printExpression(expr, indent + 2);
+        },
+        .If => |if_| {
+            print("{s}{any} (\n", .{ indentStr, @TypeOf(if_) });
+            print("{s}  condition=\n", .{indentStr});
+            printExpression(if_.condition, indent + 4);
+            print("{s}  then=\n", .{indentStr});
+            printStatement(if_.then.*, indent + 4);
+            if (if_.else_ != null) {
+                print("\n{s}  else=\n", .{indentStr});
+                printStatement(if_.else_.?.*, indent + 4);
+            }
+        },
+        .Return => |ret| {
+            print("{s}{any} (", .{ indentStr, @TypeOf(ret) });
+            print("\n{s}  {any} (expr=\n", .{ indentStr, @TypeOf(ret) });
+            printExpression(ret.expr, indent + 4);
+        },
+        .Null => |nul| print("{s}{any} ()\n", .{ indentStr, @TypeOf(nul) }),
+    }
 }
 
 fn printExpression(expr: Parser.Expression, indent: usize) void {
@@ -79,6 +100,16 @@ fn printExpression(expr: Parser.Expression, indent: usize) void {
             printExpression(assign.lhs.*, indent + 4);
             std.debug.print("{s}  rhs=\n", .{indentStr});
             printExpression(assign.rhs.*, indent + 4);
+            print("{s})\n", .{indentStr});
+        },
+        .Ternary => |ternary| {
+            print("\n", .{});
+            std.debug.print("{s}  condition=\n", .{indentStr});
+            printExpression(ternary.condition.*, indent + 4);
+            std.debug.print("{s}  then=\n", .{indentStr});
+            printExpression(ternary.then.*, indent + 4);
+            std.debug.print("{s}  else_=\n", .{indentStr});
+            printExpression(ternary.else_.*, indent + 4);
             print("{s})\n", .{indentStr});
         },
     }

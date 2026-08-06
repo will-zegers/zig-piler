@@ -5,6 +5,7 @@ const fatal = std.process.fatal;
 const ArrayList = std.ArrayList;
 
 const expression = @import("Parser/expression.zig");
+pub const expect = expression.expect;
 pub const Expression = expression.Expression;
 pub const Binary = expression.Binary;
 pub const Unary = expression.Unary;
@@ -42,7 +43,6 @@ pub const Program = struct {
     }
 
     pub fn deinit(self: *Program) void {
-        std.debug.print("deinit called\n", .{});
         self.function.deinit();
     }
 };
@@ -81,13 +81,7 @@ pub const Function = struct {
 
         for (self.body.items) |*blockItem| {
             switch (blockItem.*) {
-                .Statement => |*statement| {
-                    switch (statement.*) {
-                        .Return => |*ret| ret.deinit(),
-                        .Expression => |*expr| Expression.deinit(expr),
-                        .Null => {},
-                    }
-                },
+                .Statement => |*statement| Statement.deinit(statement),
                 .Declaration => |*decl| {
                     if (decl.initialize) |*initExpr| {
                         Expression.deinit(initExpr);
@@ -112,36 +106,74 @@ pub const BlockItem = union(BlockItemTag) {
     }
 };
 
-const StatementTag = enum { Expression, Return, Null };
+const StatementTag = enum { Expression, If, Return, Null };
 pub const Statement = union(StatementTag) {
     Expression: Expression,
+    If: If,
     Return: Return,
     Null: void, // needed to represent empty semicolon statements (for later?)
 
     pub fn parse(allocator: Allocator, tokens: *TokenIterator) ParsingError!Statement {
         const nextToken = tokens.peek() orelse unexpectedEOF();
         return switch (nextToken.type) {
+            .If => .{ .If = try .init(allocator, tokens) },
             .Return => .{ .Return = try .init(allocator, tokens) },
             .Semicolon => .{ .Null = tokens.skip() },
-            else => .{ .Expression = try .parse(allocator, tokens, 0) },
+            else => blk: {
+                const expr: Statement = .{ .Expression = try Expression.parse(allocator, tokens, 0) };
+                try expect(.Semicolon, tokens.next());
+                break :blk expr;
+            },
         };
+    }
+
+    pub fn deinit(statement: *Statement) void {
+        switch (statement.*) {
+            .Return => |*ret| ret.deinit(),
+            .Expression => |*expr| Expression.deinit(expr),
+            .Null => {},
+            .If => statement.*.If.deinit(),
+        }
     }
 };
 
-pub const Declaration = struct {
-    name: identifier,
-    initialize: ?Expression,
-    lineIndex: usize,
+pub const If = struct {
+    allocator: Allocator,
+    condition: Expression,
+    then: *Statement,
+    else_: ?*Statement,
 
-    pub fn init(allocator: Allocator, tokens: *TokenIterator) ParsingError!Declaration {
-        try expect(.Int, tokens.next());
-        const token = tokens.peek() orelse unexpectedEOF();
-        try expect(.Identifier, token);
+    pub fn init(allocator: Allocator, tokens: *TokenIterator) ParsingError!If {
+        try expect(.If, tokens.next());
+        try expect(.OpenParenthesis, tokens.peek());
+        const condition = try Expression.parse(allocator, tokens, 0);
 
-        const initialize = try Assignment.parse(allocator, tokens);
-        try expect(.Semicolon, tokens.next());
+        const then = allocator.create(Statement) catch allocError();
+        then.* = try .parse(allocator, tokens);
 
-        return .{ .name = token.symbol, .initialize = initialize, .lineIndex = token.lineIndex };
+        var else_: ?*Statement = null;
+        const nextToken = tokens.peek() orelse unexpectedEOF();
+        if (.Else == nextToken.type) { // if-else...
+            tokens.skip(); // discard the 'else' token
+
+            else_ = allocator.create(Statement) catch allocError();
+            else_.?.* = try .parse(allocator, tokens);
+        }
+
+        return .{ .allocator = allocator, .condition = condition, .then = then, .else_ = else_ };
+    }
+
+    pub fn deinit(self: *If) void {
+        defer {
+            self.allocator.destroy(self.then);
+        }
+
+        Expression.deinit(&self.condition);
+        Statement.deinit(self.then);
+        if (self.else_) |*else_| {
+            defer self.allocator.destroy(else_.*);
+            Statement.deinit(else_.*);
+        }
     }
 };
 
@@ -162,17 +194,22 @@ pub const Return = struct {
     }
 };
 
-fn expect(expected: Token.Type, token: ?Token) ParsingError!void {
-    if (token == null) {
-        std.log.err("Unexpected end of file", .{});
-        return ParsingError.Syntax;
-    }
+pub const Declaration = struct {
+    name: identifier,
+    initialize: ?Expression,
+    lineIndex: usize,
 
-    if (expected != token.?.type) {
-        std.log.err("Got unexpected {any} token '{s}'. Expected type {any}", .{ token.?.type, token.?.symbol, expected });
-        return ParsingError.Syntax;
+    pub fn init(allocator: Allocator, tokens: *TokenIterator) ParsingError!Declaration {
+        try expect(.Int, tokens.next());
+        const token = tokens.peek() orelse unexpectedEOF();
+        try expect(.Identifier, token);
+
+        const initialize = try Assignment.parse(allocator, tokens);
+        try expect(.Semicolon, tokens.next());
+
+        return .{ .name = token.symbol, .initialize = initialize, .lineIndex = token.lineIndex };
     }
-}
+};
 
 fn unexpectedEOF() noreturn {
     std.log.err("Unexpected end of file", .{});

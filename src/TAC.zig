@@ -62,6 +62,7 @@ pub const Function = struct {
                     },
                     .Expression => |expr| _ = function.emitTac(expr) catch allocError(),
                     .Null => {},
+                    .If => unreachable,
                 },
                 .Declaration => |decl| {
                     if (decl.initialize) |initExpr| {
@@ -183,6 +184,7 @@ pub const Function = struct {
 
                 return dst;
             },
+            .Ternary => unreachable,
         }
     }
 

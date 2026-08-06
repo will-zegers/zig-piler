@@ -70,6 +70,13 @@ fn resolveStatement(self: *Semantic, statement: *Statement) void {
     switch (statement.*) {
         .Return => |*ret| self.resolveExpression(&ret.expr),
         .Expression => |*expr| self.resolveExpression(expr),
+        .If => |*if_| {
+            self.resolveExpression(&if_.condition);
+            self.resolveStatement(if_.then);
+            if (if_.else_) |*else_| {
+                self.resolveStatement(else_.*);
+            }
+        },
         .Null => {},
     }
 }
@@ -107,6 +114,11 @@ fn resolveExpression(self: *Semantic, expr: *Expression) void {
             self.resolveExpression(unary.operand);
         },
         .Constant => {},
+        .Ternary => |*ternary| {
+            self.resolveExpression(ternary.condition);
+            self.resolveExpression(ternary.then);
+            self.resolveExpression(ternary.else_);
+        },
     }
 }
 

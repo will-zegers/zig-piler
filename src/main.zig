@@ -96,19 +96,19 @@ pub fn main(init: std.process.Init) !void {
             std.log.info("Running parser...", .{});
             var ast = Parser.parse(init.gpa, &tokens) catch {
                 const index = tokens.lineIndex;
-                std.log.err(" {d} | {s}", .{ index, lines[index] });
+                std.log.err(" {d} | {s}\n", .{ index, lines[index] });
                 std.process.exit(1);
             };
             defer ast.deinit();
 
+            var semantic = Semantic.init(init.gpa);
+            defer semantic.deinit();
+            semantic.resolve(&ast);
             if (parse and debug) {
                 std.debug.print("-------parsed-------\n", .{});
                 Debugger.printParserAST(ast);
             }
 
-            var semantic = Semantic.init(init.gpa);
-            defer semantic.deinit();
-            semantic.resolve(&ast);
             if (semantic.errors.capacity > 0) {
                 for (semantic.errors.items) |err| {
                     switch (err.type) {
@@ -117,7 +117,7 @@ pub fn main(init: std.process.Init) !void {
                         .UndeclaredIdentifier => std.log.err("Use of undeclared identifier '{s}'", .{err.name.?}),
                     }
                     const index = err.lineIndex;
-                    std.log.err(" {d} | {s}", .{ index, lines[index] });
+                    std.log.err(" {d} | {s}\n", .{ index, lines[index] });
                 }
 
                 std.process.exit(1);

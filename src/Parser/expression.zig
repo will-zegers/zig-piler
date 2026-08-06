@@ -23,6 +23,7 @@ pub const ExpressionTag = enum {
     Unary,
     Binary,
     Assignment,
+    Ternary,
 };
 
 pub const Expression = union(ExpressionTag) {
@@ -31,6 +32,7 @@ pub const Expression = union(ExpressionTag) {
     Unary: Unary,
     Binary: Binary,
     Assignment: Assignment,
+    Ternary: Ternary,
 
     /// Evaluates expression from left-to-right for arithmetic, or right-to-left for assignment, operators.
     /// This is a recursive descent parser that uses the precedence climbing algorithm.
@@ -39,20 +41,36 @@ pub const Expression = union(ExpressionTag) {
 
         var nextToken = tokens.peek() orelse return unexpectedEOF();
         while (nextToken.associativity != .None and nextToken.precedence >= minPrecedence) {
-            const operator = tokens.next() orelse return unexpectedEOF();
+            nextToken = tokens.next() orelse return unexpectedEOF();
             if (nextToken.associativity == .RightToLeft) {
-                const right = try parse(allocator, tokens, nextToken.precedence);
-                const temp = try Assignment.init(allocator, operator, left, right);
-                left = .{ .Assignment = temp };
+                left = blk: switch (nextToken.type) {
+                    .TernaryOp => { // <expr> '?' <expr> ':' <expr>
+                        if (!mem.eql(u8, "?", nextToken.symbol)) return unexpectedToken(nextToken); // discard the '?'
+                        const middle = try parse(allocator, tokens, 0);
+
+                        nextToken = tokens.next() orelse return unexpectedEOF();
+                        if (!mem.eql(u8, ":", nextToken.symbol)) return unexpectedToken(nextToken); // discard the '?'
+                        const right = try parse(allocator, tokens, nextToken.precedence);
+
+                        const temp = try Ternary.init(allocator, left, middle, right);
+                        break :blk .{ .Ternary = temp };
+                    },
+                    .BinaryOp => { // <expr> '='|'+='|'-='|'*='|'/='|'%='|'&='|'|=' <expr>
+                        const right = try parse(allocator, tokens, nextToken.precedence);
+                        const temp = try Assignment.init(allocator, nextToken, left, right);
+                        break :blk .{ .Assignment = temp };
+                    },
+                    else => unreachable,
+                };
             } else {
                 left = switch (nextToken.type) {
-                    .UnaryOp => blk: {
-                        const temp = Unary.initPost(allocator, operator, left);
+                    .UnaryOp => blk: { // <factor> '++'|'--'
+                        const temp = try Unary.initPost(allocator, nextToken, left);
                         break :blk .{ .Unary = temp };
                     },
-                    .BinaryOp => blk: {
+                    .BinaryOp => blk: { // <expr> '+'|'-'|'*'|'/'|'%'|'&'|'|' <expr>
                         const right = try parse(allocator, tokens, nextToken.precedence + 1);
-                        const temp = try Binary.init(allocator, operator, left, right);
+                        const temp = try Binary.init(allocator, nextToken, left, right);
                         break :blk .{ .Binary = temp };
                     },
                     else => unreachable,
@@ -67,9 +85,10 @@ pub const Expression = union(ExpressionTag) {
     pub fn deinit(expr: *Expression) void {
         switch (expr.*) {
             .Constant, .Var => {},
-            .Unary => |*unary| unary.deinit(),
-            .Binary => |*binary| binary.deinit(),
-            .Assignment => |*assign| assign.deinit(),
+            .Unary => expr.*.Unary.deinit(),
+            .Binary => expr.*.Binary.deinit(),
+            .Assignment => expr.*.Assignment.deinit(),
+            .Ternary => expr.*.Ternary.deinit(),
         }
     }
 };
@@ -104,7 +123,9 @@ pub const Unary = struct {
     type: enum { Pre, Post },
     lineIndex: usize,
 
-    pub fn initPost(allocator: Allocator, token: Token, right: Expression) Unary {
+    pub fn initPost(allocator: Allocator, token: Token, right: Expression) ParsingError!Unary {
+        if (!mem.eql(u8, "++", token.symbol) and !mem.eql(u8, "--", token.symbol)) return unexpectedToken(token);
+
         const operand = allocator.create(Expression) catch allocError();
         operand.* = right;
 
@@ -112,11 +133,11 @@ pub const Unary = struct {
         return .{ .allocator = allocator, .operator = operator, .operand = operand, .type = .Post, .lineIndex = token.lineIndex };
     }
 
-    pub fn initPre(allocator: Allocator, token: Token, left: Expression) Unary {
+    pub fn initPre(allocator: Allocator, token: Token, left: Expression) ParsingError!Unary {
         const operand = allocator.create(Expression) catch allocError();
         operand.* = left;
 
-        const operator: Operator = OperatorMap.get(token.symbol) orelse unreachable;
+        const operator: Operator = OperatorMap.get(token.symbol) orelse return unexpectedToken(token);
         return .{ .allocator = allocator, .operator = operator, .operand = operand, .type = .Pre, .lineIndex = token.lineIndex };
     }
 
@@ -254,16 +275,46 @@ pub const Assignment = struct {
     }
 };
 
+pub const Ternary = struct {
+    allocator: Allocator,
+    condition: *Expression,
+    then: *Expression,
+    else_: *Expression,
+
+    pub fn init(allocator: Allocator, left: Expression, middle: Expression, right: Expression) ParsingError!Ternary {
+        const condition = allocator.create(Expression) catch allocError();
+        condition.* = left;
+
+        const then = allocator.create(Expression) catch allocError();
+        then.* = middle;
+
+        const else_ = allocator.create(Expression) catch allocError();
+        else_.* = right;
+
+        return .{ .allocator = allocator, .condition = condition, .then = then, .else_ = else_ };
+    }
+
+    pub fn deinit(self: *Ternary) void {
+        defer self.allocator.destroy(self.condition);
+        defer self.allocator.destroy(self.then);
+        defer self.allocator.destroy(self.else_);
+
+        Expression.deinit(self.condition);
+        Expression.deinit(self.then);
+        Expression.deinit(self.else_);
+    }
+};
+
 fn parseFactor(allocator: Allocator, tokens: *TokenIterator) ParsingError!Expression {
     const token = tokens.next() orelse return unexpectedEOF();
     const expr: Expression = switch (token.type) {
         .Constant => .{ .Constant = token.symbol },
-        .UnaryOp => blk: {
+        .UnaryOp => blk: { // '~'|'!'|'-'|'++'|'--' <factor>
             const right = try parseFactor(allocator, tokens);
-            break :blk .{ .Unary = Unary.initPre(allocator, token, right) };
+            break :blk .{ .Unary = try Unary.initPre(allocator, token, right) };
         },
         .Identifier => .{ .Var = .{ .name = token.symbol, .lineIndex = token.lineIndex } },
-        .OpenParenthesis => blk: {
+        .OpenParenthesis => blk: { // '(' <expr> ')'
             const expr = try Expression.parse(allocator, tokens, 0);
             const next = tokens.next() orelse return unexpectedEOF();
             if (next.type != .CloseParenthesis) return unexpectedToken(token);
@@ -273,11 +324,23 @@ fn parseFactor(allocator: Allocator, tokens: *TokenIterator) ParsingError!Expres
     };
 
     const nextToken = tokens.peek() orelse return unexpectedEOF();
-    if (nextToken.type == .UnaryOp) {
-        return .{ .Unary = .initPost(allocator, tokens.next().?, expr) };
+    if (nextToken.type == .UnaryOp) { // '~'|'!'|'-'|'++'|'--' <factor> '++'|'--'
+        return .{ .Unary = try .initPost(allocator, tokens.next().?, expr) };
     }
 
     return expr;
+}
+
+pub fn expect(expected: Token.Type, token: ?Token) ParsingError!void {
+    if (token == null) {
+        std.log.err("Unexpected end of file", .{});
+        return ParsingError.Syntax;
+    }
+
+    if (expected != token.?.type) {
+        std.log.err("Got unexpected {any} token '{s}'. Expected type {any}", .{ token.?.type, token.?.symbol, expected });
+        return ParsingError.Syntax;
+    }
 }
 
 fn unexpectedEOF() ParsingError {
