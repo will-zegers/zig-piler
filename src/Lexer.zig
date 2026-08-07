@@ -194,7 +194,7 @@ pub fn tokenize(self: *Lexer, text: [:0]const u8) !TokenIterator {
                 };
             },
             '?' => token = .{ .type = .TernaryOp, .symbol = "?", .precedence = 40, .associativity = .RightToLeft, .lineIndex = lineIndex },
-            ':' => token = .{ .type = .TernaryOp, .symbol = ":", .lineIndex = lineIndex },
+            ':' => token = .{ .type = .TernaryOp, .symbol = ":", .precedence = 40, .lineIndex = lineIndex },
             else => {
                 badToken(remainingText, lineIndex);
             },

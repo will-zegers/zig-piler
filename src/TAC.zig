@@ -55,18 +55,10 @@ pub const Function = struct {
 
         for (ast.function.body.items) |blockItem| {
             switch (blockItem) {
-                .Statement => switch (blockItem.Statement) {
-                    .Return => |ret| {
-                        const val = function.emitTac(ret.expr) catch allocError();
-                        function.body.append(allocator, .{ .Return = .{ .val = val } }) catch allocError();
-                    },
-                    .Expression => |expr| _ = function.emitTac(expr) catch allocError(),
-                    .Null => {},
-                    .If => unreachable,
-                },
+                .Statement => |stmt| function.emitStatement(stmt) catch allocError(),
                 .Declaration => |decl| {
                     if (decl.initialize) |initExpr| {
-                        _ = function.emitTac(initExpr) catch allocError();
+                        _ = function.emitExpression(initExpr) catch allocError();
                     }
                 },
             }
@@ -89,13 +81,39 @@ pub const Function = struct {
         }
     }
 
-    fn emitTac(self: *Function, expr: Parser.Expression) !Val {
+    fn emitStatement(self: *Function, stmt: Parser.Statement) !void {
+        switch (stmt) {
+            .Return => |ret| {
+                const val = self.emitExpression(ret.expr) catch allocError();
+                self.body.append(self.allocator, .{ .Return = .{ .val = val } }) catch allocError();
+            },
+            .Expression => |expr| _ = self.emitExpression(expr) catch allocError(),
+            .Null => {},
+            .If => |ifStmt| {
+                const elseLabel = self.nextLabel("else");
+                const endLabel = self.nextLabel("end");
+
+                const c = try self.emitExpression(ifStmt.condition);
+                try self.body.append(self.allocator, .{ .JumpIfZero = .{ .condition = c, .target = elseLabel } });
+
+                _ = try self.emitStatement(ifStmt.then.*);
+                try self.body.append(self.allocator, .{ .Jump = .{ .target = endLabel } });
+
+                try self.body.append(self.allocator, .{ .Label = .{ .identifier = elseLabel } });
+                if (ifStmt.else_) |elseStmt| _ = try self.emitStatement(elseStmt.*);
+
+                try self.body.append(self.allocator, .{ .Label = .{ .identifier = endLabel } });
+            },
+        }
+    }
+
+    fn emitExpression(self: *Function, expr: Parser.Expression) !Val {
         switch (expr) {
             .Constant => return .{ .Constant = expr.Constant },
             .Var => return .{ .Var = expr.Var.name },
             .Unary => |unary| {
                 const unaryExpr: Parser.Expression = unary.operand.*;
-                const src = try self.emitTac(unaryExpr);
+                const src = try self.emitExpression(unaryExpr);
                 const dst: Val = .{ .Var = self.nextTag() };
                 switch (unary.operator) {
                     .Inc, .Dec => {
@@ -122,10 +140,10 @@ pub const Function = struct {
                         const falseLabel = self.nextLabel("andFalse");
                         const endLabel = self.nextLabel("andEnd");
 
-                        const v1 = try self.emitTac(binary.left.*);
+                        const v1 = try self.emitExpression(binary.left.*);
                         try self.body.append(self.allocator, .{ .JumpIfZero = .{ .condition = v1, .target = falseLabel } });
 
-                        const v2 = try self.emitTac(binary.right.*);
+                        const v2 = try self.emitExpression(binary.right.*);
                         try self.body.append(self.allocator, .{ .JumpIfZero = .{ .condition = v2, .target = falseLabel } });
 
                         const dst: Val = .{ .Var = self.nextTag() };
@@ -142,10 +160,10 @@ pub const Function = struct {
                         const trueLabel = self.nextLabel("orTrue");
                         const endLabel = self.nextLabel("orEnd");
 
-                        const v1 = try self.emitTac(binary.left.*);
+                        const v1 = try self.emitExpression(binary.left.*);
                         try self.body.append(self.allocator, .{ .JumpIfNotZero = .{ .condition = v1, .target = trueLabel } });
 
-                        const v2 = try self.emitTac(binary.right.*);
+                        const v2 = try self.emitExpression(binary.right.*);
                         try self.body.append(self.allocator, .{ .JumpIfNotZero = .{ .condition = v2, .target = trueLabel } });
 
                         const dst: Val = .{ .Var = self.nextTag() };
@@ -159,10 +177,10 @@ pub const Function = struct {
                         return dst;
                     },
                     else => {
-                        const src1 = try self.emitTac(
+                        const src1 = try self.emitExpression(
                             binary.left.*,
                         );
-                        const src2 = try self.emitTac(
+                        const src2 = try self.emitExpression(
                             binary.right.*,
                         );
                         const dst: Val = .{ .Var = self.nextTag() };
@@ -172,8 +190,8 @@ pub const Function = struct {
                 }
             },
             .Assignment => |assign| {
-                const result = try self.emitTac(assign.rhs.*);
-                const dst = try self.emitTac(assign.lhs.*);
+                const result = try self.emitExpression(assign.rhs.*);
+                const dst = try self.emitExpression(assign.lhs.*);
 
                 // If this is a compound assignment, we need to emit a binary instruction.
                 // Otherwise, for simple assignments we just emit a copy.
@@ -184,7 +202,30 @@ pub const Function = struct {
 
                 return dst;
             },
-            .Ternary => unreachable,
+            .Ternary => |ternary| {
+                std.debug.print("ternary\n", .{});
+                const elseLabel = self.nextLabel("else");
+                const endLabel = self.nextLabel("end");
+                const dst: Val = .{ .Var = self.nextTag() };
+
+                const c = try self.emitExpression(ternary.condition.*);
+                try self.body.append(self.allocator, .{ .JumpIfZero = .{ .condition = c, .target = elseLabel } });
+
+                const e1 = try self.emitExpression(ternary.then.*);
+                try self.body.appendSlice(self.allocator, &.{
+                    .{ .Copy = .{ .src = e1, .dst = dst } },
+                    .{ .Jump = .{ .target = endLabel } },
+                    .{ .Label = .{ .identifier = elseLabel } },
+                });
+
+                const e2 = try self.emitExpression(ternary.else_.*);
+                try self.body.appendSlice(self.allocator, &.{
+                    .{ .Copy = .{ .src = e2, .dst = dst } },
+                    .{ .Label = .{ .identifier = endLabel } },
+                });
+
+                return dst;
+            },
         }
     }
 
