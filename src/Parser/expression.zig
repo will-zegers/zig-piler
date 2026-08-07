@@ -45,12 +45,14 @@ pub const Expression = union(ExpressionTag) {
             if (nextToken.associativity == .RightToLeft) {
                 left = blk: switch (nextToken.type) {
                     .TernaryOp => { // <expr> '?' <expr> ':' <expr>
-                        if (!mem.eql(u8, "?", nextToken.symbol)) return unexpectedToken(nextToken); // discard the '?'
+                        const ternaryPrecedence = nextToken.precedence;
+
+                        try expect(.TernaryOp, nextToken);
                         const middle = try parse(allocator, tokens, 0);
 
                         nextToken = tokens.next() orelse return unexpectedEOF();
-                        if (!mem.eql(u8, ":", nextToken.symbol)) return unexpectedToken(nextToken); // discard the '?'
-                        const right = try parse(allocator, tokens, nextToken.precedence);
+                        try expect(.Colon, nextToken);
+                        const right = try parse(allocator, tokens, ternaryPrecedence); // use the same precedence for the right side of the ternary operator
 
                         const temp = try Ternary.init(allocator, left, middle, right);
                         break :blk .{ .Ternary = temp };

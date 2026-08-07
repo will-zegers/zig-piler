@@ -104,6 +104,11 @@ pub const Function = struct {
 
                 try self.body.append(self.allocator, .{ .Label = .{ .identifier = endLabel } });
             },
+            .Label => |lbl| {
+                try self.body.append(self.allocator, .{ .Label = .{ .identifier = lbl.name } });
+                _ = try self.emitStatement(lbl.statement.*);
+            },
+            .Goto => |goto| try self.body.append(self.allocator, .{ .Jump = .{ .target = goto.label } }),
         }
     }
 

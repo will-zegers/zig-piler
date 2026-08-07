@@ -19,17 +19,16 @@ pub fn printParserAST(ast: Parser.AST) void {
     print("{any} (\n", .{@TypeOf(program)});
     print("  {any} (\n", .{@TypeOf(function)});
     for (function.body.items) |blockItem| {
-        print("    {any} (\n", .{@TypeOf(blockItem)});
         switch (blockItem) {
-            .Statement => |statement| printStatement(statement, 6),
+            .Statement => |statement| printStatement(statement, 4),
             .Declaration => |decl| {
                 print("      {any} (\n", .{@TypeOf(decl)});
                 if (decl.initialize) |init| {
                     printExpression(init, 8);
                 }
+                print("    )\n", .{});
             },
         }
-        print("    )\n", .{});
     }
     print("  )\n", .{});
     print(")\n", .{});
@@ -46,6 +45,7 @@ fn printStatement(statement: Parser.Statement, indent: usize) void {
         .Expression => |expr| {
             print("{s}{any} (\n", .{ indentStr, @TypeOf(expr) });
             printExpression(expr, indent + 2);
+            print("{s})\n", .{indentStr});
         },
         .If => |if_| {
             print("{s}{any} (\n", .{ indentStr, @TypeOf(if_) });
@@ -57,13 +57,21 @@ fn printStatement(statement: Parser.Statement, indent: usize) void {
                 print("\n{s}  else=\n", .{indentStr});
                 printStatement(if_.else_.?.*, indent + 4);
             }
+            print("{s})\n", .{indentStr});
         },
         .Return => |ret| {
-            print("{s}{any} (", .{ indentStr, @TypeOf(ret) });
-            print("\n{s}  {any} (expr=\n", .{ indentStr, @TypeOf(ret) });
+            print("{s}{any} (expr=\n", .{ indentStr, @TypeOf(ret) });
             printExpression(ret.expr, indent + 4);
+            print("{s})\n", .{indentStr});
         },
         .Null => |nul| print("{s}{any} ()\n", .{ indentStr, @TypeOf(nul) }),
+        .Label => |lbl| {
+            print("{s}{any} (\n", .{ indentStr, @TypeOf(lbl) });
+            print("{s}  name={s}\n", .{ indentStr, lbl.name });
+            print("{s}  statement=\n", .{indentStr});
+            printStatement(lbl.statement.*, indent + 4);
+        },
+        .Goto => |goto| print("{s}{any} (label={s})\n", .{ indentStr, @TypeOf(goto), goto.label }),
     }
 }
 

@@ -13,12 +13,13 @@ const Assignment = Parser.Assignment;
 
 const Semantic = @This();
 
-const VariableMap = std.StringHashMap([]const u8);
+const IdentifierMap = std.StringHashMap([]const u8);
 const AST = Parser.AST;
 
 sCounter: usize = 0,
 allocator: Allocator,
-variableMap: VariableMap,
+variableMap: IdentifierMap,
+labelMap: IdentifierMap,
 errors: std.ArrayList(SemanticError) = .empty,
 
 const SemanticError = struct {
@@ -32,7 +33,7 @@ const SemanticError = struct {
 };
 
 pub fn init(allocator: Allocator) Semantic {
-    return .{ .allocator = allocator, .variableMap = .init(allocator) };
+    return .{ .allocator = allocator, .variableMap = .init(allocator), .labelMap = .init(allocator) };
 }
 
 pub fn deinit(self: *Semantic) void {
@@ -40,20 +41,42 @@ pub fn deinit(self: *Semantic) void {
     while (it.next()) |value| {
         self.allocator.free(value.*);
     }
+
+    it = self.labelMap.valueIterator();
+    while (it.next()) |value| {
+        self.allocator.free(value.*);
+    }
+
     self.variableMap.deinit();
+    self.labelMap.deinit();
 }
 
 pub fn resolve(self: *Semantic, ast: *AST) void {
+    resolveFirstPass(self, ast);
+    resolveSecondPass(self, ast);
+}
+
+fn resolveFirstPass(self: *Semantic, ast: *AST) void {
     const body = ast.function.body.items;
     for (body) |*block| {
         switch (block.*) {
-            .Declaration => |*declaration| self.resolveDeclaration(declaration),
-            .Statement => |*statement| self.resolveStatement(statement),
+            .Statement => |*statement| self.resolveStatementFP(statement),
+            .Declaration => |*declaration| self.resolveDeclarations(declaration),
         }
     }
 }
 
-fn resolveDeclaration(self: *Semantic, decl: *Declaration) void {
+fn resolveSecondPass(self: *Semantic, ast: *AST) void {
+    const body = ast.function.body.items;
+    for (body) |*block| {
+        switch (block.*) {
+            .Statement => |*statement| self.resolveStatementSP(statement),
+            .Declaration => {},
+        }
+    }
+}
+
+fn resolveDeclarations(self: *Semantic, decl: *Declaration) void {
     const name = decl.name;
     if (self.variableMap.contains(name)) {
         self.errors.append(self.allocator, .{ .lineIndex = decl.lineIndex, .type = .Redeclaration, .name = name }) catch allocError();
@@ -66,18 +89,30 @@ fn resolveDeclaration(self: *Semantic, decl: *Declaration) void {
     }
 }
 
-fn resolveStatement(self: *Semantic, statement: *Statement) void {
+fn resolveStatementFP(self: *Semantic, statement: *Statement) void {
     switch (statement.*) {
         .Return => |*ret| self.resolveExpression(&ret.expr),
         .Expression => |*expr| self.resolveExpression(expr),
         .If => |*if_| {
             self.resolveExpression(&if_.condition);
-            self.resolveStatement(if_.then);
+            self.resolveStatementFP(if_.then);
             if (if_.else_) |*else_| {
-                self.resolveStatement(else_.*);
+                self.resolveStatementFP(else_.*);
             }
         },
-        .Null => {},
+        .Label => |*lbl| {
+            const name = statement.Label.name;
+            if (self.labelMap.contains(name)) {
+                self.errors.append(self.allocator, .{ .lineIndex = lbl.lineIndex, .type = .Redeclaration, .name = name }) catch allocError();
+            }
+            const uniqueName = self.generateUnique(name);
+            self.labelMap.put(name, uniqueName) catch allocError();
+
+            lbl.*.name = uniqueName;
+
+            self.resolveStatementFP(lbl.statement);
+        },
+        .Goto, .Null => {},
     }
 }
 
@@ -119,6 +154,28 @@ fn resolveExpression(self: *Semantic, expr: *Expression) void {
             self.resolveExpression(ternary.then);
             self.resolveExpression(ternary.else_);
         },
+    }
+}
+
+fn resolveStatementSP(self: *Semantic, statement: *Statement) void {
+    switch (statement.*) {
+        .Goto => |*goto| {
+            if (self.labelMap.get(goto.*.label)) |unique| {
+                goto.*.label = unique;
+            } else {
+                self.errors.append(self.allocator, .{ .lineIndex = goto.*.lineIndex, .type = .UndeclaredIdentifier, .name = goto.*.label }) catch allocError();
+            }
+        },
+        .If => |*if_| {
+            self.resolveStatementSP(if_.then);
+            if (if_.else_) |*else_| {
+                self.resolveStatementSP(else_.*);
+            }
+        },
+        .Label => |*lbl| {
+            self.resolveStatementSP(lbl.statement);
+        },
+        else => {},
     }
 }
 

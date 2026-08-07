@@ -106,20 +106,51 @@ pub const BlockItem = union(BlockItemTag) {
     }
 };
 
-const StatementTag = enum { Expression, If, Return, Null };
+const StatementTag = enum { Expression, Goto, If, Label, Return, Null };
 pub const Statement = union(StatementTag) {
     Expression: Expression,
+    Goto: Goto,
     If: If,
+    Label: Label,
     Return: Return,
     Null: void, // needed to represent empty semicolon statements (for later?)
 
     pub fn parse(allocator: Allocator, tokens: *TokenIterator) ParsingError!Statement {
-        const nextToken = tokens.peek() orelse unexpectedEOF();
+        var nextToken = tokens.peek() orelse unexpectedEOF();
         return switch (nextToken.type) {
-            .If => .{ .If = try .init(allocator, tokens) },
-            .Return => .{ .Return = try .init(allocator, tokens) },
+            .Goto => blk: { // goto <identifier> ';'
+                try expect(.Goto, tokens.next());
+                const stmt: Statement = .{ .Goto = try .init(tokens) };
+                try expect(.Semicolon, tokens.next());
+                break :blk stmt;
+            },
+            .If => blk: { // if '(' <expr> ')' <statement> [else <statement>]
+                try expect(.If, tokens.next());
+                try expect(.OpenParenthesis, tokens.peek());
+                break :blk .{ .If = try .init(allocator, tokens) };
+            },
+            .Identifier => blk: { // <identifier> ':' <statement>
+                const ident = tokens.next() orelse unexpectedEOF();
+                nextToken = tokens.peek() orelse unexpectedEOF();
+                if (nextToken.type == .Colon) { // labeled statement of the form <identifier> ':' <statement>
+                    try expect(.Identifier, ident);
+                    try expect(.Colon, tokens.next());
+                    break :blk .{ .Label = try .init(allocator, ident, tokens) };
+                } else { // otherwise parse it as an expression of the form <expr> ';'
+                    tokens.rewind();
+                    const expr: Statement = .{ .Expression = try Expression.parse(allocator, tokens, 0) };
+                    try expect(.Semicolon, tokens.next());
+                    break :blk expr;
+                }
+            },
+            .Return => blk: { // return <expr> ';'
+                try expect(.Return, tokens.next());
+                const stmt: Statement = .{ .Return = try .init(allocator, tokens) };
+                try expect(.Semicolon, tokens.next());
+                break :blk stmt;
+            },
             .Semicolon => .{ .Null = tokens.skip() },
-            else => blk: {
+            else => blk: { // <expr> ';'
                 const expr: Statement = .{ .Expression = try Expression.parse(allocator, tokens, 0) };
                 try expect(.Semicolon, tokens.next());
                 break :blk expr;
@@ -129,10 +160,11 @@ pub const Statement = union(StatementTag) {
 
     pub fn deinit(statement: *Statement) void {
         switch (statement.*) {
-            .Return => |*ret| ret.deinit(),
-            .Expression => |*expr| Expression.deinit(expr),
-            .Null => {},
+            .Return => statement.*.Return.deinit(),
+            .Expression => Expression.deinit(&statement.*.Expression),
+            .Null, .Goto => {},
             .If => statement.*.If.deinit(),
+            .Label => statement.*.Label.deinit(),
         }
     }
 };
@@ -144,8 +176,6 @@ pub const If = struct {
     else_: ?*Statement,
 
     pub fn init(allocator: Allocator, tokens: *TokenIterator) ParsingError!If {
-        try expect(.If, tokens.next());
-        try expect(.OpenParenthesis, tokens.peek());
         const condition = try Expression.parse(allocator, tokens, 0);
 
         const then = allocator.create(Statement) catch allocError();
@@ -177,15 +207,43 @@ pub const If = struct {
     }
 };
 
+pub const Goto = struct {
+    label: identifier,
+    lineIndex: usize,
+
+    pub fn init(tokens: *TokenIterator) ParsingError!Goto {
+        const label = tokens.next() orelse unexpectedEOF();
+        try expect(.Identifier, label);
+
+        return .{ .label = label.symbol, .lineIndex = label.lineIndex };
+    }
+};
+
+pub const Label = struct {
+    allocator: Allocator,
+    name: identifier,
+    statement: *Statement,
+    lineIndex: usize,
+
+    pub fn init(allocator: Allocator, name: Token, tokens: *TokenIterator) ParsingError!Label {
+        const statement = allocator.create(Statement) catch allocError();
+        statement.* = try Statement.parse(allocator, tokens);
+
+        return .{ .allocator = allocator, .name = name.symbol, .statement = statement, .lineIndex = name.lineIndex };
+    }
+
+    pub fn deinit(self: *Label) void {
+        defer self.allocator.destroy(self.statement);
+        Statement.deinit(self.statement);
+    }
+};
+
 pub const Return = struct {
     allocator: Allocator,
     expr: Expression,
 
     pub fn init(allocator: Allocator, tokens: *TokenIterator) ParsingError!Return {
-        try expect(.Return, tokens.next());
         const expr = try Expression.parse(allocator, tokens, 0);
-        try expect(.Semicolon, tokens.next());
-
         return .{ .allocator = allocator, .expr = expr };
     }
 

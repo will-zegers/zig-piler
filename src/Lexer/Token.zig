@@ -12,8 +12,10 @@ pub const Type = enum {
     BinaryOp,
     CloseBrace,
     CloseParenthesis,
+    Colon,
     Constant,
     Else,
+    Goto,
     Identifier,
     If,
     Int,
@@ -56,6 +58,12 @@ pub const Iterator = struct {
 
     pub fn skip(self: *Iterator) void {
         self.index += 1;
+    }
+
+    pub fn rewind(self: *Iterator) void {
+        if (self.index > 0) {
+            self.index -= 1;
+        }
     }
 
     pub fn reset(self: *Iterator) void {
