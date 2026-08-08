@@ -53,7 +53,7 @@ pub const Function = struct {
             .labels = .empty,
         };
 
-        for (ast.function.body) |blockItem| {
+        for (ast.function.body.items) |blockItem| {
             switch (blockItem) {
                 .Statement => |stmt| function.emitStatement(stmt) catch allocError(),
                 .Declaration => |decl| {
@@ -83,6 +83,16 @@ pub const Function = struct {
 
     fn emitStatement(self: *Function, stmt: Parser.Statement) !void {
         switch (stmt) {
+            .Compound => |compound| for (compound.block.items) |item| {
+                switch (item) {
+                    .Statement => try self.emitStatement(item.Statement),
+                    .Declaration => |decl| {
+                        if (decl.initialize) |initExpr| {
+                            _ = self.emitExpression(initExpr) catch allocError();
+                        }
+                    },
+                }
+            },
             .Return => |ret| {
                 const val = self.emitExpression(ret.expr) catch allocError();
                 self.body.append(self.allocator, .{ .Return = .{ .val = val } }) catch allocError();
@@ -208,7 +218,6 @@ pub const Function = struct {
                 return dst;
             },
             .Ternary => |ternary| {
-                std.debug.print("ternary\n", .{});
                 const elseLabel = self.nextLabel("else");
                 const endLabel = self.nextLabel("end");
                 const dst: Val = .{ .Var = self.nextTag() };

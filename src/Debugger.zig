@@ -18,20 +18,24 @@ pub fn printParserAST(ast: Parser.AST) void {
     const function = program.function;
     print("{any} (\n", .{@TypeOf(program)});
     print("  {any} (\n", .{@TypeOf(function)});
-    for (function.body) |blockItem| {
-        switch (blockItem) {
-            .Statement => |statement| printStatement(statement, 4),
-            .Declaration => |decl| {
-                print("      {any} (\n", .{@TypeOf(decl)});
-                if (decl.initialize) |init| {
-                    printExpression(init, 8);
-                }
-                print("    )\n", .{});
-            },
-        }
+    for (function.body.items) |blockItem| {
+        printBlockItem(blockItem);
     }
     print("  )\n", .{});
     print(")\n", .{});
+}
+
+fn printBlockItem(blockItem: Parser.BlockItem) void {
+    switch (blockItem) {
+        .Statement => |statement| printStatement(statement, 4),
+        .Declaration => |decl| {
+            print("      {any} (\n", .{@TypeOf(decl)});
+            if (decl.initialize) |init| {
+                printExpression(init, 8);
+            }
+            print("    )\n", .{});
+        },
+    }
 }
 
 fn printStatement(statement: Parser.Statement, indent: usize) void {
@@ -42,6 +46,12 @@ fn printStatement(statement: Parser.Statement, indent: usize) void {
     defer std.heap.page_allocator.free(indentStr);
 
     switch (statement) {
+        .Compound => |compound| {
+            print("{s}{any} ()\n", .{ indentStr, @TypeOf(compound) });
+            for (compound.block.items) |item| {
+                printBlockItem(item);
+            }
+        },
         .Expression => |expr| {
             print("{s}{any} (\n", .{ indentStr, @TypeOf(expr) });
             printExpression(expr, indent + 2);

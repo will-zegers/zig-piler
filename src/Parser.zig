@@ -50,11 +50,9 @@ pub const Program = struct {
 pub const Function = struct {
     allocator: Allocator,
     name: identifier,
-    body: []BlockItem,
+    body: Block,
 
     pub fn init(allocator: Allocator, tokens: *TokenIterator) ParsingError!Function {
-        var blockList: ArrayList(BlockItem) = .empty;
-
         try expect(.Int, tokens.next());
 
         const token = tokens.next() orelse unexpectedEOF();
@@ -63,6 +61,21 @@ pub const Function = struct {
         try expect(.OpenParenthesis, tokens.next());
         try expect(.Void, tokens.next());
         try expect(.CloseParenthesis, tokens.next());
+
+        return .{ .allocator = allocator, .name = token.symbol, .body = try .init(allocator, tokens) };
+    }
+
+    pub fn deinit(self: *Function) void {
+        self.body.deinit();
+    }
+};
+
+pub const Block = struct {
+    allocator: Allocator,
+    items: []BlockItem,
+
+    pub fn init(allocator: Allocator, tokens: *TokenIterator) ParsingError!Block {
+        var blockList: ArrayList(BlockItem) = .empty;
 
         try expect(.OpenBrace, tokens.next());
         while (tokens.peek()) |nextToken| {
@@ -73,15 +86,15 @@ pub const Function = struct {
         }
         try expect(.CloseBrace, tokens.next());
 
-        const body = blockList.toOwnedSlice(allocator) catch allocError();
-        return .{ .allocator = allocator, .name = token.symbol, .body = body };
+        const items = blockList.toOwnedSlice(allocator) catch allocError();
+        return .{ .allocator = allocator, .items = items };
     }
 
-    pub fn deinit(self: *Function) void {
-        defer self.allocator.free(self.body);
+    pub fn deinit(self: *Block) void {
+        defer self.allocator.free(self.items);
 
-        for (self.body) |*blockItem| {
-            switch (blockItem.*) {
+        for (self.items) |*item| {
+            switch (item.*) {
                 .Statement => |*statement| Statement.deinit(statement),
                 .Declaration => |*decl| {
                     if (decl.initialize) |*initExpr| {
@@ -107,8 +120,9 @@ pub const BlockItem = union(BlockItemTag) {
     }
 };
 
-const StatementTag = enum { Expression, Goto, If, Label, Return, Null };
+const StatementTag = enum { Compound, Expression, Goto, If, Label, Return, Null };
 pub const Statement = union(StatementTag) {
+    Compound: Compound,
     Expression: Expression,
     Goto: Goto,
     If: If,
@@ -119,6 +133,7 @@ pub const Statement = union(StatementTag) {
     pub fn parse(allocator: Allocator, tokens: *TokenIterator) ParsingError!Statement {
         var nextToken = tokens.peek() orelse unexpectedEOF();
         return switch (nextToken.type) {
+            .OpenBrace => .{ .Compound = try .init(allocator, tokens) },
             .Goto => blk: { // goto <identifier> ';'
                 try expect(.Goto, tokens.next());
                 const stmt: Statement = .{ .Goto = try .init(tokens) };
@@ -161,6 +176,7 @@ pub const Statement = union(StatementTag) {
 
     pub fn deinit(statement: *Statement) void {
         switch (statement.*) {
+            .Compound => statement.*.Compound.deinit(),
             .Return => statement.*.Return.deinit(),
             .Expression => Expression.deinit(&statement.*.Expression),
             .Null, .Goto => {},
@@ -250,6 +266,19 @@ pub const Return = struct {
 
     pub fn deinit(self: *Return) void {
         Expression.deinit(&self.expr);
+    }
+};
+
+pub const Compound = struct {
+    allocator: Allocator,
+    block: Block,
+
+    pub fn init(allocator: Allocator, tokens: *TokenIterator) ParsingError!Compound {
+        return .{ .allocator = allocator, .block = try .init(allocator, tokens) };
+    }
+
+    pub fn deinit(self: *Compound) void {
+        self.block.deinit();
     }
 };
 
