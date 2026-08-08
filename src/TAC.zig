@@ -53,7 +53,7 @@ pub const Function = struct {
             .labels = .empty,
         };
 
-        for (ast.function.body.items) |blockItem| {
+        for (ast.function.body) |blockItem| {
             switch (blockItem) {
                 .Statement => |stmt| function.emitStatement(stmt) catch allocError(),
                 .Declaration => |decl| {

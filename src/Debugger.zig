@@ -18,7 +18,7 @@ pub fn printParserAST(ast: Parser.AST) void {
     const function = program.function;
     print("{any} (\n", .{@TypeOf(program)});
     print("  {any} (\n", .{@TypeOf(function)});
-    for (function.body.items) |blockItem| {
+    for (function.body) |blockItem| {
         switch (blockItem) {
             .Statement => |statement| printStatement(statement, 4),
             .Declaration => |decl| {
@@ -215,7 +215,7 @@ pub fn printAssemblerAST(ast: Assembler.AST) void {
     print("    name={s}\n", .{function.name});
     print("    instructions=[\n", .{});
 
-    for (function.instructions.items) |instr| {
+    for (function.instructions) |instr| {
         print("      {s} (", .{@tagName(instr)});
         switch (instr) {
             .Ret, .Cqo => print(")", .{}),

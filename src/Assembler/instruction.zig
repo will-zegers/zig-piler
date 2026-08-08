@@ -3,7 +3,7 @@ const Allocator = std.mem.Allocator;
 
 const TAC = @import("../TAC.zig");
 
-pub const Instructions = std.ArrayList(Instruction);
+pub const InstructionList = std.ArrayList(Instruction);
 
 const InstructionTag = enum {
     Mov,

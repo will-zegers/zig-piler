@@ -13,7 +13,7 @@ allocator: Allocator,
 instructions: ArrayList([]const u8),
 
 pub fn init(allocator: Allocator, ast: Assembler.AST) !CodeEmitter {
-    const assembly = ast.function.instructions.items;
+    const assembly = ast.function.instructions;
 
     // Assembly instructions will be 1:1 with the []const u8 entries in the emitted code, plus
     // a few bookkeeping and prelude/epilogue instructions

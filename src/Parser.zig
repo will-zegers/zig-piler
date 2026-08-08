@@ -50,10 +50,10 @@ pub const Program = struct {
 pub const Function = struct {
     allocator: Allocator,
     name: identifier,
-    body: std.ArrayList(BlockItem),
+    body: []BlockItem,
 
     pub fn init(allocator: Allocator, tokens: *TokenIterator) ParsingError!Function {
-        var body: ArrayList(BlockItem) = .empty;
+        var blockList: ArrayList(BlockItem) = .empty;
 
         try expect(.Int, tokens.next());
 
@@ -69,17 +69,18 @@ pub const Function = struct {
             if (.CloseBrace == nextToken.type) break;
 
             const blockItem = try BlockItem.parse(allocator, tokens);
-            body.append(allocator, blockItem) catch allocError();
+            blockList.append(allocator, blockItem) catch allocError();
         }
         try expect(.CloseBrace, tokens.next());
 
+        const body = blockList.toOwnedSlice(allocator) catch allocError();
         return .{ .allocator = allocator, .name = token.symbol, .body = body };
     }
 
     pub fn deinit(self: *Function) void {
-        defer self.body.deinit(self.allocator);
+        defer self.allocator.free(self.body);
 
-        for (self.body.items) |*blockItem| {
+        for (self.body) |*blockItem| {
             switch (blockItem.*) {
                 .Statement => |*statement| Statement.deinit(statement),
                 .Declaration => |*decl| {

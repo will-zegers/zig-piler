@@ -4,7 +4,7 @@ const Allocator = std.mem.Allocator;
 const Patcher = @This();
 
 const instructions = @import("instruction.zig");
-const Instructions = instructions.Instructions;
+const InstructionList = instructions.InstructionList;
 const Cmp = instructions.Cmp;
 const Mov = instructions.Mov;
 const Binary = instructions.Binary;
@@ -21,10 +21,10 @@ const IllegalInstruction = enum {
     Ill_Shift_Rcx,
 };
 
-pub fn patchInstructions(allocator: Allocator, unpatched: *Instructions) Instructions {
-    var patched: Instructions = .empty;
+pub fn patchInstructions(allocator: Allocator, unpatched: []Instruction) []Instruction {
+    var patched: InstructionList = .empty;
 
-    for (unpatched.items) |instr| {
+    for (unpatched) |instr| {
         if (Patcher.detectIllegal(instr)) |illegal| {
             patched.appendSlice(allocator, switch (illegal) {
                 .Ill_Binary_Operands => &.{
@@ -61,9 +61,9 @@ pub fn patchInstructions(allocator: Allocator, unpatched: *Instructions) Instruc
             patched.append(allocator, instr) catch allocError();
         }
     }
-    unpatched.deinit(allocator);
+    allocator.free(unpatched);
 
-    return patched;
+    return patched.toOwnedSlice(allocator) catch allocError();
 }
 
 fn detectIllegal(instr: Instruction) ?IllegalInstruction {

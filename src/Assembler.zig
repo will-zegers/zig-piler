@@ -18,7 +18,7 @@ const Jmp = instruction.Jmp;
 const JmpCC = instruction.JmpCC;
 const Label = instruction.Label;
 const AllocStack = instruction.AllocStack;
-const Instructions = instruction.Instructions;
+const InstructionList = instruction.InstructionList;
 
 const Assembler = @This();
 
@@ -49,10 +49,10 @@ const Program = struct {
 const Function = struct {
     allocator: Allocator,
     name: []const u8,
-    instructions: Instructions,
+    instructions: []Instruction,
 
     pub fn init(allocator: Allocator, function: TAC.Function) Function {
-        var instructions: Instructions = .empty;
+        var instrList: InstructionList = .empty;
 
         // First pass to build Assembly AST
         for (function.body.items) |instr| {
@@ -68,19 +68,20 @@ const Function = struct {
             };
             defer allocator.free(assembly);
 
-            instructions.appendSlice(allocator, assembly) catch allocError();
+            instrList.appendSlice(allocator, assembly) catch allocError();
         }
 
         // Second pass, replace Pseudo registers with stack locations and prepend the prelude
-        setupStack(allocator, &instructions);
+        setupStack(allocator, &instrList);
 
         // Find illegal instructions (see specifications in the Patcher module)
-        instructions = Patcher.patchInstructions(allocator, &instructions);
+        var instructions = instrList.toOwnedSlice(allocator) catch allocError();
+        instructions = Patcher.patchInstructions(allocator, instructions);
 
         return .{ .allocator = allocator, .name = function.name, .instructions = instructions, };
     }
 
-    fn setupStack(allocator: Allocator, instructions: *Instructions) void {
+    fn setupStack(allocator: Allocator, instructions: *InstructionList) void {
         var pseudoMap: std.StringHashMap(isize) = .init(allocator);
         defer pseudoMap.deinit();
         var stackPointer: isize = -WORD_SIZE;
@@ -128,7 +129,7 @@ const Function = struct {
     }
 
     pub fn deinit(self: *Function) void {
-        defer self.instructions.deinit(self.allocator);
+        defer self.allocator.free(self.instructions);
     }
 };
 

@@ -62,7 +62,7 @@ pub const Expression = union(ExpressionTag) {
                         const temp = try Assignment.init(allocator, nextToken, left, right);
                         break :blk .{ .Assignment = temp };
                     },
-                    else => unreachable,
+                    else => return unexpectedToken(nextToken),
                 };
             } else {
                 left = switch (nextToken.type) {
@@ -75,7 +75,7 @@ pub const Expression = union(ExpressionTag) {
                         const temp = try Binary.init(allocator, nextToken, left, right);
                         break :blk .{ .Binary = temp };
                     },
-                    else => unreachable,
+                    else => return unexpectedToken(nextToken),
                 };
             }
             nextToken = tokens.peek() orelse return unexpectedEOF();
