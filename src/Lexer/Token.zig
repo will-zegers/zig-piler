@@ -10,11 +10,15 @@ lineIndex: usize = 0, // used for tracking the line number of the token in the s
 
 pub const Type = enum {
     BinaryOp,
+    Break,
     CloseBrace,
     CloseParenthesis,
     Colon,
     Constant,
+    Continue,
+    Do,
     Else,
+    For,
     Goto,
     Identifier,
     If,
@@ -26,6 +30,7 @@ pub const Type = enum {
     TernaryOp,
     UnaryOp,
     Void,
+    While,
 };
 
 pub fn iterate(tokens: []Token) Iterator {

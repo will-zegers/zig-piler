@@ -1,20 +1,24 @@
 const std = @import("std");
 const mem = std.mem;
 const Allocator = mem.Allocator;
-const fatal = std.process.fatal;
 const ArrayList = std.ArrayList;
 
+const common = @import("Parser/common.zig");
+const ParsingError = common.ParsingError;
+const allocError = common.allocError;
+const expect = common.expect;
+const identifier = common.identifier;
+const int = common.int;
+const unexpectedEOF = common.unexpectedEOF;
+
 const expression = @import("Parser/expression.zig");
-pub const expect = expression.expect;
 pub const Expression = expression.Expression;
 pub const Binary = expression.Binary;
 pub const Unary = expression.Unary;
 pub const Factor = expression.Factor;
 pub const Constant = expression.Constant;
 pub const Assignment = expression.Assignment;
-pub const ParsingError = expression.ParsingError;
 
-const Semantic = @import("Semantic.zig");
 const Token = @import("Lexer.zig").Token;
 const TokenIterator = Token.Iterator;
 
@@ -22,13 +26,11 @@ const Parser = @This();
 
 pub const AST = Program;
 
-const identifier = []const u8;
-const int = []const u8;
-
 pub fn parse(allocator: Allocator, tokens: *TokenIterator) ParsingError!AST {
     const ast = try Program.init(allocator, tokens);
     if (tokens.peek()) |token| {
-        fatal("Unexpected token(s) at end of file: {s}", .{token.symbol});
+        std.log.err("Unexpected token(s) at end of file: {s}", .{token.symbol});
+        std.process.exit(1);
     }
 
     return ast;
@@ -62,7 +64,7 @@ pub const Function = struct {
         try expect(.Void, tokens.next());
         try expect(.CloseParenthesis, tokens.next());
 
-        return .{ .allocator = allocator, .name = token.symbol, .body = try .init(allocator, tokens) };
+        return .{ .allocator = allocator, .name = token.symbol, .body = try .parse(allocator, tokens) };
     }
 
     pub fn deinit(self: *Function) void {
@@ -74,7 +76,7 @@ pub const Block = struct {
     allocator: Allocator,
     items: []BlockItem,
 
-    pub fn init(allocator: Allocator, tokens: *TokenIterator) ParsingError!Block {
+    pub fn parse(allocator: Allocator, tokens: *TokenIterator) ParsingError!Block {
         var blockList: ArrayList(BlockItem) = .empty;
 
         try expect(.OpenBrace, tokens.next());
@@ -94,14 +96,7 @@ pub const Block = struct {
         defer self.allocator.free(self.items);
 
         for (self.items) |*item| {
-            switch (item.*) {
-                .Statement => |*statement| Statement.deinit(statement),
-                .Declaration => |*decl| {
-                    if (decl.initialize) |*initExpr| {
-                        Expression.deinit(initExpr);
-                    }
-                },
-            }
+            item.deinit();
         }
     }
 };
@@ -114,75 +109,192 @@ pub const BlockItem = union(BlockItemTag) {
     pub fn parse(allocator: Allocator, tokens: *TokenIterator) ParsingError!BlockItem {
         const nextToken = tokens.peek() orelse unexpectedEOF();
         return if (.Int == nextToken.type)
-            .{ .Declaration = try .init(allocator, tokens) }
+            .{ .Declaration = try .parse(allocator, tokens) }
         else
             .{ .Statement = try .parse(allocator, tokens) };
     }
+
+    pub fn deinit(self: *BlockItem) void {
+        switch (self.*) {
+            .Statement => |*statement| Statement.deinit(statement),
+            .Declaration => |*decl| decl.deinit(),
+        }
+    }
 };
 
-const StatementTag = enum { Compound, Expression, Goto, If, Label, Return, Null };
-pub const Statement = union(StatementTag) {
-    Compound: Compound,
-    Expression: Expression,
-    Goto: Goto,
-    If: If,
-    Label: Label,
-    Return: Return,
-    Null: void, // needed to represent empty semicolon statements (for later?)
+pub const Declaration = struct {
+    name: identifier,
+    init: ?Expression,
+    lineIndex: usize,
 
-    pub fn parse(allocator: Allocator, tokens: *TokenIterator) ParsingError!Statement {
-        var nextToken = tokens.peek() orelse unexpectedEOF();
+    pub fn parse(allocator: Allocator, tokens: *TokenIterator) ParsingError!Declaration {
+        try expect(.Int, tokens.next());
+        const token = tokens.peek() orelse unexpectedEOF();
+        try expect(.Identifier, token);
+
+        const init = try Assignment.parse(allocator, tokens);
+        try expect(.Semicolon, tokens.next());
+
+        return .{ .name = token.symbol, .init = init, .lineIndex = token.lineIndex };
+    }
+
+    pub fn deinit(self: *Declaration) void {
+        if (self.*.init) |*init| Expression.deinit(init);
+    }
+};
+
+pub const Break = struct {
+    label: identifier,
+    lineIndex: usize,
+
+    pub fn parse(tokens: *TokenIterator) ParsingError!Break {
+        const token = tokens.next() orelse return unexpectedEOF();
+        try expect(.Semicolon, tokens.next());
+        return .{ .label = token.symbol, .lineIndex = token.lineIndex };
+    }
+};
+
+pub const Continue = struct {
+    label: identifier,
+    lineIndex: usize,
+
+    pub fn parse(tokens: *TokenIterator) ParsingError!Continue {
+        const token = tokens.next() orelse return unexpectedEOF();
+        try expect(.Semicolon, tokens.next());
+        return .{ .label = token.symbol, .lineIndex = token.lineIndex };
+    }
+};
+
+pub const DoWhile = struct {
+    allocator: Allocator,
+    body: *Statement,
+    cond: Expression,
+
+    pub fn parse(allocator: Allocator, tokens: *TokenIterator) ParsingError!DoWhile {
+        try expect(.Do, tokens.next());
+
+        const body = allocator.create(Statement) catch allocError();
+        body.* = try Statement.parse(allocator, tokens);
+
+        try expect(.While, tokens.next());
+        try expect(.OpenParenthesis, tokens.peek());
+        const cond = try Expression.parse(allocator, tokens, 0); // cond will be parsed in the '(' <expr> ')' form
+        try expect(.Semicolon, tokens.peek());
+
+        return .{ .allocator = allocator, .body = body, .cond = cond };
+    }
+
+    pub fn deinit(self: *DoWhile) void {
+        Statement.deinit(self.body);
+        self.allocator.destroy(self.body);
+
+        Expression.deinit(&self.cond);
+    }
+};
+
+const ForInitTag = enum { Declaration, Expression };
+const ForInit = union(ForInitTag) {
+    Declaration: Declaration,
+    Expression: ?Expression,
+
+    pub fn parse(allocator: Allocator, tokens: *TokenIterator) ParsingError!ForInit {
+        const nextToken = tokens.peek() orelse unexpectedEOF();
         return switch (nextToken.type) {
-            .OpenBrace => .{ .Compound = try .init(allocator, tokens) },
-            .Goto => blk: { // goto <identifier> ';'
-                try expect(.Goto, tokens.next());
-                const stmt: Statement = .{ .Goto = try .init(tokens) };
+            .Int => .{ .Declaration = try .parse(allocator, tokens) },
+            else => blk: {
+                const expr: ?Expression = if (.Semicolon != nextToken.type)
+                    try .parse(allocator, tokens, 0)
+                else
+                    null;
                 try expect(.Semicolon, tokens.next());
-                break :blk stmt;
-            },
-            .If => blk: { // if '(' <expr> ')' <statement> [else <statement>]
-                try expect(.If, tokens.next());
-                try expect(.OpenParenthesis, tokens.peek());
-                break :blk .{ .If = try .init(allocator, tokens) };
-            },
-            .Identifier => blk: { // <identifier> ':' <statement>
-                const ident = tokens.next() orelse unexpectedEOF();
-                nextToken = tokens.peek() orelse unexpectedEOF();
-                if (nextToken.type == .Colon) { // labeled statement of the form <identifier> ':' <statement>
-                    try expect(.Identifier, ident);
-                    try expect(.Colon, tokens.next());
-                    break :blk .{ .Label = try .init(allocator, ident, tokens) };
-                } else { // otherwise parse it as an expression of the form <expr> ';'
-                    tokens.rewind();
-                    const expr: Statement = .{ .Expression = try Expression.parse(allocator, tokens, 0) };
-                    try expect(.Semicolon, tokens.next());
-                    break :blk expr;
-                }
-            },
-            .Return => blk: { // return <expr> ';'
-                try expect(.Return, tokens.next());
-                const stmt: Statement = .{ .Return = try .init(allocator, tokens) };
-                try expect(.Semicolon, tokens.next());
-                break :blk stmt;
-            },
-            .Semicolon => .{ .Null = tokens.skip() },
-            else => blk: { // <expr> ';'
-                const expr: Statement = .{ .Expression = try Expression.parse(allocator, tokens, 0) };
-                try expect(.Semicolon, tokens.next());
-                break :blk expr;
+                break :blk .{ .Expression = expr };
             },
         };
     }
 
-    pub fn deinit(statement: *Statement) void {
-        switch (statement.*) {
-            .Compound => statement.*.Compound.deinit(),
-            .Return => statement.*.Return.deinit(),
-            .Expression => Expression.deinit(&statement.*.Expression),
-            .Null, .Goto => {},
-            .If => statement.*.If.deinit(),
-            .Label => statement.*.Label.deinit(),
+    pub fn deinit(self: *ForInit) void {
+        switch (self.*) {
+            .Expression => if (self.*.Expression) |*expr| Expression.deinit(expr),
+            .Declaration => self.*.Declaration.deinit(),
         }
+    }
+};
+
+pub const For = struct {
+    allocator: Allocator,
+    init: ForInit,
+    cond: ?Expression,
+    post: ?Expression,
+    body: *Statement,
+
+    pub fn parse(allocator: Allocator, tokens: *TokenIterator) ParsingError!For {
+        try expect(.For, tokens.next());
+        try expect(.OpenParenthesis, tokens.next());
+
+        const init: ForInit = try .parse(allocator, tokens);
+
+        var nextToken = tokens.peek() orelse unexpectedEOF();
+        const cond = if (.Semicolon != nextToken.type) try Expression.parse(allocator, tokens, 0) else null;
+        try expect(.Semicolon, tokens.next());
+
+        nextToken = tokens.peek() orelse unexpectedEOF();
+        const post = if (.CloseParenthesis != nextToken.type) try Expression.parse(allocator, tokens, 0) else null;
+        try expect(.CloseParenthesis, tokens.next());
+
+        const body = allocator.create(Statement) catch allocError();
+        body.* = try Statement.parse(allocator, tokens);
+
+        return .{ .allocator = allocator, .init = init, .cond = cond, .post = post, .body = body };
+    }
+
+    pub fn deinit(self: *For) void {
+        self.init.deinit();
+        if (self.cond) |*cond| Expression.deinit(cond);
+        if (self.post) |*post| Expression.deinit(post);
+
+        Statement.deinit(self.body);
+        self.allocator.destroy(self.body);
+    }
+};
+
+pub const While = struct {
+    allocator: Allocator,
+    cond: Expression,
+    body: *Statement,
+
+    pub fn parse(allocator: Allocator, tokens: *TokenIterator) ParsingError!While {
+        try expect(.While, tokens.next());
+        try expect(.OpenParenthesis, tokens.peek());
+        const cond = try Expression.parse(allocator, tokens, 0);
+
+        const body = allocator.create(Statement) catch allocError();
+        body.* = try Statement.parse(allocator, tokens);
+
+        return .{ .allocator = allocator, .cond = cond, .body = body };
+    }
+
+    pub fn deinit(self: *While) void {
+        Expression.deinit(&self.cond);
+
+        Statement.deinit(self.body);
+        self.allocator.destroy(self.body);
+    }
+};
+
+pub const Goto = struct {
+    label: identifier,
+    lineIndex: usize,
+
+    pub fn parse(tokens: *TokenIterator) ParsingError!Goto {
+        try expect(.Goto, tokens.next());
+
+        const label = tokens.next() orelse unexpectedEOF();
+        try expect(.Identifier, label);
+        const self: Goto = .{ .label = label.symbol, .lineIndex = label.lineIndex };
+
+        try expect(.Semicolon, tokens.next());
+
+        return self;
     }
 };
 
@@ -192,7 +304,10 @@ pub const If = struct {
     then: *Statement,
     else_: ?*Statement,
 
-    pub fn init(allocator: Allocator, tokens: *TokenIterator) ParsingError!If {
+    pub fn parse(allocator: Allocator, tokens: *TokenIterator) ParsingError!If {
+        try expect(.If, tokens.next());
+        try expect(.OpenParenthesis, tokens.peek()); // only peek, since parentheses will be handled while parsing the expr
+
         const condition = try Expression.parse(allocator, tokens, 0);
 
         const then = allocator.create(Statement) catch allocError();
@@ -206,6 +321,7 @@ pub const If = struct {
             else_ = allocator.create(Statement) catch allocError();
             else_.?.* = try .parse(allocator, tokens);
         }
+        // no need to check for close parenthesis, since it's handled by the expression parser
 
         return .{ .allocator = allocator, .condition = condition, .then = then, .else_ = else_ };
     }
@@ -224,25 +340,16 @@ pub const If = struct {
     }
 };
 
-pub const Goto = struct {
-    label: identifier,
-    lineIndex: usize,
-
-    pub fn init(tokens: *TokenIterator) ParsingError!Goto {
-        const label = tokens.next() orelse unexpectedEOF();
-        try expect(.Identifier, label);
-
-        return .{ .label = label.symbol, .lineIndex = label.lineIndex };
-    }
-};
-
 pub const Label = struct {
     allocator: Allocator,
     name: identifier,
     statement: *Statement,
     lineIndex: usize,
 
-    pub fn init(allocator: Allocator, name: Token, tokens: *TokenIterator) ParsingError!Label {
+    pub fn parse(allocator: Allocator, name: Token, tokens: *TokenIterator) ParsingError!Label {
+        try expect(.Identifier, name);
+        try expect(.Colon, tokens.next());
+
         const statement = allocator.create(Statement) catch allocError();
         statement.* = try Statement.parse(allocator, tokens);
 
@@ -259,9 +366,13 @@ pub const Return = struct {
     allocator: Allocator,
     expr: Expression,
 
-    pub fn init(allocator: Allocator, tokens: *TokenIterator) ParsingError!Return {
+    pub fn parse(allocator: Allocator, tokens: *TokenIterator) ParsingError!Return {
+        try expect(.Return, tokens.next());
         const expr = try Expression.parse(allocator, tokens, 0);
-        return .{ .allocator = allocator, .expr = expr };
+        const self: Return = .{ .allocator = allocator, .expr = expr };
+        try expect(.Semicolon, tokens.next());
+
+        return self;
     }
 
     pub fn deinit(self: *Return) void {
@@ -269,42 +380,66 @@ pub const Return = struct {
     }
 };
 
-pub const Compound = struct {
-    allocator: Allocator,
-    block: Block,
+const StatementTag = enum { Break, Compound, Continue, DoWhile, Expression, For, Goto, If, Label, Return, While, Null };
+pub const Statement = union(StatementTag) {
+    Break: Break,
+    Compound: Block,
+    Continue: Continue,
+    DoWhile: DoWhile,
+    Expression: Expression,
+    For: For,
+    Goto: Goto,
+    If: If,
+    Label: Label,
+    Return: Return,
+    While: While,
+    Null: void, // needed to represent empty semicolon-delimited statements
 
-    pub fn init(allocator: Allocator, tokens: *TokenIterator) ParsingError!Compound {
-        return .{ .allocator = allocator, .block = try .init(allocator, tokens) };
+    pub fn parse(allocator: Allocator, tokens: *TokenIterator) ParsingError!Statement {
+        var nextToken = tokens.peek() orelse unexpectedEOF();
+        return switch (nextToken.type) {
+            .Break => .{ .Break = try .parse(tokens) },
+            .OpenBrace => .{ .Compound = try .parse(allocator, tokens) },
+            .Continue => .{ .Continue = try .parse(tokens) },
+            .Do => .{ .DoWhile = try .parse(allocator, tokens) },
+            .Goto => .{ .Goto = try .parse(tokens) },
+            .For => .{ .For = try .parse(allocator, tokens) },
+            .If => .{ .If = try .parse(allocator, tokens) },
+            .Return => .{ .Return = try .parse(allocator, tokens) },
+            .While => .{ .While = try .parse(allocator, tokens) },
+            .Semicolon => .{ .Null = tokens.skip() },
+            .Identifier => blk: { // <identifier> ':' <statement>
+                const ident = tokens.next() orelse unexpectedEOF();
+                nextToken = tokens.peek() orelse unexpectedEOF();
+                if (nextToken.type == .Colon) { // labeled statement of the form <identifier> ':' <statement>
+                    break :blk .{ .Label = try .parse(allocator, ident, tokens) };
+                } else { // otherwise parse it as an expression of the form <expr> ';'
+                    tokens.rewind();
+                    const expr: Statement = .{ .Expression = try Expression.parse(allocator, tokens, 0) };
+                    try expect(.Semicolon, tokens.next());
+                    break :blk expr;
+                }
+            },
+            else => blk: { // <expr> ';'
+                const expr: Statement = .{ .Expression = try Expression.parse(allocator, tokens, 0) };
+                try expect(.Semicolon, tokens.next());
+                break :blk expr;
+            },
+        };
     }
 
-    pub fn deinit(self: *Compound) void {
-        self.block.deinit();
+    pub fn deinit(statement: *Statement) void {
+        switch (statement.*) {
+            .Compound => statement.*.Compound.deinit(),
+            .DoWhile => statement.*.DoWhile.deinit(),
+            .Expression => Expression.deinit(&statement.*.Expression),
+            .For => statement.*.For.deinit(),
+            .If => statement.*.If.deinit(),
+            .Label => statement.*.Label.deinit(),
+            .Null, .Goto => {},
+            .Return => statement.*.Return.deinit(),
+            .While => statement.*.While.deinit(),
+            else => {},
+        }
     }
 };
-
-pub const Declaration = struct {
-    name: identifier,
-    initialize: ?Expression,
-    lineIndex: usize,
-
-    pub fn init(allocator: Allocator, tokens: *TokenIterator) ParsingError!Declaration {
-        try expect(.Int, tokens.next());
-        const token = tokens.peek() orelse unexpectedEOF();
-        try expect(.Identifier, token);
-
-        const initialize = try Assignment.parse(allocator, tokens);
-        try expect(.Semicolon, tokens.next());
-
-        return .{ .name = token.symbol, .initialize = initialize, .lineIndex = token.lineIndex };
-    }
-};
-
-fn unexpectedEOF() noreturn {
-    std.log.err("Unexpected end of file", .{});
-    std.process.exit(1);
-}
-
-fn allocError() noreturn {
-    std.log.err("Memory allocation error", .{});
-    std.process.exit(1);
-}

@@ -83,7 +83,7 @@ fn resolveDeclaration(self: *Semantic, decl: *Declaration, variableMap: *Identif
     const unique = self.generateUnique(name);
     variableMap.put(name, .{ .unique = unique }) catch allocError();
 
-    if (decl.initialize) |*initExpr| {
+    if (decl.init) |*initExpr| {
         self.resolveExpression(initExpr, variableMap.*);
     }
 }
@@ -94,7 +94,7 @@ fn resolveStatementFP(self: *Semantic, statement: *Statement, variableMap: Ident
             var mapClone = newScope(variableMap);
             defer mapClone.deinit();
 
-            for (compound.block.items) |*item| {
+            for (compound.items) |*item| {
                 switch (item.*) {
                     .Statement => |*stmt| self.resolveStatementFP(stmt, mapClone),
                     .Declaration => |*decl| self.resolveDeclaration(decl, &mapClone),
@@ -126,6 +126,7 @@ fn resolveStatementFP(self: *Semantic, statement: *Statement, variableMap: Ident
             self.resolveStatementFP(lbl.statement, variableMap);
         },
         .Goto, .Null => {},
+        else => {}, // TODO: Break, Continue, DoWhile, For, While
     }
 }
 
@@ -173,7 +174,7 @@ fn resolveExpression(self: *Semantic, expr: *Expression, variableMap: Identifier
 fn resolveStatementSP(self: *Semantic, statement: *Statement) void {
     switch (statement.*) {
         .Compound => |*compound| {
-            for (compound.block.items) |*item| {
+            for (compound.items) |*item| {
                 switch (item.*) {
                     .Statement => |*stmt| self.resolveStatementSP(stmt),
                     .Declaration => {},

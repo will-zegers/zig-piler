@@ -8,12 +8,17 @@ pub const Token = @import("Lexer/Token.zig");
 const TokenIterator = Token.Iterator;
 
 const KeywordMap = std.StaticStringMap(Token.Type).initComptime(.{
+    .{ "break", .Break },
+    .{ "continue", .Continue },
+    .{ "do", .Do },
+    .{ "for", .For },
     .{ "goto", .Goto },
     .{ "if", .If },
     .{ "int", .Int },
     .{ "else", .Else },
     .{ "return", .Return },
     .{ "void", .Void },
+    .{ "while", .While },
 });
 
 const Lexer = @This();

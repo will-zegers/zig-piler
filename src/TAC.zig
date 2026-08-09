@@ -57,7 +57,7 @@ pub const Function = struct {
             switch (blockItem) {
                 .Statement => |stmt| function.emitStatement(stmt) catch allocError(),
                 .Declaration => |decl| {
-                    if (decl.initialize) |initExpr| {
+                    if (decl.init) |initExpr| {
                         _ = function.emitExpression(initExpr) catch allocError();
                     }
                 },
@@ -83,11 +83,11 @@ pub const Function = struct {
 
     fn emitStatement(self: *Function, stmt: Parser.Statement) !void {
         switch (stmt) {
-            .Compound => |compound| for (compound.block.items) |item| {
+            .Compound => |compound| for (compound.items) |item| {
                 switch (item) {
                     .Statement => try self.emitStatement(item.Statement),
                     .Declaration => |decl| {
-                        if (decl.initialize) |initExpr| {
+                        if (decl.init) |initExpr| {
                             _ = self.emitExpression(initExpr) catch allocError();
                         }
                     },
@@ -119,6 +119,7 @@ pub const Function = struct {
                 _ = try self.emitStatement(lbl.statement.*);
             },
             .Goto => |goto| try self.body.append(self.allocator, .{ .Jump = .{ .target = goto.label } }),
+            else => {}, // TODO: Break, Continue, DoWhile, For, While
         }
     }
 

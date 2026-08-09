@@ -7,15 +7,13 @@ const Allocator = std.mem.Allocator;
 const Token = @import("../Lexer.zig").Token;
 const TokenIterator = Token.Iterator;
 
-const identifier = []const u8;
-const int = []const u8;
-
-pub const ParsingError = error{
-    EOF,
-    Lvalue,
-    Syntax,
-    Token,
-};
+const common = @import("common.zig");
+const ParsingError = common.ParsingError;
+const allocError = common.allocError;
+const expect = common.expect;
+const identifier = common.identifier;
+const int = common.int;
+const unexpectedEOF = common.unexpectedEOF;
 
 pub const ExpressionTag = enum {
     Constant,
@@ -331,28 +329,6 @@ fn parseFactor(allocator: Allocator, tokens: *TokenIterator) ParsingError!Expres
     }
 
     return expr;
-}
-
-pub fn expect(expected: Token.Type, token: ?Token) ParsingError!void {
-    if (token == null) {
-        std.log.err("Unexpected end of file", .{});
-        return ParsingError.Syntax;
-    }
-
-    if (expected != token.?.type) {
-        std.log.err("Got unexpected {any} token '{s}'. Expected type {any}", .{ token.?.type, token.?.symbol, expected });
-        return ParsingError.Syntax;
-    }
-}
-
-fn unexpectedEOF() ParsingError {
-    std.log.err("Unexpected end of file", .{});
-    return ParsingError.EOF;
-}
-
-fn allocError() noreturn {
-    std.log.err("Memory allocation error", .{});
-    std.process.exit(1);
 }
 
 fn unexpectedToken(token: Token) ParsingError {

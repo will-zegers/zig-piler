@@ -19,21 +19,30 @@ pub fn printParserAST(ast: Parser.AST) void {
     print("{any} (\n", .{@TypeOf(program)});
     print("  {any} (\n", .{@TypeOf(function)});
     for (function.body.items) |blockItem| {
-        printBlockItem(blockItem);
+        printBlockItem(blockItem, 4);
     }
     print("  )\n", .{});
     print(")\n", .{});
 }
 
-fn printBlockItem(blockItem: Parser.BlockItem) void {
+fn printBlockItem(blockItem: Parser.BlockItem, indent: usize) void {
+    const indentStr = std.heap.page_allocator.alloc(u8, indent) catch allocError();
+    for (indentStr, 0..) |_, i| {
+        indentStr[i] = ' ';
+    }
+    defer std.heap.page_allocator.free(indentStr);
+
     switch (blockItem) {
-        .Statement => |statement| printStatement(statement, 4),
+        .Statement => |statement| printStatement(statement, indent),
         .Declaration => |decl| {
-            print("      {any} (\n", .{@TypeOf(decl)});
-            if (decl.initialize) |init| {
+            print("{s}{any} (", .{ indentStr, @TypeOf(decl) });
+            if (decl.init) |init| {
+                print("\n", .{});
                 printExpression(init, 8);
+                print("{s})\n", .{indentStr});
+            } else {
+                print("{s}{s})\n", .{ indentStr, decl.name });
             }
-            print("    )\n", .{});
         },
     }
 }
@@ -47,15 +56,14 @@ fn printStatement(statement: Parser.Statement, indent: usize) void {
 
     switch (statement) {
         .Compound => |compound| {
-            print("{s}{any} ()\n", .{ indentStr, @TypeOf(compound) });
-            for (compound.block.items) |item| {
-                printBlockItem(item);
+            print("{s}{{\n", .{indentStr});
+            for (compound.items) |item| {
+                printBlockItem(item, indent + 2);
             }
+            print("{s}}}\n", .{indentStr});
         },
         .Expression => |expr| {
-            print("{s}{any} (\n", .{ indentStr, @TypeOf(expr) });
-            printExpression(expr, indent + 2);
-            print("{s})\n", .{indentStr});
+            printExpression(expr, indent);
         },
         .If => |if_| {
             print("{s}{any} (\n", .{ indentStr, @TypeOf(if_) });
@@ -82,6 +90,55 @@ fn printStatement(statement: Parser.Statement, indent: usize) void {
             printStatement(lbl.statement.*, indent + 4);
         },
         .Goto => |goto| print("{s}{any} (label={s})\n", .{ indentStr, @TypeOf(goto), goto.label }),
+        .Break => |b| {
+            print("{s}{any} ()\n", .{ indentStr, @TypeOf(b) });
+        },
+        .Continue => |c| {
+            print("{s}{any} ()\n", .{ indentStr, @TypeOf(c) });
+        },
+        .DoWhile => |dw| {
+            print("{s}{any} (\n", .{ indentStr, @TypeOf(dw) });
+            print("  {s}body=\n", .{indentStr});
+            printStatement(dw.body.*, indent + 2);
+            print("  {s}cond=\n", .{indentStr});
+            printExpression(dw.cond, indent + 2);
+            print("{s})\n", .{indentStr});
+        },
+        .For => |f| {
+            print("{s}{any} (\n", .{ indentStr, @TypeOf(f) });
+            switch (f.init) {
+                .Declaration => |decl| {
+                    if (decl.init) |init| {
+                        print("  {s}init=\n", .{indentStr});
+                        printExpression(init, 6);
+                    }
+                },
+                .Expression => |expr| {
+                    if (expr != null) {
+                        print("  {s}init=\n", .{indentStr});
+                        printExpression(expr.?, indent + 4);
+                    }
+                },
+            }
+            if (f.cond) |cond| {
+                print("  {s}cond=\n", .{indentStr});
+                printExpression(cond, indent + 4);
+            }
+            if (f.post) |post| {
+                print("  {s}post=\n", .{indentStr});
+                printExpression(post, indent + 4);
+            }
+            print("  {s}body=\n", .{indentStr});
+            printStatement(f.body.*, indent + 4);
+        },
+        .While => |w| {
+            print("{s}{any} (\n", .{ indentStr, @TypeOf(w) });
+            print("  {s}cond=\n", .{indentStr});
+            printExpression(w.cond, indent + 4);
+            print("  {s}body=\n", .{indentStr});
+            printStatement(w.body.*, indent + 4);
+            print("{s})\n", .{indentStr});
+        },
     }
 }
 
