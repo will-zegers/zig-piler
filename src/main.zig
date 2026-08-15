@@ -112,6 +112,8 @@ pub fn main(init: std.process.Init) !void {
             if (semantic.errors.capacity > 0) {
                 for (semantic.errors.items) |err| {
                     switch (err.type) {
+                        .Break => std.log.err("Break statement outside loop or switch statement", .{}),
+                        .Continue => std.log.err("Continue statement outside loop or switch statement", .{}),
                         .NotAssignable => std.log.err("Expression is not an assignable lvalue", .{}),
                         .Redeclaration => std.log.err("Redeclaration of '{s}'", .{err.name.?}),
                         .UndeclaredIdentifier => std.log.err("Use of undeclared identifier '{s}'", .{err.name.?}),

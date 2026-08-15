@@ -82,6 +82,8 @@ pub const Function = struct {
     }
 
     fn emitStatement(self: *Function, stmt: Parser.Statement) !void {
+        const context = self.name;
+        _ = context;
         switch (stmt) {
             .Compound => |compound| for (compound.items) |item| {
                 switch (item) {
@@ -118,7 +120,8 @@ pub const Function = struct {
                 try self.body.append(self.allocator, .{ .Label = .{ .identifier = lbl.name } });
                 _ = try self.emitStatement(lbl.statement.*);
             },
-            .Goto => |goto| try self.body.append(self.allocator, .{ .Jump = .{ .target = goto.label } }),
+            .Goto => |goto| try self.body.append(self.allocator, .{ .Jump = .{ .target = goto.target } }),
+            // .Break =>|b|
             else => {}, // TODO: Break, Continue, DoWhile, For, While
         }
     }

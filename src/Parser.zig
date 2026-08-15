@@ -144,29 +144,30 @@ pub const Declaration = struct {
 };
 
 pub const Break = struct {
-    label: identifier,
+    tag: identifier = undefined, // this will get set during semantic analysis
     lineIndex: usize,
 
     pub fn parse(tokens: *TokenIterator) ParsingError!Break {
         const token = tokens.next() orelse return unexpectedEOF();
         try expect(.Semicolon, tokens.next());
-        return .{ .label = token.symbol, .lineIndex = token.lineIndex };
+        return .{ .lineIndex = token.lineIndex };
     }
 };
 
 pub const Continue = struct {
-    label: identifier,
+    tag: identifier = undefined, // this will get set during semantic analysis
     lineIndex: usize,
 
     pub fn parse(tokens: *TokenIterator) ParsingError!Continue {
         const token = tokens.next() orelse return unexpectedEOF();
         try expect(.Semicolon, tokens.next());
-        return .{ .label = token.symbol, .lineIndex = token.lineIndex };
+        return .{ .lineIndex = token.lineIndex };
     }
 };
 
 pub const DoWhile = struct {
     allocator: Allocator,
+    tag: identifier = undefined, // this will get set during semantic analysis
     body: *Statement,
     cond: Expression,
 
@@ -222,6 +223,7 @@ const ForInit = union(ForInitTag) {
 
 pub const For = struct {
     allocator: Allocator,
+    tag: identifier = undefined, // this will get set during semantic analysis
     init: ForInit,
     cond: ?Expression,
     post: ?Expression,
@@ -259,6 +261,7 @@ pub const For = struct {
 
 pub const While = struct {
     allocator: Allocator,
+    tag: identifier = undefined, // this will get set during semantic analysis
     cond: Expression,
     body: *Statement,
 
@@ -282,15 +285,15 @@ pub const While = struct {
 };
 
 pub const Goto = struct {
-    label: identifier,
+    target: identifier,
     lineIndex: usize,
 
     pub fn parse(tokens: *TokenIterator) ParsingError!Goto {
         try expect(.Goto, tokens.next());
 
-        const label = tokens.next() orelse unexpectedEOF();
-        try expect(.Identifier, label);
-        const self: Goto = .{ .label = label.symbol, .lineIndex = label.lineIndex };
+        const token = tokens.next() orelse unexpectedEOF();
+        try expect(.Identifier, token);
+        const self: Goto = .{ .target = token.symbol, .lineIndex = token.lineIndex };
 
         try expect(.Semicolon, tokens.next());
 
