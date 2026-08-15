@@ -79,7 +79,7 @@ fn resolveDeclaration(self: *Semantic, decl: *Declaration, context: *Context) vo
             return;
         }
     }
-    const unique = self.generateUnique(name);
+    const unique = self.generateUnique(context.function, name);
     context.*.getScopeMut().variables.put(name, .{ .unique = unique }) catch allocError();
 
     if (decl.init) |*initExpr| {
@@ -117,7 +117,7 @@ fn resolveStatement1P(self: *Semantic, statement: *Statement, context: *Context)
                     return;
                 }
             }
-            const unique = self.generateUnique(name);
+            const unique = self.generateUnique(context.function, name);
             context.labels.put(name, .{ .unique = unique }) catch allocError();
 
             lbl.*.name = unique;
@@ -135,7 +135,7 @@ fn resolveStatement1P(self: *Semantic, statement: *Statement, context: *Context)
             self.errors.append(self.allocator, .{ .lineIndex = cont.lineIndex, .type = .Continue }) catch allocError();
         },
         .DoWhile => |*doWhl| {
-            const newTag = self.generateUnique("doWhile");
+            const newTag = self.generateUnique(context.function, "doWhile");
             doWhl.tag = newTag;
 
             context.pushScope(newTag);
@@ -146,14 +146,14 @@ fn resolveStatement1P(self: *Semantic, statement: *Statement, context: *Context)
         .While => |*whl| {
             self.resolveExpression(&whl.cond, context);
 
-            const newTag = self.generateUnique("while");
+            const newTag = self.generateUnique(context.function, "while");
             whl.tag = newTag;
 
             context.pushScope(newTag);
             self.resolveStatement1P(whl.body, context);
         },
         .For => |*f| {
-            const newTag = self.generateUnique("for");
+            const newTag = self.generateUnique(context.function, "for");
             f.tag = newTag;
 
             context.pushScope(newTag);
@@ -242,8 +242,8 @@ fn resolveExpression(self: *Semantic, expr: *Expression, context: *Context) void
     }
 }
 
-fn generateUnique(self: *Semantic, name: []const u8) []u8 {
-    const unique = std.fmt.allocPrint(self.allocator, "{s}.{d}", .{ name, self.uniqueIds.items.len }) catch allocError();
+fn generateUnique(self: *Semantic, function: []const u8, name: []const u8) []u8 {
+    const unique = std.fmt.allocPrint(self.allocator, "{s}.{s}.{d}", .{ function, name, self.uniqueIds.items.len }) catch allocError();
     self.uniqueIds.append(self.allocator, unique) catch allocError();
     return unique;
 }
