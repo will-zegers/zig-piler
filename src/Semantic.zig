@@ -9,53 +9,10 @@ const Expression = Parser.Expression;
 
 const Semantic = @This();
 
-const IdentifierMap = std.StringHashMap(Entry);
+const Context = @import("Semantic/Context.zig");
+const IdentifierMap = Context.IdentifierMap;
+
 const AST = Parser.AST;
-
-const Entry = struct {
-    unique: []const u8,
-    insideScope: bool = true,
-};
-
-const Context = struct {
-    allocator: Allocator,
-    labels: IdentifierMap,
-    variables: IdentifierMap,
-    loopTag: ?[]const u8 = null,
-    function: []const u8 = "main",
-
-    pub fn init(allocator: Allocator) Context {
-        return .{
-            .allocator = allocator,
-            .labels = .init(allocator),
-            .variables = .init(allocator),
-        };
-    }
-
-    pub fn deinit(self: *Context) void {
-        self.variables.deinit();
-        self.labels.deinit();
-    }
-
-    pub fn clone(self: Context) Context {
-        return .{
-            .allocator = self.allocator,
-            .variables = newScope(self.variables),
-            .labels = self.labels,
-            .loopTag = self.loopTag,
-        };
-    }
-
-    fn newScope(map: IdentifierMap) IdentifierMap {
-        var newMap = map.clone() catch allocError();
-        var it = newMap.valueIterator();
-        while (it.next()) |*entry| {
-            entry.*.insideScope = false;
-        }
-
-        return newMap;
-    }
-};
 
 allocator: Allocator,
 uniqueIds: std.ArrayList([]const u8) = .empty,
@@ -116,14 +73,14 @@ fn resolveSecondPass(self: *Semantic, ast: *AST, context: *Context) void {
 
 fn resolveDeclaration(self: *Semantic, decl: *Declaration, context: *Context) void {
     const name = decl.name;
-    if (context.variables.get(name)) |entry| {
+    if (context.getScope().variables.get(name)) |entry| {
         if (entry.insideScope) {
             self.errors.append(self.allocator, .{ .lineIndex = decl.lineIndex, .type = .Redeclaration, .name = name }) catch allocError();
             return;
         }
     }
     const unique = self.generateUnique(name);
-    context.variables.put(name, .{ .unique = unique }) catch allocError();
+    context.*.getScopeMut().variables.put(name, .{ .unique = unique }) catch allocError();
 
     if (decl.init) |*initExpr| {
         self.resolveExpression(initExpr, context);
@@ -133,22 +90,22 @@ fn resolveDeclaration(self: *Semantic, decl: *Declaration, context: *Context) vo
 fn resolveStatement1P(self: *Semantic, statement: *Statement, context: *Context) void {
     switch (statement.*) {
         .Compound => |*compound| {
-            var scopedContext = context.clone();
-            defer scopedContext.deinit();
+            context.pushScope(context.*.getScope().loopTag);
+            defer context.popScope();
 
             for (compound.items) |*item| {
                 switch (item.*) {
-                    .Statement => |*stmt| self.resolveStatement1P(stmt, &scopedContext),
-                    .Declaration => |*decl| self.resolveDeclaration(decl, &scopedContext),
+                    .Statement => |*stmt| self.resolveStatement1P(stmt, context),
+                    .Declaration => |*decl| self.resolveDeclaration(decl, context),
                 }
             }
         },
         .Return => |*ret| self.resolveExpression(&ret.expr, context),
         .Expression => |*expr| self.resolveExpression(expr, context),
-        .If => |*if_| {
-            self.resolveExpression(&if_.condition, context);
-            self.resolveStatement1P(if_.then, context);
-            if (if_.else_) |*else_| {
+        .If => |*ifStmt| {
+            self.resolveExpression(&ifStmt.condition, context);
+            self.resolveStatement1P(ifStmt.then, context);
+            if (ifStmt.else_) |*else_| {
                 self.resolveStatement1P(else_.*, context);
             }
         },
@@ -167,24 +124,21 @@ fn resolveStatement1P(self: *Semantic, statement: *Statement, context: *Context)
 
             self.resolveStatement1P(lbl.statement, context);
         },
-        .Break => |*brk| if (context.loopTag) |tag| {
+        .Break => |*brk| if (context.getScope().loopTag) |tag| {
             brk.tag = tag;
         } else {
             self.errors.append(self.allocator, .{ .lineIndex = brk.lineIndex, .type = .Break }) catch allocError();
         },
-        .Continue => |*cont| if (context.loopTag) |tag| {
+        .Continue => |*cont| if (context.getScope().loopTag) |tag| {
             cont.tag = tag;
         } else {
             self.errors.append(self.allocator, .{ .lineIndex = cont.lineIndex, .type = .Continue }) catch allocError();
         },
         .DoWhile => |*doWhl| {
-            // Save the current scope tag, and restore it on return
-            const currentLabel = context.loopTag;
-            defer context.loopTag = currentLabel;
+            const newTag = self.generateUnique("doWhile");
+            doWhl.tag = newTag;
 
-            const newLabel = self.generateUnique("doWhile");
-            doWhl.tag = newLabel;
-            context.loopTag = newLabel;
+            context.pushScope(newTag);
 
             self.resolveStatement1P(doWhl.body, context);
             self.resolveExpression(&doWhl.cond, context);
@@ -192,34 +146,28 @@ fn resolveStatement1P(self: *Semantic, statement: *Statement, context: *Context)
         .While => |*whl| {
             self.resolveExpression(&whl.cond, context);
 
-            // Save the current scope tag, and restore it on return
-            const currentLabel = context.loopTag;
-            defer context.loopTag = currentLabel;
+            const newTag = self.generateUnique("while");
+            whl.tag = newTag;
 
-            const newLabel = self.generateUnique("while");
-            whl.tag = newLabel;
-            context.loopTag = newLabel;
-
+            context.pushScope(newTag);
             self.resolveStatement1P(whl.body, context);
         },
         .For => |*f| {
-            var scopedContext = context.clone();
-            defer scopedContext.deinit();
+            const newTag = self.generateUnique("for");
+            f.tag = newTag;
 
-            const newLabel = self.generateUnique("for");
-            f.tag = newLabel;
-            scopedContext.loopTag = newLabel;
+            context.pushScope(newTag);
 
             switch (f.init) {
-                .Declaration => self.resolveDeclaration(&f.init.Declaration, &scopedContext),
+                .Declaration => self.resolveDeclaration(&f.init.Declaration, context),
                 .Expression => if (f.init.Expression) |*expr| {
-                    self.resolveExpression(expr, &scopedContext);
+                    self.resolveExpression(expr, context);
                 },
             }
-            if (f.cond) |*cond| self.resolveExpression(cond, &scopedContext);
-            if (f.post) |*post| self.resolveExpression(post, &scopedContext);
+            if (f.cond) |*cond| self.resolveExpression(cond, context);
+            if (f.post) |*post| self.resolveExpression(post, context);
 
-            self.resolveStatement1P(f.body, &scopedContext);
+            self.resolveStatement1P(f.body, context);
         },
         .Goto, .Null => {}, // gotos are resolved on the second pass
     }
@@ -242,9 +190,9 @@ fn resolveStatement2P(self: *Semantic, statement: *Statement, context: *Context)
                 self.errors.append(self.allocator, .{ .lineIndex = goto.*.lineIndex, .type = .UndeclaredIdentifier, .name = goto.*.target }) catch allocError();
             }
         },
-        .If => |*if_| {
-            self.resolveStatement2P(if_.then, context);
-            if (if_.else_) |*else_| {
+        .If => |*ifStmt| {
+            self.resolveStatement2P(ifStmt.then, context);
+            if (ifStmt.else_) |*else_| {
                 self.resolveStatement2P(else_.*, context);
             }
         },
@@ -268,7 +216,7 @@ fn resolveExpression(self: *Semantic, expr: *Expression, context: *Context) void
             self.resolveExpression(binary.right, context);
         },
         .Var => |*v| {
-            if (context.variables.get(v.*.name)) |entry| {
+            if (context.getScope().variables.get(v.*.name)) |entry| {
                 v.*.name = entry.unique;
             } else {
                 self.errors.append(self.allocator, .{ .lineIndex = v.*.lineIndex, .type = .UndeclaredIdentifier, .name = v.*.name }) catch allocError();

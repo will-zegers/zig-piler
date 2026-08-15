@@ -65,15 +65,15 @@ fn printStatement(statement: Parser.Statement, indent: usize) void {
         .Expression => |expr| {
             printExpression(expr, indent);
         },
-        .If => |if_| {
-            print("{s}{any}(\n", .{ indentStr, @TypeOf(if_) });
+        .If => |ifStmt| {
+            print("{s}{any}(\n", .{ indentStr, @TypeOf(ifStmt) });
             print("{s}  condition:\n", .{indentStr});
-            printExpression(if_.condition, indent + 4);
+            printExpression(ifStmt.condition, indent + 4);
             print("{s}  then=\n", .{indentStr});
-            printStatement(if_.then.*, indent + 4);
-            if (if_.else_ != null) {
+            printStatement(ifStmt.then.*, indent + 4);
+            if (ifStmt.else_ != null) {
                 print("\n{s}  else:\n", .{indentStr});
-                printStatement(if_.else_.?.*, indent + 4);
+                printStatement(ifStmt.else_.?.*, indent + 4);
             }
             print("{s})\n", .{indentStr});
         },
