@@ -8,6 +8,7 @@ pub const int = []const u8;
 pub const ParsingError = error{
     EOF,
     Lvalue,
+    NonConstExpr,
     Syntax,
     Token,
 };

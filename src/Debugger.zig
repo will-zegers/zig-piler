@@ -132,7 +132,7 @@ fn printStatement(statement: Parser.Statement, indent: usize) void {
             printStatement(f.body.*, indent + 4);
         },
         .While => |w| {
-            print("{s} {any}( {s}\n", .{ indentStr, @TypeOf(w), w.tag });
+            print("{s}{any}( {s}\n", .{ indentStr, @TypeOf(w), w.tag });
             print("  {s}cond:\n", .{indentStr});
             printExpression(w.cond, indent + 4);
             print("  {s}body:\n", .{indentStr});

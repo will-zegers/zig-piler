@@ -9,14 +9,17 @@ const TokenIterator = Token.Iterator;
 
 const KeywordMap = std.StaticStringMap(Token.Type).initComptime(.{
     .{ "break", .Break },
+    .{ "case", .Case },
     .{ "continue", .Continue },
+    .{ "default", .Default },
     .{ "do", .Do },
+    .{ "else", .Else },
     .{ "for", .For },
     .{ "goto", .Goto },
     .{ "if", .If },
     .{ "int", .Int },
-    .{ "else", .Else },
     .{ "return", .Return },
+    .{ "switch", .Switch },
     .{ "void", .Void },
     .{ "while", .While },
 });

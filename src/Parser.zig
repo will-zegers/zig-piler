@@ -343,6 +343,84 @@ pub const If = struct {
     }
 };
 
+pub const Switch = struct {
+    allocator: Allocator,
+    cond: Expression,
+    body: *Statement,
+    cases: ArrayList(Case) = .empty,
+    tag: identifier = "",
+
+    pub fn parse(allocator: Allocator, tokens: *TokenIterator) ParsingError!Switch {
+        try expect(.Switch, tokens.next());
+        try expect(.OpenParenthesis, tokens.peek());
+
+        const cond = try Expression.parse(allocator, tokens, 0);
+
+        const body = allocator.create(Statement) catch allocError();
+        body.* = try Statement.parse(allocator, tokens);
+
+        return .{ .allocator = allocator, .cond = cond, .body = body };
+    }
+
+    pub fn deinit(self: *Switch) void {
+        for (self.cases.items) |*case| {
+            case.deinit();
+        }
+        self.cases.deinit(self.allocator);
+
+        Expression.deinit(&self.cond);
+
+        Statement.deinit(self.body);
+        self.allocator.destroy(self.body);
+    }
+};
+
+pub const Case = struct {
+    allocator: Allocator,
+    cond: ?Expression,
+    body: ArrayList(Statement),
+    tag: identifier = "",
+    lineIndex: usize,
+
+    pub fn parse(allocator: Allocator, tokens: *TokenIterator) ParsingError!Case {
+        const nextToken = tokens.next() orelse unexpectedEOF();
+        const cond: ?Expression = switch (nextToken.type) {
+            .Case => try Expression.parse(allocator, tokens, 0),
+            .Default => null,
+            else => unreachable, // the statement parser already guards against other cases
+        };
+        if (cond != null and cond.? != .Constant) {
+            std.log.err("Non-constant expression", .{});
+            return ParsingError.NonConstExpr;
+        }
+        const lineIndex = nextToken.lineIndex;
+        try expect(.Colon, tokens.next());
+
+        var body: ArrayList(Statement) = .empty;
+        while (tokens.peek()) |token| {
+            switch (token.type) {
+                .Case, .CloseBrace, .Default => break,
+                else => {
+                    const blockItem = try Statement.parse(allocator, tokens);
+                    body.append(allocator, blockItem) catch allocError();
+                },
+            }
+        }
+
+        return .{ .allocator = allocator, .cond = cond, .body = body, .lineIndex = lineIndex };
+    }
+
+    pub fn deinit(self: *Case) void {
+        if (self.cond) |*cond| {
+            Expression.deinit(cond);
+        }
+        for (self.body.items) |*item| {
+            item.deinit();
+        }
+        self.body.deinit(self.allocator);
+    }
+};
+
 pub const Label = struct {
     allocator: Allocator,
     name: identifier,
@@ -383,9 +461,10 @@ pub const Return = struct {
     }
 };
 
-const StatementTag = enum { Break, Compound, Continue, DoWhile, Expression, For, Goto, If, Label, Return, While, Null };
+const StatementTag = enum { Break, Case, Compound, Continue, DoWhile, Expression, For, Goto, If, Label, Return, Switch, While, Null };
 pub const Statement = union(StatementTag) {
     Break: Break,
+    Case: Case,
     Compound: Block,
     Continue: Continue,
     DoWhile: DoWhile,
@@ -395,6 +474,7 @@ pub const Statement = union(StatementTag) {
     If: If,
     Label: Label,
     Return: Return,
+    Switch: Switch,
     While: While,
     Null: void, // needed to represent empty semicolon-delimited statements
 
@@ -402,6 +482,7 @@ pub const Statement = union(StatementTag) {
         var nextToken = tokens.peek() orelse unexpectedEOF();
         return switch (nextToken.type) {
             .Break => .{ .Break = try .parse(tokens) },
+            .Case, .Default => .{ .Case = try .parse(allocator, tokens) },
             .OpenBrace => .{ .Compound = try .parse(allocator, tokens) },
             .Continue => .{ .Continue = try .parse(tokens) },
             .Do => .{ .DoWhile = try .parse(allocator, tokens) },
@@ -411,6 +492,7 @@ pub const Statement = union(StatementTag) {
             .Return => .{ .Return = try .parse(allocator, tokens) },
             .While => .{ .While = try .parse(allocator, tokens) },
             .Semicolon => .{ .Null = tokens.skip() },
+            .Switch => .{ .Switch = try .parse(allocator, tokens) },
             .Identifier => blk: { // <identifier> ':' <statement>
                 const ident = tokens.next() orelse unexpectedEOF();
                 nextToken = tokens.peek() orelse unexpectedEOF();
@@ -442,6 +524,8 @@ pub const Statement = union(StatementTag) {
             .Null, .Goto => {},
             .Return => statement.*.Return.deinit(),
             .While => statement.*.While.deinit(),
+            .Switch => statement.*.Switch.deinit(),
+            .Case => statement.*.Case.deinit(),
             else => {},
         }
     }

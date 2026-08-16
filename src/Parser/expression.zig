@@ -144,7 +144,7 @@ pub const Unary = struct {
     pub fn deinit(self: *Unary) void {
         defer self.allocator.destroy(self.operand);
 
-        Expression.deinit(&self.operand.*);
+        Expression.deinit(self.operand);
     }
 };
 
@@ -212,8 +212,8 @@ pub const Binary = struct {
         defer self.allocator.destroy(self.left);
         defer self.allocator.destroy(self.right);
 
-        Expression.deinit(&self.left.*);
-        Expression.deinit(&self.right.*);
+        Expression.deinit(self.left);
+        Expression.deinit(self.right);
     }
 };
 
@@ -256,8 +256,8 @@ pub const Assignment = struct {
         defer self.allocator.destroy(self.lhs);
         defer self.allocator.destroy(self.rhs);
 
-        Expression.deinit(&self.lhs.*);
-        Expression.deinit(&self.rhs.*);
+        Expression.deinit(self.lhs);
+        Expression.deinit(self.rhs);
     }
 
     pub fn parse(allocator: Allocator, tokens: *TokenIterator) ParsingError!?Expression {
