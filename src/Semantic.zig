@@ -157,6 +157,7 @@ fn resolveStatement1P(self: *Semantic, statement: *Statement, context: *Context)
             f.tag = newTag;
 
             context.pushScope(newTag);
+            defer context.popScope();
 
             switch (f.init) {
                 .Declaration => self.resolveDeclaration(&f.init.Declaration, context),

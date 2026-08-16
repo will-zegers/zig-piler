@@ -177,9 +177,9 @@ pub const Function = struct {
                     },
                 }
 
-                const continueLabel = try fmt.allocPrint(self.allocator, "{s}.continue", .{f.tag});
-                try self.labels.append(self.allocator, continueLabel);
-                try self.body.append(self.allocator, .{ .Label = .{ .identifier = continueLabel } });
+                const startLabel = try fmt.allocPrint(self.allocator, "{s}.start", .{f.tag});
+                try self.labels.append(self.allocator, startLabel);
+                try self.body.append(self.allocator, .{ .Label = .{ .identifier = startLabel } });
 
                 const breakLabel = try fmt.allocPrint(self.allocator, "{s}.break", .{f.tag});
                 try self.labels.append(self.allocator, breakLabel);
@@ -191,10 +191,15 @@ pub const Function = struct {
                     try self.body.append(self.allocator, .{ .JumpIfZero = .{ .condition = .{ .Constant = "1" }, .target = breakLabel } });
                 }
 
-                if (f.post) |cond| _ = try self.emitExpression(cond);
-
                 try self.emitStatement(f.body.*);
-                try self.body.append(self.allocator, .{ .Jump = .{ .target = continueLabel } });
+
+                const continueLabel = try fmt.allocPrint(self.allocator, "{s}.continue", .{f.tag});
+                try self.labels.append(self.allocator, continueLabel);
+                try self.body.append(self.allocator, .{ .Label = .{ .identifier = continueLabel } });
+
+                if (f.post) |post| _ = try self.emitExpression(post);
+
+                try self.body.append(self.allocator, .{ .Jump = .{ .target = startLabel } });
                 try self.body.append(self.allocator, .{ .Label = .{ .identifier = breakLabel } });
             },
         }
