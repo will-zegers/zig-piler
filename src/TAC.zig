@@ -2,6 +2,7 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const ArrayList = std.ArrayList;
 const fatal = std.process.fatal;
+const fmt = std.fmt;
 
 const Parser = @import("Parser.zig");
 const instruction = @import("TAC/instruction.zig");
@@ -121,8 +122,81 @@ pub const Function = struct {
                 _ = try self.emitStatement(lbl.statement.*);
             },
             .Goto => |goto| try self.body.append(self.allocator, .{ .Jump = .{ .target = goto.target } }),
-            // .Break =>|b|
-            else => {}, // TODO: Break, Continue, DoWhile, For, While
+            .Break => |b| {
+                const breakLabel = try fmt.allocPrint(self.allocator, "{s}.break", .{b.tag});
+                try self.labels.append(self.allocator, breakLabel);
+
+                try self.body.append(self.allocator, .{ .Jump = .{ .target = breakLabel } });
+            },
+            .Continue => |c| {
+                const continueLabel = try fmt.allocPrint(self.allocator, "{s}.continue", .{c.tag});
+                try self.labels.append(self.allocator, continueLabel);
+
+                try self.body.append(self.allocator, .{ .Jump = .{ .target = continueLabel } });
+            },
+            .DoWhile => |d| {
+                const startLabel = try fmt.allocPrint(self.allocator, "{s}.start", .{d.tag});
+                try self.labels.append(self.allocator, startLabel);
+                try self.body.append(self.allocator, .{ .Label = .{ .identifier = startLabel } });
+
+                try self.emitStatement(d.body.*);
+
+                const continueLabel = try fmt.allocPrint(self.allocator, "{s}.continue", .{d.tag});
+                try self.labels.append(self.allocator, continueLabel);
+                try self.body.append(self.allocator, .{ .Label = .{ .identifier = continueLabel } });
+
+                const e = try self.emitExpression(d.cond);
+                try self.body.append(self.allocator, .{ .JumpIfNotZero = .{ .condition = e, .target = startLabel } });
+
+                const breakLabel = try fmt.allocPrint(self.allocator, "{s}.break", .{d.tag});
+                try self.labels.append(self.allocator, breakLabel);
+                try self.body.append(self.allocator, .{ .Label = .{ .identifier = breakLabel } });
+            },
+            .While => |w| {
+                const continueLabel = try fmt.allocPrint(self.allocator, "{s}.continue", .{w.tag});
+                try self.labels.append(self.allocator, continueLabel);
+                try self.body.append(self.allocator, .{ .Label = .{ .identifier = continueLabel } });
+
+                const e = try self.emitExpression(w.cond);
+
+                const breakLabel = try fmt.allocPrint(self.allocator, "{s}.break", .{w.tag});
+                try self.labels.append(self.allocator, breakLabel);
+                try self.body.append(self.allocator, .{ .JumpIfZero = .{ .condition = e, .target = breakLabel } });
+
+                try self.emitStatement(w.body.*);
+                try self.body.append(self.allocator, .{ .Jump = .{ .target = continueLabel } });
+                try self.body.append(self.allocator, .{ .Label = .{ .identifier = breakLabel } });
+            },
+            .For => |f| {
+                switch (f.init) {
+                    .Declaration => |decl| if (decl.init) |declInit| {
+                        _ = try self.emitExpression(declInit);
+                    },
+                    .Expression => |expr| if (expr) |exprInit| {
+                        _ = try self.emitExpression(exprInit);
+                    },
+                }
+
+                const continueLabel = try fmt.allocPrint(self.allocator, "{s}.continue", .{f.tag});
+                try self.labels.append(self.allocator, continueLabel);
+                try self.body.append(self.allocator, .{ .Label = .{ .identifier = continueLabel } });
+
+                const breakLabel = try fmt.allocPrint(self.allocator, "{s}.break", .{f.tag});
+                try self.labels.append(self.allocator, breakLabel);
+
+                if (f.cond) |cond| {
+                    const e = try self.emitExpression(cond);
+                    try self.body.append(self.allocator, .{ .JumpIfZero = .{ .condition = e, .target = breakLabel } });
+                } else {
+                    try self.body.append(self.allocator, .{ .JumpIfZero = .{ .condition = .{ .Constant = "1" }, .target = breakLabel } });
+                }
+
+                if (f.post) |cond| _ = try self.emitExpression(cond);
+
+                try self.emitStatement(f.body.*);
+                try self.body.append(self.allocator, .{ .Jump = .{ .target = continueLabel } });
+                try self.body.append(self.allocator, .{ .Label = .{ .identifier = breakLabel } });
+            },
         }
     }
 
@@ -248,13 +322,13 @@ pub const Function = struct {
     }
 
     fn nextTag(self: *Function) []u8 {
-        const tag = std.fmt.allocPrint(self.allocator, "{s}.{d}", .{ self.name, self.tags.items.len }) catch allocError();
+        const tag = fmt.allocPrint(self.allocator, "{s}.{d}", .{ self.name, self.tags.items.len }) catch allocError();
         self.tags.append(self.allocator, tag) catch allocError();
         return tag;
     }
 
     fn nextLabel(self: *Function, descr: []const u8) []u8 {
-        const label = std.fmt.allocPrint(self.allocator, "{s}.{s}.{d}", .{ self.name, descr, self.labels.items.len }) catch allocError();
+        const label = fmt.allocPrint(self.allocator, "{s}.{s}.{d}", .{ self.name, descr, self.labels.items.len }) catch allocError();
         self.labels.append(self.allocator, label) catch allocError();
         return label;
     }
