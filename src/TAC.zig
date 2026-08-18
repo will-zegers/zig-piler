@@ -109,17 +109,17 @@ pub const Function = struct {
                 const c = try self.emitExpression(ifStmt.condition);
                 try self.body.append(self.allocator, .{ .JumpIfZero = .{ .condition = c, .target = elseLabel } });
 
-                _ = try self.emitStatement(ifStmt.then.*);
+                _ = try self.emitStatement(ifStmt.thenStmt.*);
                 try self.body.append(self.allocator, .{ .Jump = .{ .target = endLabel } });
 
                 try self.body.append(self.allocator, .{ .Label = .{ .identifier = elseLabel } });
-                if (ifStmt.else_) |elseStmt| _ = try self.emitStatement(elseStmt.*);
+                if (ifStmt.elseStmt) |elseStmt| _ = try self.emitStatement(elseStmt.*);
 
                 try self.body.append(self.allocator, .{ .Label = .{ .identifier = endLabel } });
             },
             .Label => |lbl| {
-                try self.body.append(self.allocator, .{ .Label = .{ .identifier = lbl.name } });
-                _ = try self.emitStatement(lbl.statement.*);
+                try self.body.append(self.allocator, .{ .Label = .{ .identifier = lbl.tag } });
+                _ = try self.emitStatement(lbl.body.*);
             },
             .Goto => |goto| try self.body.append(self.allocator, .{ .Jump = .{ .target = goto.target } }),
             .Break => |b| {
@@ -202,6 +202,7 @@ pub const Function = struct {
                 try self.body.append(self.allocator, .{ .Jump = .{ .target = startLabel } });
                 try self.body.append(self.allocator, .{ .Label = .{ .identifier = breakLabel } });
             },
+            else => {}, // TODO: Case and Switch
         }
     }
 
@@ -308,14 +309,14 @@ pub const Function = struct {
                 const c = try self.emitExpression(ternary.condition.*);
                 try self.body.append(self.allocator, .{ .JumpIfZero = .{ .condition = c, .target = elseLabel } });
 
-                const e1 = try self.emitExpression(ternary.then.*);
+                const e1 = try self.emitExpression(ternary.thenStmt.*);
                 try self.body.appendSlice(self.allocator, &.{
                     .{ .Copy = .{ .src = e1, .dst = dst } },
                     .{ .Jump = .{ .target = endLabel } },
                     .{ .Label = .{ .identifier = elseLabel } },
                 });
 
-                const e2 = try self.emitExpression(ternary.else_.*);
+                const e2 = try self.emitExpression(ternary.elseStmt.*);
                 try self.body.appendSlice(self.allocator, &.{
                     .{ .Copy = .{ .src = e2, .dst = dst } },
                     .{ .Label = .{ .identifier = endLabel } },

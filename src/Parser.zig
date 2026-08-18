@@ -123,9 +123,9 @@ pub const BlockItem = union(BlockItemTag) {
 };
 
 pub const Declaration = struct {
+    lineIndex: usize,
     name: identifier,
     init: ?Expression,
-    lineIndex: usize,
 
     pub fn parse(allocator: Allocator, tokens: *TokenIterator) ParsingError!Declaration {
         try expect(.Int, tokens.next());
@@ -144,8 +144,8 @@ pub const Declaration = struct {
 };
 
 pub const Break = struct {
-    tag: identifier = undefined, // this will get set during semantic analysis
     lineIndex: usize,
+    tag: identifier = undefined, // this will get set during semantic analysis
 
     pub fn parse(tokens: *TokenIterator) ParsingError!Break {
         const token = tokens.next() orelse return unexpectedEOF();
@@ -155,8 +155,8 @@ pub const Break = struct {
 };
 
 pub const Continue = struct {
-    tag: identifier = undefined, // this will get set during semantic analysis
     lineIndex: usize,
+    tag: identifier = undefined, // this will get set during semantic analysis
 
     pub fn parse(tokens: *TokenIterator) ParsingError!Continue {
         const token = tokens.next() orelse return unexpectedEOF();
@@ -285,8 +285,8 @@ pub const While = struct {
 };
 
 pub const Goto = struct {
-    target: identifier,
     lineIndex: usize,
+    target: identifier,
 
     pub fn parse(tokens: *TokenIterator) ParsingError!Goto {
         try expect(.Goto, tokens.next());
@@ -304,8 +304,8 @@ pub const Goto = struct {
 pub const If = struct {
     allocator: Allocator,
     condition: Expression,
-    then: *Statement,
-    else_: ?*Statement,
+    thenStmt: *Statement,
+    elseStmt: ?*Statement,
 
     pub fn parse(allocator: Allocator, tokens: *TokenIterator) ParsingError!If {
         try expect(.If, tokens.next());
@@ -313,42 +313,42 @@ pub const If = struct {
 
         const condition = try Expression.parse(allocator, tokens, 0);
 
-        const then = allocator.create(Statement) catch allocError();
-        then.* = try .parse(allocator, tokens);
+        const thenStmt = allocator.create(Statement) catch allocError();
+        thenStmt.* = try .parse(allocator, tokens);
 
-        var else_: ?*Statement = null;
+        var elseStmt: ?*Statement = null;
         const nextToken = tokens.peek() orelse unexpectedEOF();
         if (.Else == nextToken.type) { // if-else...
             tokens.skip(); // discard the 'else' token
 
-            else_ = allocator.create(Statement) catch allocError();
-            else_.?.* = try .parse(allocator, tokens);
+            elseStmt = allocator.create(Statement) catch allocError();
+            elseStmt.?.* = try .parse(allocator, tokens);
         }
         // no need to check for close parenthesis, since it's handled by the expression parser
 
-        return .{ .allocator = allocator, .condition = condition, .then = then, .else_ = else_ };
+        return .{ .allocator = allocator, .condition = condition, .thenStmt = thenStmt, .elseStmt = elseStmt };
     }
 
     pub fn deinit(self: *If) void {
         defer {
-            self.allocator.destroy(self.then);
+            self.allocator.destroy(self.thenStmt);
         }
 
         Expression.deinit(&self.condition);
-        Statement.deinit(self.then);
-        if (self.else_) |*else_| {
-            defer self.allocator.destroy(else_.*);
-            Statement.deinit(else_.*);
+        Statement.deinit(self.thenStmt);
+        if (self.elseStmt) |*elseStmt| {
+            defer self.allocator.destroy(elseStmt.*);
+            Statement.deinit(elseStmt.*);
         }
     }
 };
 
 pub const Switch = struct {
     allocator: Allocator,
+    tag: identifier = undefined,
     cond: Expression,
     body: *Statement,
     cases: ArrayList(Case) = .empty,
-    tag: identifier = "",
 
     pub fn parse(allocator: Allocator, tokens: *TokenIterator) ParsingError!Switch {
         try expect(.Switch, tokens.next());
@@ -363,32 +363,32 @@ pub const Switch = struct {
     }
 
     pub fn deinit(self: *Switch) void {
-        for (self.cases.items) |*case| {
-            case.deinit();
-        }
-        self.cases.deinit(self.allocator);
-
         Expression.deinit(&self.cond);
 
         Statement.deinit(self.body);
         self.allocator.destroy(self.body);
+
+        // Case statement entries in '.cases' already delloc'd in the body dealloc
+        self.cases.deinit(self.allocator);
     }
 };
 
 pub const Case = struct {
     allocator: Allocator,
-    cond: ?Expression,
-    body: ArrayList(Statement),
-    tag: identifier = "",
     lineIndex: usize,
+    tag: identifier = undefined,
+    cond: ?Expression,
+    body: *Statement,
 
     pub fn parse(allocator: Allocator, tokens: *TokenIterator) ParsingError!Case {
         const nextToken = tokens.next() orelse unexpectedEOF();
         const cond: ?Expression = switch (nextToken.type) {
             .Case => try Expression.parse(allocator, tokens, 0),
-            .Default => null,
+            .Default => null, // 'default' is just treated as special "case" with no cond expr
             else => unreachable, // the statement parser already guards against other cases
         };
+
+        // No current support for chars or the 'const' keyword, so only expect null or literal constants
         if (cond != null and cond.? != .Constant) {
             std.log.err("Non-constant expression", .{});
             return ParsingError.NonConstExpr;
@@ -396,50 +396,41 @@ pub const Case = struct {
         const lineIndex = nextToken.lineIndex;
         try expect(.Colon, tokens.next());
 
-        var body: ArrayList(Statement) = .empty;
-        while (tokens.peek()) |token| {
-            switch (token.type) {
-                .Case, .CloseBrace, .Default => break,
-                else => {
-                    const blockItem = try Statement.parse(allocator, tokens);
-                    body.append(allocator, blockItem) catch allocError();
-                },
-            }
-        }
+        const body = allocator.create(Statement) catch allocError();
+        body.* = try Statement.parse(allocator, tokens);
 
-        return .{ .allocator = allocator, .cond = cond, .body = body, .lineIndex = lineIndex };
+        return .{ .allocator = allocator, .lineIndex = lineIndex, .cond = cond, .body = body };
     }
 
     pub fn deinit(self: *Case) void {
         if (self.cond) |*cond| {
             Expression.deinit(cond);
         }
-        for (self.body.items) |*item| {
-            item.deinit();
-        }
-        self.body.deinit(self.allocator);
+
+        Statement.deinit(self.body);
+        self.allocator.destroy(self.body);
     }
 };
 
 pub const Label = struct {
     allocator: Allocator,
-    name: identifier,
-    statement: *Statement,
     lineIndex: usize,
+    tag: identifier,
+    body: *Statement,
 
     pub fn parse(allocator: Allocator, name: Token, tokens: *TokenIterator) ParsingError!Label {
         try expect(.Identifier, name);
         try expect(.Colon, tokens.next());
 
-        const statement = allocator.create(Statement) catch allocError();
-        statement.* = try Statement.parse(allocator, tokens);
+        const body = allocator.create(Statement) catch allocError();
+        body.* = try Statement.parse(allocator, tokens);
 
-        return .{ .allocator = allocator, .name = name.symbol, .statement = statement, .lineIndex = name.lineIndex };
+        return .{ .allocator = allocator, .tag = name.symbol, .body = body, .lineIndex = name.lineIndex };
     }
 
     pub fn deinit(self: *Label) void {
-        defer self.allocator.destroy(self.statement);
-        Statement.deinit(self.statement);
+        defer self.allocator.destroy(self.body);
+        Statement.deinit(self.body);
     }
 };
 

@@ -278,30 +278,30 @@ pub const Assignment = struct {
 pub const Ternary = struct {
     allocator: Allocator,
     condition: *Expression,
-    then: *Expression,
-    else_: *Expression,
+    thenStmt: *Expression,
+    elseStmt: *Expression,
 
     pub fn init(allocator: Allocator, left: Expression, middle: Expression, right: Expression) ParsingError!Ternary {
         const condition = allocator.create(Expression) catch allocError();
         condition.* = left;
 
-        const then = allocator.create(Expression) catch allocError();
-        then.* = middle;
+        const thenStmt = allocator.create(Expression) catch allocError();
+        thenStmt.* = middle;
 
-        const else_ = allocator.create(Expression) catch allocError();
-        else_.* = right;
+        const elseStmt = allocator.create(Expression) catch allocError();
+        elseStmt.* = right;
 
-        return .{ .allocator = allocator, .condition = condition, .then = then, .else_ = else_ };
+        return .{ .allocator = allocator, .condition = condition, .thenStmt = thenStmt, .elseStmt = elseStmt };
     }
 
     pub fn deinit(self: *Ternary) void {
         defer self.allocator.destroy(self.condition);
-        defer self.allocator.destroy(self.then);
-        defer self.allocator.destroy(self.else_);
+        defer self.allocator.destroy(self.thenStmt);
+        defer self.allocator.destroy(self.elseStmt);
 
         Expression.deinit(self.condition);
-        Expression.deinit(self.then);
-        Expression.deinit(self.else_);
+        Expression.deinit(self.thenStmt);
+        Expression.deinit(self.elseStmt);
     }
 };
 

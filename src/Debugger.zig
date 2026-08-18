@@ -69,11 +69,11 @@ fn printStatement(statement: Parser.Statement, indent: usize) void {
             print("{s}{any}(\n", .{ indentStr, @TypeOf(ifStmt) });
             print("{s}  condition:\n", .{indentStr});
             printExpression(ifStmt.condition, indent + 4);
-            print("{s}  then=\n", .{indentStr});
-            printStatement(ifStmt.then.*, indent + 4);
-            if (ifStmt.else_ != null) {
+            print("{s}  thenStmt=\n", .{indentStr});
+            printStatement(ifStmt.thenStmt.*, indent + 4);
+            if (ifStmt.elseStmt != null) {
                 print("\n{s}  else:\n", .{indentStr});
-                printStatement(ifStmt.else_.?.*, indent + 4);
+                printStatement(ifStmt.elseStmt.?.*, indent + 4);
             }
             print("{s})\n", .{indentStr});
         },
@@ -85,9 +85,9 @@ fn printStatement(statement: Parser.Statement, indent: usize) void {
         .Null => |nul| print("{s}{any}()\n", .{ indentStr, @TypeOf(nul) }),
         .Label => |lbl| {
             print("{s}{any}(\n", .{ indentStr, @TypeOf(lbl) });
-            print("{s}  name: {s}\n", .{ indentStr, lbl.name });
+            print("{s}  name: {s}\n", .{ indentStr, lbl.tag });
             print("{s}  statement:\n", .{indentStr});
-            printStatement(lbl.statement.*, indent + 4);
+            printStatement(lbl.body.*, indent + 4);
         },
         .Goto => |goto| print("{s}{any}(label: {s})\n", .{ indentStr, @TypeOf(goto), goto.target }),
         .Break => |b| {
@@ -139,6 +139,24 @@ fn printStatement(statement: Parser.Statement, indent: usize) void {
             printStatement(w.body.*, indent + 4);
             print("{s})\n", .{indentStr});
         },
+        .Switch => |swtch| {
+            print("{s}{any}( {s}\n", .{ indentStr, @TypeOf(swtch), swtch.tag });
+            print("  {s}cond:\n", .{indentStr});
+            printExpression(swtch.cond, indent + 4);
+            print("  {s}body:\n", .{indentStr});
+            printStatement(swtch.body.*, indent + 4);
+            print("{s})\n", .{indentStr});
+        },
+        .Case => |case| {
+            print("{s}{any}( {s}\n", .{ indentStr, @TypeOf(case), case.tag });
+            if (case.cond) |cond| {
+                print("  {s}cond:\n", .{indentStr});
+                printExpression(cond, indent + 4);
+            }
+            print("  {s}body:\n", .{indentStr});
+            printStatement(case.body.*, indent + 4);
+            print("{s})\n", .{indentStr});
+        },
     }
 }
 
@@ -181,10 +199,10 @@ fn printExpression(expr: Parser.Expression, indent: usize) void {
             print("\n", .{});
             std.debug.print("{s}  condition:\n", .{indentStr});
             printExpression(ternary.condition.*, indent + 4);
-            std.debug.print("{s}  then:\n", .{indentStr});
-            printExpression(ternary.then.*, indent + 4);
-            std.debug.print("{s}  else_:\n", .{indentStr});
-            printExpression(ternary.else_.*, indent + 4);
+            std.debug.print("{s}  thenStmt:\n", .{indentStr});
+            printExpression(ternary.thenStmt.*, indent + 4);
+            std.debug.print("{s}  elseStmt:\n", .{indentStr});
+            printExpression(ternary.elseStmt.*, indent + 4);
             print("{s})\n", .{indentStr});
         },
     }

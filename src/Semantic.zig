@@ -22,6 +22,7 @@ const SemanticError = struct {
     lineIndex: usize,
     type: enum {
         Break,
+        Case,
         Continue,
         Redeclaration,
         UndeclaredIdentifier,
@@ -87,10 +88,16 @@ fn resolveDeclaration(self: *Semantic, decl: *Declaration, context: *Context) vo
     }
 }
 
+/// On first-pass:
+///   1) ensure that variables are declared, in scope, and resolve them to unique names
+///   2) collect all declared labels into a map structure for resolution in pass 2 (since
+///      labels may be used before they're declared, i.e. gotos)
 fn resolveStatement1P(self: *Semantic, statement: *Statement, context: *Context) void {
     switch (statement.*) {
         .Compound => |*compound| {
-            context.pushScope(context.*.getScope().loopTag);
+            const newTag = self.generateUnique(context.function, "while");
+
+            context.pushScope(.Block, newTag);
             defer context.popScope();
 
             for (compound.items) |*item| {
@@ -104,33 +111,35 @@ fn resolveStatement1P(self: *Semantic, statement: *Statement, context: *Context)
         .Expression => |*expr| self.resolveExpression(expr, context),
         .If => |*ifStmt| {
             self.resolveExpression(&ifStmt.condition, context);
-            self.resolveStatement1P(ifStmt.then, context);
-            if (ifStmt.else_) |*else_| {
-                self.resolveStatement1P(else_.*, context);
+            self.resolveStatement1P(ifStmt.thenStmt, context);
+            if (ifStmt.elseStmt) |*elseStmt| {
+                self.resolveStatement1P(elseStmt.*, context);
             }
         },
         .Label => |*lbl| {
-            const name = statement.Label.name;
-            if (context.labels.get(name)) |entry| {
+            const tag = statement.Label.tag;
+            if (context.labels.get(tag)) |entry| {
                 if (entry.insideScope) {
-                    self.errors.append(self.allocator, .{ .lineIndex = lbl.lineIndex, .type = .Redeclaration, .name = name }) catch allocError();
+                    self.errors.append(self.allocator, .{ .lineIndex = lbl.lineIndex, .type = .Redeclaration, .name = tag }) catch allocError();
                     return;
                 }
             }
-            const unique = self.generateUnique(context.function, name);
-            context.labels.put(name, .{ .unique = unique }) catch allocError();
+            const unique = self.generateUnique(context.function, tag);
+            context.labels.put(tag, .{ .unique = unique }) catch allocError();
 
-            lbl.*.name = unique;
+            lbl.*.tag = unique;
 
-            self.resolveStatement1P(lbl.statement, context);
+            self.resolveStatement1P(lbl.body, context);
         },
-        .Break => |*brk| if (context.getScope().loopTag) |tag| {
+        .Break => |*brk| if (context.getBreakTag()) |tag| {
             brk.tag = tag;
         } else {
             self.errors.append(self.allocator, .{ .lineIndex = brk.lineIndex, .type = .Break }) catch allocError();
         },
-        .Continue => |*cont| if (context.getScope().loopTag) |tag| {
-            cont.tag = tag;
+        .Continue => |*cont| if (context.getContinueTag()) |tag| {
+            if (std.mem.indexOf(u8, tag, "switch")) |_| {
+                self.errors.append(self.allocator, .{ .lineIndex = cont.lineIndex, .type = .Continue }) catch allocError();
+            } else cont.tag = tag;
         } else {
             self.errors.append(self.allocator, .{ .lineIndex = cont.lineIndex, .type = .Continue }) catch allocError();
         },
@@ -138,7 +147,7 @@ fn resolveStatement1P(self: *Semantic, statement: *Statement, context: *Context)
             const newTag = self.generateUnique(context.function, "doWhile");
             doWhl.tag = newTag;
 
-            context.pushScope(newTag);
+            context.pushScope(.Loop, newTag);
 
             self.resolveStatement1P(doWhl.body, context);
             self.resolveExpression(&doWhl.cond, context);
@@ -149,14 +158,14 @@ fn resolveStatement1P(self: *Semantic, statement: *Statement, context: *Context)
             const newTag = self.generateUnique(context.function, "while");
             whl.tag = newTag;
 
-            context.pushScope(newTag);
+            context.pushScope(.Loop, newTag);
             self.resolveStatement1P(whl.body, context);
         },
         .For => |*f| {
             const newTag = self.generateUnique(context.function, "for");
             f.tag = newTag;
 
-            context.pushScope(newTag);
+            context.pushScope(.Loop, newTag);
             defer context.popScope();
 
             switch (f.init) {
@@ -171,9 +180,31 @@ fn resolveStatement1P(self: *Semantic, statement: *Statement, context: *Context)
             self.resolveStatement1P(f.body, context);
         },
         .Goto, .Null => {}, // gotos are resolved on the second pass
+        .Switch => |*sw| {
+            self.resolveExpression(&sw.cond, context);
+
+            const newTag = self.generateUnique(context.function, "switch");
+            sw.tag = newTag;
+
+            context.pushScope(.Switch, newTag);
+            defer context.popScope();
+
+            self.resolveStatement1P(sw.body, context);
+        },
+        .Case => |*case| if (context.getSwitchTag()) |_| {
+            const newTag = self.generateUnique(context.function, "case");
+            case.tag = newTag;
+
+            self.resolveStatement1P(case.body, context);
+        } else {
+            self.errors.append(self.allocator, .{ .lineIndex = case.lineIndex, .type = .Case }) catch allocError();
+        },
     }
 }
 
+/// On second pass:
+///   1) resolve all labels to their unique names, using the map from the 1st pass
+///   2) collect all individual cases into their respective switch statements for use in TAC gen
 fn resolveStatement2P(self: *Semantic, statement: *Statement, context: *Context) void {
     switch (statement.*) {
         .Compound => |*compound| {
@@ -192,12 +223,31 @@ fn resolveStatement2P(self: *Semantic, statement: *Statement, context: *Context)
             }
         },
         .If => |*ifStmt| {
-            self.resolveStatement2P(ifStmt.then, context);
-            if (ifStmt.else_) |*else_| {
-                self.resolveStatement2P(else_.*, context);
+            self.resolveStatement2P(ifStmt.thenStmt, context);
+            if (ifStmt.elseStmt) |*elseStmt| {
+                self.resolveStatement2P(elseStmt.*, context);
             }
         },
-        .Label => |*lbl| self.resolveStatement2P(lbl.statement, context),
+        .Switch => |*sw| {
+            switch (sw.body.*) {
+                .Case => |case| {
+                    sw.cases.append(self.allocator, case) catch allocError();
+                },
+                .Compound => |cmpd| {
+                    // TODO: use a while loop (e.g. while(cmpd.items[i] != .Case)) to warn
+                    // of dead code statements prior to the first encountered case.
+                    for (cmpd.items) |item| {
+                        if (item == .Statement and item.Statement == .Case) {
+                            sw.cases.append(self.allocator, item.Statement.Case) catch allocError();
+                        }
+                    }
+                },
+                else => {},
+            }
+            self.resolveStatement2P(sw.body, context);
+        },
+        .Case => |*case| self.resolveStatement2P(case.body, context),
+        .Label => |*lbl| self.resolveStatement2P(lbl.body, context),
         else => {},
     }
 }
@@ -237,8 +287,8 @@ fn resolveExpression(self: *Semantic, expr: *Expression, context: *Context) void
         .Constant => {},
         .Ternary => |*ternary| {
             self.resolveExpression(ternary.condition, context);
-            self.resolveExpression(ternary.then, context);
-            self.resolveExpression(ternary.else_, context);
+            self.resolveExpression(ternary.thenStmt, context);
+            self.resolveExpression(ternary.elseStmt, context);
         },
     }
 }
