@@ -145,7 +145,7 @@ pub const Declaration = struct {
 
 pub const Break = struct {
     lineIndex: usize,
-    tag: identifier = undefined, // this will get set during semantic analysis
+    tag: []const u8 = undefined, // this will get set during semantic analysis
 
     pub fn parse(tokens: *TokenIterator) ParsingError!Break {
         const token = tokens.next() orelse return unexpectedEOF();
@@ -156,7 +156,7 @@ pub const Break = struct {
 
 pub const Continue = struct {
     lineIndex: usize,
-    tag: identifier = undefined, // this will get set during semantic analysis
+    tag: []const u8 = undefined, // this will get set during semantic analysis
 
     pub fn parse(tokens: *TokenIterator) ParsingError!Continue {
         const token = tokens.next() orelse return unexpectedEOF();
@@ -167,7 +167,7 @@ pub const Continue = struct {
 
 pub const DoWhile = struct {
     allocator: Allocator,
-    tag: identifier = undefined, // this will get set during semantic analysis
+    tag: []const u8 = undefined, // this will get set during semantic analysis
     body: *Statement,
     cond: Expression,
 
@@ -223,7 +223,7 @@ const ForInit = union(ForInitTag) {
 
 pub const For = struct {
     allocator: Allocator,
-    tag: identifier = undefined, // this will get set during semantic analysis
+    tag: []const u8 = undefined, // this will get set during semantic analysis
     init: ForInit,
     cond: ?Expression,
     post: ?Expression,
@@ -261,7 +261,7 @@ pub const For = struct {
 
 pub const While = struct {
     allocator: Allocator,
-    tag: identifier = undefined, // this will get set during semantic analysis
+    tag: []const u8 = undefined, // this will get set during semantic analysis
     cond: Expression,
     body: *Statement,
 
@@ -345,10 +345,10 @@ pub const If = struct {
 
 pub const Switch = struct {
     allocator: Allocator,
-    tag: identifier = undefined,
+    tag: []const u8 = undefined,
     cond: Expression,
     body: *Statement,
-    cases: std.StringHashMap([]const u8),
+    cases: std.StringHashMap(*Case),
 
     pub fn parse(allocator: Allocator, tokens: *TokenIterator) ParsingError!Switch {
         try expect(.Switch, tokens.next());
@@ -362,11 +362,9 @@ pub const Switch = struct {
         return .{ .allocator = allocator, .cond = cond, .body = body, .cases = .init(allocator) };
     }
 
-    pub fn addCase(self: *Switch, case: Case) ParsingError!void {
-        const cond = if (case.cond) |cond| cond.Constant else "default";
-        if (self.cases.contains(cond)) return ParsingError.DuplicateCase;
-
-        self.cases.put(cond, case.tag) catch allocError();
+    pub fn addCase(self: *Switch, case: *Case) ParsingError!void {
+        if (self.cases.contains(case.*.tag)) return ParsingError.DuplicateCase;
+        self.cases.put(case.*.tag, case) catch allocError();
     }
 
     pub fn deinit(self: *Switch) void {
@@ -383,7 +381,7 @@ pub const Switch = struct {
 pub const Case = struct {
     allocator: Allocator,
     lineIndex: usize,
-    tag: identifier = undefined,
+    tag: []const u8 = undefined,
     cond: ?Expression,
     body: ?*Statement,
 
@@ -413,6 +411,11 @@ pub const Case = struct {
         return .{ .allocator = allocator, .lineIndex = lineIndex, .cond = cond, .body = body };
     }
 
+    pub fn tagFromSwitch(self: *Case, switchTag: []const u8) void {
+        const cond = if (self.cond) |cond| cond.Constant else "default";
+        self.tag = self.allocator.print("{s}.{s}", .{ switchTag, cond }) catch allocError();
+    }
+
     pub fn deinit(self: *Case) void {
         if (self.cond) |*cond| {
             Expression.deinit(cond);
@@ -422,13 +425,15 @@ pub const Case = struct {
             Statement.deinit(body);
             self.allocator.destroy(body);
         }
+
+        self.allocator.free(self.tag);
     }
 };
 
 pub const Label = struct {
     allocator: Allocator,
     lineIndex: usize,
-    tag: identifier,
+    tag: []const u8,
     body: *Statement,
 
     pub fn parse(allocator: Allocator, name: Token, tokens: *TokenIterator) ParsingError!Label {

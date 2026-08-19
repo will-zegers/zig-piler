@@ -17,6 +17,7 @@ const IdentifierMap = Context.IdentifierMap;
 const AST = Parser.AST;
 
 allocator: Allocator,
+switches: std.StringHashMap(*Switch),
 uniqueIds: std.ArrayList([]const u8) = .empty,
 errors: std.ArrayList(SemanticError) = .empty,
 
@@ -35,13 +36,14 @@ const SemanticError = struct {
 };
 
 pub fn init(allocator: Allocator) Semantic {
-    return .{ .allocator = allocator };
+    return .{ .allocator = allocator, .switches = .init(allocator) };
 }
 
 pub fn deinit(self: *Semantic) void {
     for (self.uniqueIds.items) |item| {
         self.allocator.free(item);
     }
+    self.switches.deinit();
 
     self.uniqueIds.deinit(self.allocator);
     self.errors.deinit(self.allocator);
@@ -95,6 +97,7 @@ fn resolveDeclaration(self: *Semantic, decl: *Declaration, context: *Context) vo
 ///   1) ensure that variables are declared, in scope, and resolve them to unique names
 ///   2) collect all declared labels into a map structure for resolution in pass 2 (since
 ///      labels may be used before they're declared, i.e. gotos)
+///   3) collect all individual cases into their respective switch statements for use in TAC gen
 fn resolveStatement1P(self: *Semantic, statement: *Statement, context: *Context) void {
     switch (statement.*) {
         .Compound => |*compound| {
@@ -183,20 +186,29 @@ fn resolveStatement1P(self: *Semantic, statement: *Statement, context: *Context)
             self.resolveStatement1P(f.body, context);
         },
         .Goto, .Null => {}, // gotos are resolved on the second pass
-        .Switch => |*sw| {
-            self.resolveExpression(&sw.cond, context);
+        .Switch => |*swtch| {
+            self.resolveExpression(&swtch.cond, context);
 
             const newTag = self.generateUnique(context.function, "switch");
-            sw.tag = newTag;
+            swtch.tag = newTag;
 
             context.pushScope(.Switch, newTag);
             defer context.popScope();
 
-            self.resolveStatement1P(sw.body, context);
+            self.switches.put(swtch.tag, swtch) catch allocError();
+
+            self.resolveStatement1P(swtch.body, context);
         },
-        .Case => |*case| if (context.getSwitchTag()) |_| {
-            const newTag = self.generateUnique(context.function, "case");
-            case.tag = newTag;
+        .Case => |*case| if (context.getSwitchTag()) |switchTag| {
+            case.tagFromSwitch(switchTag);
+
+            const parentSwitch = self.switches.get(switchTag) orelse unreachable;
+            parentSwitch.*.addCase(case) catch {
+                self.errors.append(self.allocator, .{
+                    .lineIndex = case.lineIndex,
+                    .type = .CaseDuplicate,
+                }) catch allocError();
+            };
 
             if (case.body) |body| self.resolveStatement1P(body, context);
         } else {
@@ -205,9 +217,7 @@ fn resolveStatement1P(self: *Semantic, statement: *Statement, context: *Context)
     }
 }
 
-/// On second pass:
-///   1) resolve all labels to their unique names, using the map from the 1st pass
-///   2) collect all individual cases into their respective switch statements for use in TAC gen
+/// On second pass: resolve all labels to their unique names, using the map from the 1st pass
 fn resolveStatement2P(self: *Semantic, statement: *Statement, context: *Context) void {
     switch (statement.*) {
         .Compound => |*compound| {
@@ -227,28 +237,9 @@ fn resolveStatement2P(self: *Semantic, statement: *Statement, context: *Context)
         },
         .If => |*ifStmt| {
             self.resolveStatement2P(ifStmt.thenStmt, context);
-            if (ifStmt.elseStmt) |*elseStmt| {
-                self.resolveStatement2P(elseStmt.*, context);
-            }
+            if (ifStmt.elseStmt) |*elseStmt| self.resolveStatement2P(elseStmt.*, context);
         },
-        .Switch => |*swtch| {
-            switch (swtch.body.*) {
-                .Case => |case| swtch.addCase(case) catch unreachable, // no concern of duplicate cases labels for a single case
-                .Compound => |block| for (block.items) |item| {
-                    if (item == .Statement and item.Statement == .Case) {
-                        const case = item.Statement.Case;
-                        swtch.addCase(case) catch {
-                            self.errors.append(self.allocator, .{
-                                .lineIndex = case.lineIndex,
-                                .type = .CaseDuplicate,
-                            }) catch allocError();
-                        };
-                    }
-                },
-                else => {},
-            }
-            self.resolveStatement2P(swtch.body, context);
-        },
+        .Switch => |*swtch| self.resolveStatement2P(swtch.body, context),
         .Case => |*case| if (case.body) |body| self.resolveStatement2P(body, context),
         .Label => |*lbl| self.resolveStatement2P(lbl.body, context),
         else => {},
