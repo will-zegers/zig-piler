@@ -241,7 +241,10 @@ fn resolveStatement2P(self: *Semantic, statement: *Statement, context: *Context)
         },
         .Switch => |*swtch| self.resolveStatement2P(swtch.body, context),
         .Case => |*case| if (case.body) |body| self.resolveStatement2P(body, context),
-        .Label => |*lbl| self.resolveStatement2P(lbl.body, context),
+        .Label => |*label| self.resolveStatement2P(label.body, context),
+        .DoWhile, => |*loop| self.resolveStatement2P(loop.body, context),
+        .For, => |*loop| self.resolveStatement2P(loop.body, context),
+        .While => |*loop| self.resolveStatement2P(loop.body, context),
         else => {},
     }
 }
