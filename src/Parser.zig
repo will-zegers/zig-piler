@@ -348,7 +348,7 @@ pub const Switch = struct {
     tag: identifier = undefined,
     cond: Expression,
     body: *Statement,
-    cases: ArrayList(Case) = .empty,
+    cases: std.StringHashMap([]const u8),
 
     pub fn parse(allocator: Allocator, tokens: *TokenIterator) ParsingError!Switch {
         try expect(.Switch, tokens.next());
@@ -359,7 +359,14 @@ pub const Switch = struct {
         const body = allocator.create(Statement) catch allocError();
         body.* = try Statement.parse(allocator, tokens);
 
-        return .{ .allocator = allocator, .cond = cond, .body = body };
+        return .{ .allocator = allocator, .cond = cond, .body = body, .cases = .init(allocator) };
+    }
+
+    pub fn addCase(self: *Switch, case: Case) ParsingError!void {
+        const cond = if (case.cond) |cond| cond.Constant else "default";
+        if (self.cases.contains(cond)) return ParsingError.DuplicateCase;
+
+        self.cases.put(cond, case.tag) catch allocError();
     }
 
     pub fn deinit(self: *Switch) void {
@@ -369,7 +376,7 @@ pub const Switch = struct {
         self.allocator.destroy(self.body);
 
         // Case statement entries in '.cases' already delloc'd in the body dealloc
-        self.cases.deinit(self.allocator);
+        self.cases.deinit();
     }
 };
 

@@ -113,7 +113,8 @@ pub fn main(init: std.process.Init) !void {
                 for (semantic.errors.items) |err| {
                     switch (err.type) {
                         .Break => std.log.err("'break' statement outside of loop or switch statement", .{}),
-                        .Case => std.log.err("'case' or 'default' label outside of switch statement", .{}),
+                        .CaseOutside => std.log.err("'case' or 'default' label outside of switch statement", .{}),
+                        .CaseDuplicate => std.log.err("Duplicate 'case' or 'default'", .{}),
                         .Continue => std.log.err("'continue' statement outside of loop statement", .{}),
                         .NotAssignable => std.log.err("Expression is not an assignable lvalue", .{}),
                         .Redeclaration => std.log.err("Redeclaration of '{s}'", .{err.name.?}),

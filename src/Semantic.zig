@@ -1,3 +1,4 @@
+// zig fmt: off
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const fatal = std.process.fatal;
@@ -6,6 +7,7 @@ const Parser = @import("Parser.zig");
 const Declaration = Parser.Declaration;
 const Statement = Parser.Statement;
 const Expression = Parser.Expression;
+const Switch = Parser.Switch;
 
 const Semantic = @This();
 
@@ -22,7 +24,8 @@ const SemanticError = struct {
     lineIndex: usize,
     type: enum {
         Break,
-        Case,
+        CaseOutside,
+        CaseDuplicate,
         Continue,
         Redeclaration,
         UndeclaredIdentifier,
@@ -197,7 +200,7 @@ fn resolveStatement1P(self: *Semantic, statement: *Statement, context: *Context)
 
             self.resolveStatement1P(case.body, context);
         } else {
-            self.errors.append(self.allocator, .{ .lineIndex = case.lineIndex, .type = .Case }) catch allocError();
+            self.errors.append(self.allocator, .{ .lineIndex = case.lineIndex, .type = .CaseOutside }) catch allocError();
         },
     }
 }
@@ -228,23 +231,23 @@ fn resolveStatement2P(self: *Semantic, statement: *Statement, context: *Context)
                 self.resolveStatement2P(elseStmt.*, context);
             }
         },
-        .Switch => |*sw| {
-            switch (sw.body.*) {
-                .Case => |case| {
-                    sw.cases.append(self.allocator, case) catch allocError();
-                },
-                .Compound => |cmpd| {
-                    // TODO: use a while loop (e.g. while(cmpd.items[i] != .Case)) to warn
-                    // of dead code statements prior to the first encountered case.
-                    for (cmpd.items) |item| {
-                        if (item == .Statement and item.Statement == .Case) {
-                            sw.cases.append(self.allocator, item.Statement.Case) catch allocError();
-                        }
+        .Switch => |*swtch| {
+            switch (swtch.body.*) {
+                .Case => |case| swtch.addCase(case) catch unreachable, // no concern of duplicate cases labels for a single case
+                .Compound => |block| for (block.items) |item| {
+                    if (item == .Statement and item.Statement == .Case) {
+                        const case = item.Statement.Case;
+                        swtch.addCase(case) catch {
+                            self.errors.append(self.allocator, .{
+                                .lineIndex = case.lineIndex,
+                                .type = .CaseDuplicate,
+                            }) catch allocError();
+                        };
                     }
                 },
                 else => {},
             }
-            self.resolveStatement2P(sw.body, context);
+            self.resolveStatement2P(swtch.body, context);
         },
         .Case => |*case| self.resolveStatement2P(case.body, context),
         .Label => |*lbl| self.resolveStatement2P(lbl.body, context),
