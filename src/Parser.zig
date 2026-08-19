@@ -385,10 +385,10 @@ pub const Case = struct {
     lineIndex: usize,
     tag: identifier = undefined,
     cond: ?Expression,
-    body: *Statement,
+    body: ?*Statement,
 
     pub fn parse(allocator: Allocator, tokens: *TokenIterator) ParsingError!Case {
-        const nextToken = tokens.next() orelse unexpectedEOF();
+        var nextToken = tokens.next() orelse unexpectedEOF();
         const cond: ?Expression = switch (nextToken.type) {
             .Case => try Expression.parse(allocator, tokens, 0),
             .Default => null, // 'default' is just treated as special "case" with no cond expr
@@ -403,8 +403,12 @@ pub const Case = struct {
         const lineIndex = nextToken.lineIndex;
         try expect(.Colon, tokens.next());
 
-        const body = allocator.create(Statement) catch allocError();
-        body.* = try Statement.parse(allocator, tokens);
+        var body: ?*Statement = null;
+        nextToken = tokens.peek() orelse unexpectedEOF();
+        if (nextToken.type != .Case and nextToken.type != .Default) {
+            body = allocator.create(Statement) catch allocError();
+            body.?.* = try Statement.parse(allocator, tokens);
+        }
 
         return .{ .allocator = allocator, .lineIndex = lineIndex, .cond = cond, .body = body };
     }
@@ -414,8 +418,10 @@ pub const Case = struct {
             Expression.deinit(cond);
         }
 
-        Statement.deinit(self.body);
-        self.allocator.destroy(self.body);
+        if (self.body) |body| {
+            Statement.deinit(body);
+            self.allocator.destroy(body);
+        }
     }
 };
 

@@ -153,9 +153,11 @@ fn printStatement(statement: Parser.Statement, indent: usize) void {
                 print("  {s}cond:\n", .{indentStr});
                 printExpression(cond, indent + 4);
             }
-            print("  {s}body:\n", .{indentStr});
-            printStatement(case.body.*, indent + 4);
-            print("{s})\n", .{indentStr});
+            if (case.body) |body| {
+                print("  {s}body:\n", .{indentStr});
+                printStatement(body.*, indent + 4);
+                print("{s})\n", .{indentStr});
+            }
         },
     }
 }

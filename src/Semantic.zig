@@ -198,7 +198,7 @@ fn resolveStatement1P(self: *Semantic, statement: *Statement, context: *Context)
             const newTag = self.generateUnique(context.function, "case");
             case.tag = newTag;
 
-            self.resolveStatement1P(case.body, context);
+            if (case.body) |body| self.resolveStatement1P(body, context);
         } else {
             self.errors.append(self.allocator, .{ .lineIndex = case.lineIndex, .type = .CaseOutside }) catch allocError();
         },
@@ -249,7 +249,7 @@ fn resolveStatement2P(self: *Semantic, statement: *Statement, context: *Context)
             }
             self.resolveStatement2P(swtch.body, context);
         },
-        .Case => |*case| self.resolveStatement2P(case.body, context),
+        .Case => |*case| if (case.body) |body| self.resolveStatement2P(body, context),
         .Label => |*lbl| self.resolveStatement2P(lbl.body, context),
         else => {},
     }
