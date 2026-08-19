@@ -202,7 +202,35 @@ pub const Function = struct {
                 try self.body.append(self.allocator, .{ .Jump = .{ .target = startLabel } });
                 try self.body.append(self.allocator, .{ .Label = .{ .identifier = breakLabel } });
             },
-            else => {}, // TODO: Case and Switch
+            .Switch => |swtch| {
+                const switchBreak = try self.allocator.print("{s}.break", .{swtch.tag});
+                try self.labels.append(self.allocator, switchBreak);
+
+                const c = try self.emitExpression(swtch.cond);
+                const dst: Val = .{ .Var = self.nextTag() };
+
+                for (swtch.cases.items) |case| {
+                    if (case.*.cond) |cond| { // ignore 'default' for now
+                        const e = try self.emitExpression(cond);
+                        try self.body.append(self.allocator, .{ .Binary = .{ .operator = .Eq, .src1 = c, .src2 = e, .dst = dst } });
+                        try self.body.append(self.allocator, .{ .JumpIfNotZero = .{ .condition = dst, .target = case.*.tag } });
+                    }
+                }
+                // jump to the default statement if one exists, else to the end of the switch statement
+                if (swtch.defaultTag) |defaultTag| {
+                    try self.body.append(self.allocator, .{ .Jump = .{ .target = defaultTag } });
+                } else {
+                    try self.body.append(self.allocator, .{ .Jump = .{ .target = switchBreak } });
+                }
+
+                try self.emitStatement(swtch.body.*);
+
+                try self.body.append(self.allocator, .{ .Label = .{ .identifier = switchBreak } });
+            },
+            .Case => |case| {
+                try self.body.append(self.allocator, .{ .Label = .{ .identifier = case.tag } });
+                if (case.body) |body| try self.emitStatement(body.*);
+            },
         }
     }
 

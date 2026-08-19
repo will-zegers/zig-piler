@@ -348,7 +348,8 @@ pub const Switch = struct {
     tag: []const u8 = undefined,
     cond: Expression,
     body: *Statement,
-    cases: std.StringHashMap(*Case),
+    cases: ArrayList(*Case) = .empty,
+    defaultTag: ?[]const u8 = null,
 
     pub fn parse(allocator: Allocator, tokens: *TokenIterator) ParsingError!Switch {
         try expect(.Switch, tokens.next());
@@ -359,12 +360,18 @@ pub const Switch = struct {
         const body = allocator.create(Statement) catch allocError();
         body.* = try Statement.parse(allocator, tokens);
 
-        return .{ .allocator = allocator, .cond = cond, .body = body, .cases = .init(allocator) };
+        return .{ .allocator = allocator, .cond = cond, .body = body };
     }
 
     pub fn addCase(self: *Switch, case: *Case) ParsingError!void {
-        if (self.cases.contains(case.*.tag)) return ParsingError.DuplicateCase;
-        self.cases.put(case.*.tag, case) catch allocError();
+        for (self.cases.items) |child| { // ensure this is not a duplicate case
+            if (std.mem.eql(u8, child.tag, case.*.tag)) return ParsingError.DuplicateCase;
+        }
+
+        // a case with no conditional signifies a default statement
+        if (case.cond == null) self.defaultTag = case.tag;
+
+        self.cases.append(self.allocator, case) catch allocError();
     }
 
     pub fn deinit(self: *Switch) void {
@@ -374,7 +381,7 @@ pub const Switch = struct {
         self.allocator.destroy(self.body);
 
         // Case statement entries in '.cases' already delloc'd in the body dealloc
-        self.cases.deinit();
+        self.cases.deinit(self.allocator);
     }
 };
 
