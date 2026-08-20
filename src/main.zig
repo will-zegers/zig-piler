@@ -103,18 +103,11 @@ pub fn main(init: std.process.Init) !void {
 
     var tokens: Lexer.Token.Iterator = undefined;
     var ast: Parser.AST = undefined;
-    var uniqueIds: [][]const u8 = undefined;
     var tac: TAC.Tacky = undefined;
     var assembly: Assembler.AST = undefined;
     defer {
         if (stage.isUpto(.Lex)) tokens.deinit();
         if (stage.isUpto(.Parse)) ast.deinit();
-        if (stage.isUpto(.Validate)) {
-            for (uniqueIds) |id| {
-                allocator.free(id);
-            }
-            allocator.free(uniqueIds);
-        }
         if (stage.isUpto(.TACky)) tac.deinit();
         if (stage.isUpto(.CodeGen)) assembly.deinit();
     }
@@ -147,7 +140,7 @@ pub fn main(init: std.process.Init) !void {
         var semantic = Semantic.init(allocator);
         defer semantic.deinit();
 
-        uniqueIds = semantic.resolve(&ast);
+        ast.uniqueIds = semantic.resolve(&ast);
         semantic.reportAnyErrors(lines);
 
         if (debug) {

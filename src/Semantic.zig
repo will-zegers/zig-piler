@@ -41,8 +41,8 @@ pub fn init(allocator: Allocator) Semantic {
 
 pub fn deinit(self: *Semantic) void {
     self.switches.deinit();
-
     self.errors.deinit(self.allocator);
+    self.uniqueIds.deinit(self.allocator);
 }
 
 pub fn resolve(self: *Semantic, ast: *AST) [][]const u8 {

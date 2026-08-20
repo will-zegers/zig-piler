@@ -27,17 +27,15 @@ const Parser = @This();
 pub const AST = struct {
     allocator: Allocator,
     tree: Program,
-    uniqueIds: std.ArrayList([]const u8) = .empty, // this will be populated during semantic analysis
+    uniqueIds: [][]const u8 = undefined,
 
     pub fn deinit(self: *AST) void {
         self.tree.deinit();
-        self.uniqueIds.deinit(self.allocator);
-    }
 
-    fn generateUnique(self: *AST, function: []const u8, name: []const u8) []u8 {
-        const unique = self.allocator.print("{s}.{s}.{d}", .{ function, name, self.uniqueIds.items.len }) catch allocError();
-        self.uniqueIds.append(self.allocator, unique) catch allocError();
-        return unique;
+        for (self.uniqueIds) |id| {
+            self.allocator.free(id);
+        }
+        self.allocator.free(self.uniqueIds);
     }
 };
 

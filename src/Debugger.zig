@@ -304,7 +304,7 @@ pub fn printAssemblerAST(ast: Assembler.AST) void {
     for (function.instructions) |instr| {
         print("      {s} (", .{@tagName(instr)});
         switch (instr) {
-            .Ret, .Cqo => print(")", .{}),
+            .Ret, .Cqo => {},
             .Mov => |mov| {
                 switch (mov.src) {
                     .Imm => |imm| print("src: Imm({s}) ", .{imm}),
