@@ -27,7 +27,6 @@ const KeywordMap = std.StaticStringMap(Token.Type).initComptime(.{
 const Lexer = @This();
 
 allocator: Allocator,
-tokens: ArrayList(Token),
 reIdentifier: Regex,
 reConstant: Regex,
 reComment: Regex,
@@ -36,7 +35,6 @@ reMacro: Regex,
 pub fn init(allocator: Allocator) !Lexer {
     return .{
         .allocator = allocator,
-        .tokens = .empty,
         .reIdentifier = try .init("[a-zA-Z_]\\w*\\b"),
         .reConstant = try .init("[0-9]+\\b"),
         .reComment = try .init("//[^\n]*|/\\*([^*]|\\*+[^*/])*\\*+/"),
@@ -49,10 +47,11 @@ pub fn deinit(self: *Lexer) void {
     defer self.reConstant.deinit();
     defer self.reComment.deinit();
     defer self.reMacro.deinit();
-    defer self.tokens.deinit(self.allocator);
 }
 
 pub fn tokenize(self: *Lexer, text: [:0]const u8) !TokenIterator {
+    var tokens: ArrayList(Token) = .empty;
+
     var tokenStart: usize = 0;
     var lineIndex: usize = 0;
 
@@ -208,11 +207,17 @@ pub fn tokenize(self: *Lexer, text: [:0]const u8) !TokenIterator {
                 badToken(remainingText, lineIndex);
             },
         }
-        try self.tokens.append(self.allocator, token);
+        tokens.append(self.allocator, token) catch allocError();
         prevToken = token;
         tokenStart += token.symbol.len;
     }
-    return Token.iterate(self.tokens.items);
+    return Token.iterate(self.allocator, tokens.toOwnedSlice(self.allocator) catch allocError());
+}
+
+pub fn allocError() noreturn {
+    std.log.err("Memory allocation error", .{});
+    std.debug.dumpCurrentStackTrace(.{ .first_address = @returnAddress() });
+    std.process.exit(1);
 }
 
 /// From the remaining text, find the first non-whitespace sequence to report as the invalid token
@@ -223,5 +228,6 @@ fn badToken(text: [:0]const u8, lineIndex: usize) noreturn {
     };
 
     const token = reBadToken.exec(text).?;
-    std.process.fatal("Invalid symbol found '{s}' on line {d}", .{ token, lineNumber });
+    std.log.err("Invalid symbol found '{s}' on line {d}", .{ token, lineNumber });
+    std.process.exit(1);
 }

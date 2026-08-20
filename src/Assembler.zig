@@ -22,27 +22,31 @@ const InstructionList = instruction.InstructionList;
 
 const Assembler = @This();
 
-pub const AST = Program;
-
 const WORD_SIZE: isize = 8;
 
-pub fn codeGen(allocator: Allocator, ast: TAC.IR) AST {
-    return .init(allocator, ast);
+pub const AST = struct {
+    allocator: Allocator,
+    function: Function,
+
+    pub fn deinit(self: *AST) void {
+        self.function.deinit();
+    }
+};
+
+pub fn codeGen(allocator: Allocator, ast: TAC.Tacky) AST {
+    const program: Program = .init(allocator, ast);
+    return .{ .allocator = allocator, .function = program.function };
 }
 
 const Program = struct {
     allocator: Allocator,
     function: Function,
 
-    pub fn init(allocator: Allocator, program: TAC.IR) Program {
+    pub fn init(allocator: Allocator, program: TAC.Tacky) Program {
         return .{
             .allocator = allocator,
             .function = Function.init(allocator, program.function)
         };
-    }
-
-    pub fn deinit(self: *Program) void {
-        self.function.deinit();
     }
 };
 

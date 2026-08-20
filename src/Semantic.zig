@@ -40,21 +40,19 @@ pub fn init(allocator: Allocator) Semantic {
 }
 
 pub fn deinit(self: *Semantic) void {
-    for (self.uniqueIds.items) |item| {
-        self.allocator.free(item);
-    }
     self.switches.deinit();
 
-    self.uniqueIds.deinit(self.allocator);
     self.errors.deinit(self.allocator);
 }
 
-pub fn resolve(self: *Semantic, ast: *AST) void {
+pub fn resolve(self: *Semantic, ast: *AST) [][]const u8 {
     var context: Context = .init(self.allocator);
     defer context.deinit();
 
     resolveFirstPass(self, ast, &context);
     resolveSecondPass(self, ast, &context);
+
+    return self.uniqueIds.toOwnedSlice(self.allocator) catch allocError();
 }
 
 fn resolveFirstPass(self: *Semantic, ast: *AST, context: *Context) void {
@@ -200,7 +198,9 @@ fn resolveStatement1P(self: *Semantic, statement: *Statement, context: *Context)
             self.resolveStatement1P(swtch.body, context);
         },
         .Case => |*case| if (context.getSwitchTag()) |switchTag| {
-            case.tagFromSwitch(switchTag);
+            const cond = if (case.cond) |cond| cond.Constant else "default";
+            const newTag = self.generateUnique(context.function, cond);
+            case.tag = newTag;
 
             const parentSwitch = self.switches.get(switchTag) orelse unreachable;
             parentSwitch.*.addCase(case) catch {

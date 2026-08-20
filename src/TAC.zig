@@ -17,12 +17,42 @@ pub const Unary = instruction.Unary;
 const Val = instruction.Val;
 
 pub const TAC = @This();
-pub const IR = Program;
+
+const Labels = ArrayList([]const u8);
+const Tags = ArrayList([]const u8);
+const Instructions = ArrayList(Instruction);
+
+pub const Tacky = struct {
+    allocator: Allocator,
+    function: Function,
+    tags: [][]const u8,
+    labels: [][]const u8,
+
+    pub fn deinit(self: *Tacky) void {
+        for (self.tags) |item| {
+            self.allocator.free(item);
+        }
+        self.allocator.free(self.tags);
+
+        for (self.labels) |item| {
+            self.allocator.free(item);
+        }
+        self.allocator.free(self.labels);
+
+        self.function.deinit();
+    }
+};
 
 allocator: Allocator,
 
-pub fn init(allocator: Allocator, ast: Parser.AST) IR {
-    return .init(allocator, ast);
+pub fn init(allocator: Allocator, ast: Parser.AST) Tacky {
+    var program: Program = .init(allocator, ast);
+    return .{
+        .allocator = allocator,
+        .function = program.function,
+        .tags = program.function.tags.toOwnedSlice(allocator) catch allocError(),
+        .labels = program.function.labels.toOwnedSlice(allocator) catch allocError(),
+    };
 }
 
 const Program = struct {
@@ -32,13 +62,13 @@ const Program = struct {
     pub fn init(allocator: Allocator, ast: Parser.AST) Program {
         return .{ .allocator = allocator, .function = .init(allocator, ast) };
     }
+
+    pub fn deinit(self: *Program) void {
+        self.function.deinit();
+    }
 };
 
 pub const Function = struct {
-    const Labels = ArrayList([]const u8);
-    const Tags = ArrayList([]const u8);
-    const Instructions = ArrayList(Instruction);
-
     allocator: Allocator,
     name: []const u8,
     body: ArrayList(Instruction),
@@ -71,15 +101,6 @@ pub const Function = struct {
 
     pub fn deinit(self: *Function) void {
         defer self.body.deinit(self.allocator);
-        defer self.tags.deinit(self.allocator);
-        defer self.labels.deinit(self.allocator);
-
-        for (self.tags.items) |item| {
-            self.allocator.free(item);
-        }
-        for (self.labels.items) |item| {
-            self.allocator.free(item);
-        }
     }
 
     fn emitStatement(self: *Function, stmt: Parser.Statement) !void {

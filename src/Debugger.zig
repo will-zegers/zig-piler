@@ -210,7 +210,7 @@ fn printExpression(expr: Parser.Expression, indent: usize) void {
     }
 }
 
-pub fn printTAC(ir: TAC.IR) void {
+pub fn printTAC(ir: TAC.Tacky) void {
     const program = ir;
     const function = program.function;
     const body = function.body;

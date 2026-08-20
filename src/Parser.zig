@@ -24,7 +24,22 @@ const TokenIterator = Token.Iterator;
 
 const Parser = @This();
 
-pub const AST = Program;
+pub const AST = struct {
+    allocator: Allocator,
+    function: Function,
+    uniqueIds: std.ArrayList([]const u8) = .empty, // this will be populated during semantic analysis
+
+    pub fn deinit(self: *AST) void {
+        self.function.deinit();
+        self.uniqueIds.deinit(self.allocator);
+    }
+
+    fn generateUnique(self: *AST, function: []const u8, name: []const u8) []u8 {
+        const unique = std.fmt.allocPrint(self.allocator, "{s}.{s}.{d}", .{ function, name, self.uniqueIds.items.len }) catch allocError();
+        self.uniqueIds.append(self.allocator, unique) catch allocError();
+        return unique;
+    }
+};
 
 pub fn parse(allocator: Allocator, tokens: *TokenIterator) ParsingError!AST {
     const ast = try Program.init(allocator, tokens);
@@ -33,7 +48,7 @@ pub fn parse(allocator: Allocator, tokens: *TokenIterator) ParsingError!AST {
         std.process.exit(1);
     }
 
-    return ast;
+    return .{ .allocator = allocator, .function = ast.function };
 }
 
 pub const Program = struct {
@@ -418,11 +433,6 @@ pub const Case = struct {
         return .{ .allocator = allocator, .lineIndex = lineIndex, .cond = cond, .body = body };
     }
 
-    pub fn tagFromSwitch(self: *Case, switchTag: []const u8) void {
-        const cond = if (self.cond) |cond| cond.Constant else "default";
-        self.tag = self.allocator.print("{s}.{s}", .{ switchTag, cond }) catch allocError();
-    }
-
     pub fn deinit(self: *Case) void {
         if (self.cond) |*cond| {
             Expression.deinit(cond);
@@ -432,8 +442,6 @@ pub const Case = struct {
             Statement.deinit(body);
             self.allocator.destroy(body);
         }
-
-        self.allocator.free(self.tag);
     }
 };
 

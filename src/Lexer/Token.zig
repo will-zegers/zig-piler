@@ -1,4 +1,5 @@
 const std = @import("std");
+const Allocator = std.mem.Allocator;
 
 const Token = @This();
 
@@ -36,11 +37,12 @@ pub const Type = enum {
     While,
 };
 
-pub fn iterate(tokens: []Token) Iterator {
-    return .{ .items = tokens };
+pub fn iterate(allocator: Allocator, tokens: []Token) Iterator {
+    return .{ .allocator = allocator, .items = tokens };
 }
 
 pub const Iterator = struct {
+    allocator: Allocator,
     lineIndex: usize = 0,
     items: []const Token,
     index: usize = 0,
@@ -55,6 +57,10 @@ pub const Iterator = struct {
             return token;
         }
         return null;
+    }
+
+    pub fn deinit(self: *Iterator) void {
+        self.allocator.free(self.items);
     }
 
     pub fn peek(self: *Iterator) ?Token {
