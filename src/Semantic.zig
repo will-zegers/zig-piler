@@ -199,7 +199,8 @@ fn resolveStatement1P(self: *Semantic, statement: *Statement, context: *Context)
         },
         .Case => |*case| if (context.getSwitchTag()) |switchTag| {
             const cond = if (case.cond) |cond| cond.Constant else "default";
-            const newTag = self.generateUnique(context.function, cond);
+            const newTag = self.allocator.print("{s}.{s}", .{switchTag, cond}) catch allocError();
+            self.uniqueIds.append(self.allocator, newTag) catch allocError();
             case.tag = newTag;
 
             const parentSwitch = self.switches.get(switchTag) orelse unreachable;
