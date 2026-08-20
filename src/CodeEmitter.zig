@@ -26,7 +26,7 @@ pub fn init(allocator: Allocator, ast: Assembler.AST) !CodeEmitter {
         \\  movq    %rsp, %rbp
     ;
 
-    const functionDefinition = try std.fmt.allocPrint(allocator, functionDefTemplate, .{ast.function.name});
+    const functionDefinition = try allocator.print(functionDefTemplate, .{ast.function.name});
     const localPrefix = switch (builtin.os.tag) {
         .linux => ".L",
         else => unreachable, // only running this on linux atm
@@ -40,7 +40,7 @@ pub fn init(allocator: Allocator, ast: Assembler.AST) !CodeEmitter {
                 const template =
                     \\  subq    ${d}, %rsp
                 ;
-                break :code std.fmt.allocPrint(allocator, template, .{allocStack.stackPointer});
+                break :code allocator.print(template, .{allocStack.stackPointer});
             },
             .Mov => |mov| {
                 const template =
@@ -51,7 +51,7 @@ pub fn init(allocator: Allocator, ast: Assembler.AST) !CodeEmitter {
                 const dst = getOperandString(allocator, mov.dst);
                 defer allocator.free(dst);
 
-                break :code std.fmt.allocPrint(allocator, template, .{src, dst});
+                break :code allocator.print(template, .{src, dst});
             },
             .Ret =>  {
                 const instr =
@@ -75,7 +75,7 @@ pub fn init(allocator: Allocator, ast: Assembler.AST) !CodeEmitter {
                 const operand = getOperandString(allocator, unary.operand);
                 defer allocator.free(operand);
 
-                break :code std.fmt.allocPrint(allocator, template, .{operator, operand});
+                break :code allocator.print(template, .{operator, operand});
             },
             .Binary => |binary| {
                 const template =
@@ -97,7 +97,7 @@ pub fn init(allocator: Allocator, ast: Assembler.AST) !CodeEmitter {
                 const dst = getOperandString(allocator, binary.dst);
                 defer allocator.free(dst);
 
-                break :code std.fmt.allocPrint(allocator, template, .{operator, src, dst});
+                break :code allocator.print(template, .{operator, src, dst});
             },
             .Cqo =>  {
                 const instr =
@@ -112,7 +112,7 @@ pub fn init(allocator: Allocator, ast: Assembler.AST) !CodeEmitter {
                 const operand = getOperandString(allocator, idiv.operand);
                 defer allocator.free(operand);
 
-                break :code std.fmt.allocPrint(allocator, template, .{operand});
+                break :code allocator.print(template, .{operand});
             },
             .Cmp => |cmp| {
                 const template =
@@ -123,14 +123,14 @@ pub fn init(allocator: Allocator, ast: Assembler.AST) !CodeEmitter {
                 const arg2 = getOperandString(allocator, cmp.arg2);
                 defer allocator.free(arg2);
 
-                break :code std.fmt.allocPrint(allocator, template, .{arg1, arg2});
+                break :code allocator.print(template, .{arg1, arg2});
             },
             .Jmp => |jmp| {
                 const template =
                     \\  jmp    {s}{s}
                 ;
 
-                break :code std.fmt.allocPrint(allocator, template, .{localPrefix, jmp.target});
+                break :code allocator.print(template, .{localPrefix, jmp.target});
             },
             .JmpCC => |jmp| {
                 const template =
@@ -142,7 +142,7 @@ pub fn init(allocator: Allocator, ast: Assembler.AST) !CodeEmitter {
                     else => unreachable,
                 };
 
-                break :code std.fmt.allocPrint(allocator, template, .{condCode, localPrefix, jmp.target});
+                break :code allocator.print(template, .{condCode, localPrefix, jmp.target});
             },
             .SetCC => |*set| {
                 const template =
@@ -164,14 +164,14 @@ pub fn init(allocator: Allocator, ast: Assembler.AST) !CodeEmitter {
                 const operand = getOperandString(allocator, byteOperand);
                 defer allocator.free(operand);
 
-                break :code std.fmt.allocPrint(allocator, template, .{condCode, operand});
+                break :code allocator.print(template, .{condCode, operand});
 
             },
             .Label => |label| {
                 const template =
                     \\{s}{s}:
                 ;
-                break :code std.fmt.allocPrint(allocator, template, .{localPrefix, label.id});
+                break :code allocator.print(template, .{localPrefix, label.id});
             },
         } catch allocError();
         instructions.appendAssumeCapacity(code);
@@ -188,9 +188,9 @@ pub fn init(allocator: Allocator, ast: Assembler.AST) !CodeEmitter {
 
 fn getOperandString(allocator: Allocator, operand: Assembler.Operand) []const u8 {
     return switch(operand) {
-        .Imm => |op|   std.fmt.allocPrint(allocator, "{c}{s}", .{'$', op}),
-        .Reg => |op|   std.fmt.allocPrint(allocator, "{c}{s}", .{'%', @tagName(op)}),
-        .Stack => |op| std.fmt.allocPrint(allocator, "{d}{s}", .{op, "(%rbp)"}),
+        .Imm => |op|   allocator.print("{c}{s}", .{'$', op}),
+        .Reg => |op|   allocator.print("{c}{s}", .{'%', @tagName(op)}),
+        .Stack => |op| allocator.print("{d}{s}", .{op, "(%rbp)"}),
         .Pseudo => unreachable,
     } catch allocError();
 }

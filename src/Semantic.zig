@@ -291,7 +291,7 @@ fn resolveExpression(self: *Semantic, expr: *Expression, context: *Context) void
 }
 
 fn generateUnique(self: *Semantic, function: []const u8, name: []const u8) []u8 {
-    const unique = std.fmt.allocPrint(self.allocator, "{s}.{s}.{d}", .{ function, name, self.uniqueIds.items.len }) catch allocError();
+    const unique = self.allocator.print("{s}.{s}.{d}", .{ function, name, self.uniqueIds.items.len }) catch allocError();
     self.uniqueIds.append(self.allocator, unique) catch allocError();
     return unique;
 }

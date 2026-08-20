@@ -221,5 +221,5 @@ fn getOutputBinary(allocator: std.mem.Allocator, inputFile: []const u8) ![]const
             break;
         }
     }
-    return try std.fmt.allocPrint(allocator, "{s}", .{outputBinary});
+    return try allocator.print("{s}", .{outputBinary});
 }
