@@ -383,7 +383,8 @@ pub fn printAssemblerAST(ast: Assembler.AST) void {
     print(")\n", .{});
 }
 
-fn allocError() noreturn {
+pub fn allocError() noreturn {
     std.log.err("Memory allocation error", .{});
+    std.debug.dumpCurrentStackTrace(.{ .first_address = @returnAddress() });
     std.process.exit(1);
 }

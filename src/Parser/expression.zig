@@ -1,7 +1,6 @@
 const std = @import("std");
 const fmt = std.fmt;
 const mem = std.mem;
-const fatal = std.process.fatal;
 const Allocator = std.mem.Allocator;
 
 const Token = @import("../Lexer.zig").Token;

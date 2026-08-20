@@ -19,7 +19,7 @@ const Stage = enum(usize) {
     ToFile,
     Compile,
 
-    fn isUpto(self: Stage, other: Stage) bool {
+    fn includes(self: Stage, other: Stage) bool {
         return @intFromEnum(self) >= @intFromEnum(other);
     }
 };
@@ -33,7 +33,6 @@ fn usage() noreturn {
         \\        --tacky      Generate intermediate representation
         \\        --codegen    Generate output from the assembler
         \\        --compile    (default) Run all stages and compile to binary
-        \\        -o <file>    Place the output into <file>
         \\        -S           Produce only the source file, don't compile
         \\        -d, --debug  Output debug information
         \\        -h, --help   Print this help message
@@ -106,13 +105,13 @@ pub fn main(init: std.process.Init) !void {
     var tac: TAC.Tacky = undefined;
     var assembly: Assembler.AST = undefined;
     defer {
-        if (stage.isUpto(.Lex)) tokens.deinit();
-        if (stage.isUpto(.Parse)) ast.deinit();
-        if (stage.isUpto(.TACky)) tac.deinit();
-        if (stage.isUpto(.CodeGen)) assembly.deinit();
+        if (stage.includes(.Lex)) tokens.deinit();
+        if (stage.includes(.Parse)) ast.deinit();
+        if (stage.includes(.TACky)) tac.deinit();
+        if (stage.includes(.CodeGen)) assembly.deinit();
     }
 
-    if (stage.isUpto(.Lex)) {
+    if (stage.includes(.Lex)) {
         std.log.info("Running lexer...", .{});
         var lexer = try Lexer.init(allocator);
         defer lexer.deinit();
@@ -126,7 +125,7 @@ pub fn main(init: std.process.Init) !void {
         }
     } else return;
 
-    if (stage.isUpto(.Parse)) {
+    if (stage.includes(.Parse)) {
         std.log.info("Running parser...", .{});
         ast = Parser.parse(allocator, &tokens) catch {
             const index = tokens.lineIndex;
@@ -135,7 +134,7 @@ pub fn main(init: std.process.Init) !void {
         };
     } else return;
 
-    if (stage.isUpto(.Validate)) {
+    if (stage.includes(.Validate)) {
         std.log.info("Running semantic analysis...", .{});
         var semantic = Semantic.init(allocator);
         defer semantic.deinit();
@@ -149,7 +148,7 @@ pub fn main(init: std.process.Init) !void {
         }
     } else return;
 
-    if (stage.isUpto(.TACky)) {
+    if (stage.includes(.TACky)) {
         std.log.info("Generating Tacky...", .{});
         tac = TAC.init(allocator, ast);
 
@@ -159,7 +158,7 @@ pub fn main(init: std.process.Init) !void {
         }
     } else return;
 
-    if (stage.isUpto(.CodeGen)) {
+    if (stage.includes(.CodeGen)) {
         std.log.info("Running assembler...", .{});
         assembly = Assembler.codeGen(allocator, tac);
 
@@ -169,18 +168,18 @@ pub fn main(init: std.process.Init) !void {
         }
     } else return;
 
-    if (stage.isUpto(.ToFile)) {
+    if (stage.includes(.ToFile)) {
         std.log.info("Writing source to '{s}'", .{outputSource});
         var ce = try CodeEmitter.init(allocator, assembly);
         defer ce.deinit();
         try ce.writeToFile(init.io, outputSource);
     } else return;
 
-    if (stage.isUpto(.Compile)) {
+    if (stage.includes(.Compile)) {
         var cmd = try std.process.spawn(init.io, .{ .argv = &.{ "gcc", outputSource, "-o", outputBinary } });
         const status = try cmd.wait(init.io);
         if (status.exited != 0) {
-            std.process.fatal("Failed to compile {s}", .{outputBinary});
+            std.log.err("Failed to compile {s}", .{outputBinary});
             std.process.exit(status.exited);
         } else {
             std.log.info("'{s}' successfully compiled!", .{outputBinary});

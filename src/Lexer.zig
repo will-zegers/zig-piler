@@ -224,7 +224,8 @@ pub fn allocError() noreturn {
 fn badToken(text: [:0]const u8, lineIndex: usize) noreturn {
     const lineNumber = lineIndex + 1;
     const reBadToken = Regex.init("\\S*") catch {
-        std.process.fatal("Lexing error on line {d}", .{lineNumber});
+        std.log.err("Lexing error on line {d}", .{lineNumber});
+        std.process.exit(1);
     };
 
     const token = reBadToken.exec(text).?;

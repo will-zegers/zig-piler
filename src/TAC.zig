@@ -1,7 +1,6 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const ArrayList = std.ArrayList;
-const fatal = std.process.fatal;
 const fmt = std.fmt;
 
 const Parser = @import("Parser.zig");
@@ -389,7 +388,8 @@ pub const Function = struct {
     }
 };
 
-fn allocError() noreturn {
+pub fn allocError() noreturn {
     std.log.err("Memory allocation error", .{});
+    std.debug.dumpCurrentStackTrace(.{ .first_address = @returnAddress() });
     std.process.exit(1);
 }

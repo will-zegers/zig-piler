@@ -1,7 +1,6 @@
 // zig fmt: off
 const std = @import("std");
 const Allocator = std.mem.Allocator;
-const fatal = std.process.fatal;
 
 const Parser = @import("Parser.zig");
 const Declaration = Parser.Declaration;
@@ -316,7 +315,8 @@ fn generateUnique(self: *Semantic, function: []const u8, name: []const u8) []u8 
     return unique;
 }
 
-fn allocError() noreturn {
+pub fn allocError() noreturn {
     std.log.err("Memory allocation error", .{});
+    std.debug.dumpCurrentStackTrace(.{ .first_address = @returnAddress() });
     std.process.exit(1);
 }
