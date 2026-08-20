@@ -78,13 +78,13 @@ pub const Function = struct {
     pub fn init(allocator: Allocator, ast: Parser.AST) Function {
         var function: Function = .{
             .allocator = allocator,
-            .name = ast.function.name,
+            .name = ast.tree.function.name,
             .body = .empty,
             .tags = .empty,
             .labels = .empty,
         };
 
-        for (ast.function.body.items) |blockItem| {
+        for (ast.tree.function.body.items) |blockItem| {
             switch (blockItem) {
                 .Statement => |stmt| function.emitStatement(stmt) catch allocError(),
                 .Declaration => |decl| {

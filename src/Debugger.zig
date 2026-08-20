@@ -14,9 +14,8 @@ pub fn printLexerTokens(tokens: *TokenIterator) void {
 }
 
 pub fn printParserAST(ast: Parser.AST) void {
-    const program = ast;
-    const function = program.function;
-    print("{any}(\n", .{@TypeOf(program)});
+    const function = ast.tree.function;
+    print("{any}(\n", .{@TypeOf(ast.tree)});
     print("  {any}(\n", .{@TypeOf(function)});
     for (function.body.items) |blockItem| {
         printBlockItem(blockItem, 4);

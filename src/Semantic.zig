@@ -56,7 +56,7 @@ pub fn resolve(self: *Semantic, ast: *AST) [][]const u8 {
 }
 
 fn resolveFirstPass(self: *Semantic, ast: *AST, context: *Context) void {
-    const body = ast.function.body.items;
+    const body = ast.tree.function.body.items;
     for (body) |*block| {
         switch (block.*) {
             .Statement => |*statement| self.resolveStatement1P(statement, context),
@@ -66,7 +66,7 @@ fn resolveFirstPass(self: *Semantic, ast: *AST, context: *Context) void {
 }
 
 fn resolveSecondPass(self: *Semantic, ast: *AST, context: *Context) void {
-    const body = ast.function.body.items;
+    const body = ast.tree.function.body.items;
     for (body) |*block| {
         switch (block.*) {
             .Statement => |*statement| self.resolveStatement2P(statement, context),

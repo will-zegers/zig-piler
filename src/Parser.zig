@@ -26,11 +26,11 @@ const Parser = @This();
 
 pub const AST = struct {
     allocator: Allocator,
-    function: Function,
+    tree: Program,
     uniqueIds: std.ArrayList([]const u8) = .empty, // this will be populated during semantic analysis
 
     pub fn deinit(self: *AST) void {
-        self.function.deinit();
+        self.tree.deinit();
         self.uniqueIds.deinit(self.allocator);
     }
 
@@ -42,13 +42,13 @@ pub const AST = struct {
 };
 
 pub fn parse(allocator: Allocator, tokens: *TokenIterator) ParsingError!AST {
-    const ast = try Program.init(allocator, tokens);
+    const program = try Program.init(allocator, tokens);
     if (tokens.peek()) |token| {
         std.log.err("Unexpected token(s) at end of file: {s}", .{token.symbol});
         std.process.exit(1);
     }
 
-    return .{ .allocator = allocator, .function = ast.function };
+    return .{ .allocator = allocator, .tree = program };
 }
 
 pub const Program = struct {
