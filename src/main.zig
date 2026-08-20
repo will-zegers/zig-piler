@@ -65,8 +65,10 @@ pub fn main(init: std.process.Init) !void {
             stage = .CodeGen
         else if (mem.eql(u8, "-S", arg))
             stage = .ToFile
-        else if (mem.eql(u8, "--debug", arg))
+        else if (mem.eql(u8, "-d", arg) or mem.eql(u8, "--debug", arg))
             debug = true
+        else if (mem.eql(u8, "-h", arg) or mem.eql(u8, "--help", arg))
+            usage()
         else
             inputFile = arg;
     }
@@ -132,6 +134,11 @@ pub fn main(init: std.process.Init) !void {
             std.log.err(" {d} | {s}\n", .{ index, lines[index] });
             std.process.exit(1);
         };
+
+        if (debug) {
+            std.debug.print("-------parsed-------\n", .{});
+            Debugger.printParserAST(ast);
+        }
     } else return;
 
     if (stage.includes(.Validate)) {
@@ -139,7 +146,7 @@ pub fn main(init: std.process.Init) !void {
         var semantic = Semantic.init(allocator);
         defer semantic.deinit();
 
-        ast.uniqueIds = semantic.resolve(&ast);
+        semantic.resolve(&ast);
         semantic.reportAnyErrors(lines);
 
         if (debug) {

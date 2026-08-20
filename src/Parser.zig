@@ -27,15 +27,9 @@ const Parser = @This();
 pub const AST = struct {
     allocator: Allocator,
     tree: Program,
-    uniqueIds: [][]const u8 = undefined,
 
     pub fn deinit(self: *AST) void {
         self.tree.deinit();
-
-        for (self.uniqueIds) |id| {
-            self.allocator.free(id);
-        }
-        self.allocator.free(self.uniqueIds);
     }
 };
 
@@ -87,6 +81,7 @@ pub const Function = struct {
 
 pub const Block = struct {
     allocator: Allocator,
+    tag: ?[]const u8 = null,
     items: []BlockItem,
 
     pub fn parse(allocator: Allocator, tokens: *TokenIterator) ParsingError!Block {
@@ -106,6 +101,8 @@ pub const Block = struct {
     }
 
     pub fn deinit(self: *Block) void {
+        if (self.tag) |tag| self.allocator.free(tag);
+
         defer self.allocator.free(self.items);
 
         for (self.items) |*item| {
@@ -136,7 +133,9 @@ pub const BlockItem = union(BlockItemTag) {
 };
 
 pub const Declaration = struct {
+    allocator: Allocator,
     lineIndex: usize,
+    tag: ?[]const u8 = null,
     name: identifier,
     init: ?Expression,
 
@@ -148,39 +147,46 @@ pub const Declaration = struct {
         const init = try Assignment.parse(allocator, tokens);
         try expect(.Semicolon, tokens.next());
 
-        return .{ .name = token.symbol, .init = init, .lineIndex = token.lineIndex };
+        return .{ .allocator = allocator, .name = token.symbol, .init = init, .lineIndex = token.lineIndex };
     }
 
     pub fn deinit(self: *Declaration) void {
+        if (self.tag) |tag| self.allocator.free(tag);
         if (self.*.init) |*init| Expression.deinit(init);
     }
 };
 
 pub const Break = struct {
+    allocator: Allocator,
     lineIndex: usize,
-    tag: []const u8 = undefined, // this will get set during semantic analysis
+    tag: ?[]const u8 = null, // this will get set during semantic analysis
 
-    pub fn parse(tokens: *TokenIterator) ParsingError!Break {
+    pub fn parse(allocator: Allocator, tokens: *TokenIterator) ParsingError!Break {
         const token = tokens.next() orelse return unexpectedEOF();
         try expect(.Semicolon, tokens.next());
-        return .{ .lineIndex = token.lineIndex };
+        return .{ .allocator = allocator, .lineIndex = token.lineIndex };
     }
+
+    // no deinit needed since the tag is owned by the enclosing loop/switch
 };
 
 pub const Continue = struct {
+    allocator: Allocator,
     lineIndex: usize,
-    tag: []const u8 = undefined, // this will get set during semantic analysis
+    tag: ?[]const u8 = null, // this will get set during semantic analysis
 
-    pub fn parse(tokens: *TokenIterator) ParsingError!Continue {
+    pub fn parse(allocator: Allocator, tokens: *TokenIterator) ParsingError!Continue {
         const token = tokens.next() orelse return unexpectedEOF();
         try expect(.Semicolon, tokens.next());
-        return .{ .lineIndex = token.lineIndex };
+        return .{ .allocator = allocator, .lineIndex = token.lineIndex };
     }
+
+    // no deinit needed since the tag is owned by the enclosing loop
 };
 
 pub const DoWhile = struct {
     allocator: Allocator,
-    tag: []const u8 = undefined, // this will get set during semantic analysis
+    tag: ?[]const u8 = null, // this will get set during semantic analysis
     body: *Statement,
     cond: Expression,
 
@@ -199,6 +205,8 @@ pub const DoWhile = struct {
     }
 
     pub fn deinit(self: *DoWhile) void {
+        if (self.tag) |tag| self.allocator.free(tag);
+
         Statement.deinit(self.body);
         self.allocator.destroy(self.body);
 
@@ -236,7 +244,7 @@ const ForInit = union(ForInitTag) {
 
 pub const For = struct {
     allocator: Allocator,
-    tag: []const u8 = undefined, // this will get set during semantic analysis
+    tag: ?[]const u8 = null, // this will get set during semantic analysis
     init: ForInit,
     cond: ?Expression,
     post: ?Expression,
@@ -263,6 +271,8 @@ pub const For = struct {
     }
 
     pub fn deinit(self: *For) void {
+        if (self.tag) |tag| self.allocator.free(tag);
+
         self.init.deinit();
         if (self.cond) |*cond| Expression.deinit(cond);
         if (self.post) |*post| Expression.deinit(post);
@@ -274,7 +284,7 @@ pub const For = struct {
 
 pub const While = struct {
     allocator: Allocator,
-    tag: []const u8 = undefined, // this will get set during semantic analysis
+    tag: ?[]const u8 = null, // this will get set during semantic analysis
     cond: Expression,
     body: *Statement,
 
@@ -290,6 +300,8 @@ pub const While = struct {
     }
 
     pub fn deinit(self: *While) void {
+        if (self.tag) |tag| self.allocator.free(tag);
+
         Expression.deinit(&self.cond);
 
         Statement.deinit(self.body);
@@ -358,7 +370,7 @@ pub const If = struct {
 
 pub const Switch = struct {
     allocator: Allocator,
-    tag: []const u8 = undefined,
+    tag: ?[]const u8 = null,
     cond: Expression,
     body: *Statement,
     cases: ArrayList(*Case) = .empty,
@@ -378,7 +390,7 @@ pub const Switch = struct {
 
     pub fn addCase(self: *Switch, case: *Case) ParsingError!void {
         for (self.cases.items) |child| { // ensure this is not a duplicate case
-            if (std.mem.eql(u8, child.tag, case.*.tag)) return ParsingError.DuplicateCase;
+            if (std.mem.eql(u8, child.tag.?, case.*.tag.?)) return ParsingError.DuplicateCase;
         }
 
         // a case with no conditional signifies a default statement
@@ -388,6 +400,8 @@ pub const Switch = struct {
     }
 
     pub fn deinit(self: *Switch) void {
+        if (self.tag) |tag| self.allocator.free(tag);
+
         Expression.deinit(&self.cond);
 
         Statement.deinit(self.body);
@@ -401,7 +415,7 @@ pub const Switch = struct {
 pub const Case = struct {
     allocator: Allocator,
     lineIndex: usize,
-    tag: []const u8 = undefined,
+    tag: ?[]const u8 = null,
     cond: ?Expression,
     body: ?*Statement,
 
@@ -432,6 +446,8 @@ pub const Case = struct {
     }
 
     pub fn deinit(self: *Case) void {
+        if (self.tag) |tag| self.allocator.free(tag);
+
         if (self.cond) |*cond| {
             Expression.deinit(cond);
         }
@@ -446,7 +462,8 @@ pub const Case = struct {
 pub const Label = struct {
     allocator: Allocator,
     lineIndex: usize,
-    tag: []const u8,
+    name: []const u8,
+    tag: ?[]const u8 = null,
     body: *Statement,
 
     pub fn parse(allocator: Allocator, name: Token, tokens: *TokenIterator) ParsingError!Label {
@@ -456,10 +473,12 @@ pub const Label = struct {
         const body = allocator.create(Statement) catch allocError();
         body.* = try Statement.parse(allocator, tokens);
 
-        return .{ .allocator = allocator, .tag = name.symbol, .body = body, .lineIndex = name.lineIndex };
+        return .{ .allocator = allocator, .name = name.symbol, .body = body, .lineIndex = name.lineIndex };
     }
 
     pub fn deinit(self: *Label) void {
+        if (self.tag) |tag| self.allocator.free(tag);
+
         defer self.allocator.destroy(self.body);
         Statement.deinit(self.body);
     }
@@ -503,10 +522,10 @@ pub const Statement = union(StatementTag) {
     pub fn parse(allocator: Allocator, tokens: *TokenIterator) ParsingError!Statement {
         var nextToken = tokens.peek() orelse unexpectedEOF();
         return switch (nextToken.type) {
-            .Break => .{ .Break = try .parse(tokens) },
+            .Break => .{ .Break = try .parse(allocator, tokens) },
             .Case, .Default => .{ .Case = try .parse(allocator, tokens) },
             .OpenBrace => .{ .Compound = try .parse(allocator, tokens) },
-            .Continue => .{ .Continue = try .parse(tokens) },
+            .Continue => .{ .Continue = try .parse(allocator, tokens) },
             .Do => .{ .DoWhile = try .parse(allocator, tokens) },
             .Goto => .{ .Goto = try .parse(tokens) },
             .For => .{ .For = try .parse(allocator, tokens) },
@@ -548,7 +567,7 @@ pub const Statement = union(StatementTag) {
             .While => statement.*.While.deinit(),
             .Switch => statement.*.Switch.deinit(),
             .Case => statement.*.Case.deinit(),
-            else => {},
+            .Break, .Continue => {},
         }
     }
 };

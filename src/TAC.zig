@@ -138,48 +138,48 @@ pub const Function = struct {
                 try self.body.append(self.allocator, .{ .Label = .{ .identifier = endLabel } });
             },
             .Label => |lbl| {
-                try self.body.append(self.allocator, .{ .Label = .{ .identifier = lbl.tag } });
+                try self.body.append(self.allocator, .{ .Label = .{ .identifier = lbl.tag.? } });
                 _ = try self.emitStatement(lbl.body.*);
             },
             .Goto => |goto| try self.body.append(self.allocator, .{ .Jump = .{ .target = goto.target } }),
             .Break => |b| {
-                const breakLabel = try self.allocator.print("{s}.break", .{b.tag});
+                const breakLabel = try self.allocator.print("{s}.break", .{b.tag.?});
                 try self.labels.append(self.allocator, breakLabel);
 
                 try self.body.append(self.allocator, .{ .Jump = .{ .target = breakLabel } });
             },
             .Continue => |c| {
-                const continueLabel = try self.allocator.print("{s}.continue", .{c.tag});
+                const continueLabel = try self.allocator.print("{s}.continue", .{c.tag.?});
                 try self.labels.append(self.allocator, continueLabel);
 
                 try self.body.append(self.allocator, .{ .Jump = .{ .target = continueLabel } });
             },
             .DoWhile => |d| {
-                const startLabel = try self.allocator.print("{s}.start", .{d.tag});
+                const startLabel = try self.allocator.print("{s}.start", .{d.tag.?});
                 try self.labels.append(self.allocator, startLabel);
                 try self.body.append(self.allocator, .{ .Label = .{ .identifier = startLabel } });
 
                 try self.emitStatement(d.body.*);
 
-                const continueLabel = try self.allocator.print("{s}.continue", .{d.tag});
+                const continueLabel = try self.allocator.print("{s}.continue", .{d.tag.?});
                 try self.labels.append(self.allocator, continueLabel);
                 try self.body.append(self.allocator, .{ .Label = .{ .identifier = continueLabel } });
 
                 const e = try self.emitExpression(d.cond);
                 try self.body.append(self.allocator, .{ .JumpIfNotZero = .{ .condition = e, .target = startLabel } });
 
-                const breakLabel = try self.allocator.print("{s}.break", .{d.tag});
+                const breakLabel = try self.allocator.print("{s}.break", .{d.tag.?});
                 try self.labels.append(self.allocator, breakLabel);
                 try self.body.append(self.allocator, .{ .Label = .{ .identifier = breakLabel } });
             },
             .While => |w| {
-                const continueLabel = try self.allocator.print("{s}.continue", .{w.tag});
+                const continueLabel = try self.allocator.print("{s}.continue", .{w.tag.?});
                 try self.labels.append(self.allocator, continueLabel);
                 try self.body.append(self.allocator, .{ .Label = .{ .identifier = continueLabel } });
 
                 const e = try self.emitExpression(w.cond);
 
-                const breakLabel = try self.allocator.print("{s}.break", .{w.tag});
+                const breakLabel = try self.allocator.print("{s}.break", .{w.tag.?});
                 try self.labels.append(self.allocator, breakLabel);
                 try self.body.append(self.allocator, .{ .JumpIfZero = .{ .condition = e, .target = breakLabel } });
 
@@ -197,11 +197,11 @@ pub const Function = struct {
                     },
                 }
 
-                const startLabel = try self.allocator.print("{s}.start", .{f.tag});
+                const startLabel = try self.allocator.print("{s}.start", .{f.tag.?});
                 try self.labels.append(self.allocator, startLabel);
                 try self.body.append(self.allocator, .{ .Label = .{ .identifier = startLabel } });
 
-                const breakLabel = try self.allocator.print("{s}.break", .{f.tag});
+                const breakLabel = try self.allocator.print("{s}.break", .{f.tag.?});
                 try self.labels.append(self.allocator, breakLabel);
 
                 if (f.cond) |cond| {
@@ -213,7 +213,7 @@ pub const Function = struct {
 
                 try self.emitStatement(f.body.*);
 
-                const continueLabel = try self.allocator.print("{s}.continue", .{f.tag});
+                const continueLabel = try self.allocator.print("{s}.continue", .{f.tag.?});
                 try self.labels.append(self.allocator, continueLabel);
                 try self.body.append(self.allocator, .{ .Label = .{ .identifier = continueLabel } });
 
@@ -223,7 +223,7 @@ pub const Function = struct {
                 try self.body.append(self.allocator, .{ .Label = .{ .identifier = breakLabel } });
             },
             .Switch => |swtch| {
-                const switchBreak = try self.allocator.print("{s}.break", .{swtch.tag});
+                const switchBreak = try self.allocator.print("{s}.break", .{swtch.tag.?});
                 try self.labels.append(self.allocator, switchBreak);
 
                 const c = try self.emitExpression(swtch.cond);
@@ -233,7 +233,7 @@ pub const Function = struct {
                     if (case.*.cond) |cond| { // ignore 'default' for now
                         const e = try self.emitExpression(cond);
                         try self.body.append(self.allocator, .{ .Binary = .{ .operator = .Eq, .src1 = c, .src2 = e, .dst = dst } });
-                        try self.body.append(self.allocator, .{ .JumpIfNotZero = .{ .condition = dst, .target = case.*.tag } });
+                        try self.body.append(self.allocator, .{ .JumpIfNotZero = .{ .condition = dst, .target = case.*.tag.? } });
                     }
                 }
                 // jump to the default statement if one exists, else to the end of the switch statement
@@ -248,7 +248,7 @@ pub const Function = struct {
                 try self.body.append(self.allocator, .{ .Label = .{ .identifier = switchBreak } });
             },
             .Case => |case| {
-                try self.body.append(self.allocator, .{ .Label = .{ .identifier = case.tag } });
+                try self.body.append(self.allocator, .{ .Label = .{ .identifier = case.tag.? } });
                 if (case.body) |body| try self.emitStatement(body.*);
             },
         }

@@ -84,19 +84,20 @@ fn printStatement(statement: Parser.Statement, indent: usize) void {
         .Null => |nul| print("{s}{any}()\n", .{ indentStr, @TypeOf(nul) }),
         .Label => |lbl| {
             print("{s}{any}(\n", .{ indentStr, @TypeOf(lbl) });
-            print("{s}  name: {s}\n", .{ indentStr, lbl.tag });
+            print("{s}  name: {s}\n", .{ indentStr, lbl.name });
+            print("{s}  tag: {s}\n", .{ indentStr, if (lbl.tag) |tag| tag else "null" });
             print("{s}  statement:\n", .{indentStr});
             printStatement(lbl.body.*, indent + 4);
         },
         .Goto => |goto| print("{s}{any}(label: {s})\n", .{ indentStr, @TypeOf(goto), goto.target }),
         .Break => |b| {
-            print("{s}{any}({s})\n", .{ indentStr, @TypeOf(b), b.tag });
+            print("{s}{any}({s})\n", .{ indentStr, @TypeOf(b), if (b.tag) |tag| tag else "null" });
         },
         .Continue => |c| {
-            print("{s}{any}({s})\n", .{ indentStr, @TypeOf(c), c.tag });
+            print("{s}{any}({s})\n", .{ indentStr, @TypeOf(c), if (c.tag) |tag| tag else "null" });
         },
         .DoWhile => |dw| {
-            print("{s}{any}( {s}\n", .{ indentStr, @TypeOf(dw), dw.tag });
+            print("{s}{any}( {s}\n", .{ indentStr, @TypeOf(dw), if (dw.tag) |tag| tag else "null" });
             print("  {s}body:\n", .{indentStr});
             printStatement(dw.body.*, indent + 2);
             print("  {s}cond:\n", .{indentStr});
@@ -104,7 +105,7 @@ fn printStatement(statement: Parser.Statement, indent: usize) void {
             print("{s})\n", .{indentStr});
         },
         .For => |f| {
-            print("{s}{any}( {s}\n", .{ indentStr, @TypeOf(f), f.tag });
+            print("{s}{any}( {s}\n", .{ indentStr, @TypeOf(f), if (f.tag) |tag| tag else "null" });
             switch (f.init) {
                 .Declaration => |decl| {
                     if (decl.init) |init| {
@@ -131,7 +132,7 @@ fn printStatement(statement: Parser.Statement, indent: usize) void {
             printStatement(f.body.*, indent + 4);
         },
         .While => |w| {
-            print("{s}{any}( {s}\n", .{ indentStr, @TypeOf(w), w.tag });
+            print("{s}{any}( {s}\n", .{ indentStr, @TypeOf(w), if (w.tag) |tag| tag else "null" });
             print("  {s}cond:\n", .{indentStr});
             printExpression(w.cond, indent + 4);
             print("  {s}body:\n", .{indentStr});
@@ -139,7 +140,7 @@ fn printStatement(statement: Parser.Statement, indent: usize) void {
             print("{s})\n", .{indentStr});
         },
         .Switch => |swtch| {
-            print("{s}{any}( {s}\n", .{ indentStr, @TypeOf(swtch), swtch.tag });
+            print("{s}{any}( {s}\n", .{ indentStr, @TypeOf(swtch), if (swtch.tag) |tag| tag else "null" });
             print("  {s}cond:\n", .{indentStr});
             printExpression(swtch.cond, indent + 4);
             print("  {s}body:\n", .{indentStr});
@@ -147,7 +148,7 @@ fn printStatement(statement: Parser.Statement, indent: usize) void {
             print("{s})\n", .{indentStr});
         },
         .Case => |case| {
-            print("{s}{any}( {s}\n", .{ indentStr, @TypeOf(case), case.tag });
+            print("{s}{any}( {s}\n", .{ indentStr, @TypeOf(case), if (case.tag) |tag| tag else "null" });
             if (case.cond) |cond| {
                 print("  {s}cond:\n", .{indentStr});
                 printExpression(cond, indent + 4);

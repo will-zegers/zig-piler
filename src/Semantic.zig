@@ -17,7 +17,7 @@ const AST = Parser.AST;
 
 allocator: Allocator,
 switches: std.StringHashMap(*Switch),
-uniqueIds: std.ArrayList([]const u8) = .empty,
+idCounter: usize = 0,
 errors: std.ArrayList(SemanticError) = .empty,
 
 const SemanticError = struct {
@@ -41,17 +41,14 @@ pub fn init(allocator: Allocator) Semantic {
 pub fn deinit(self: *Semantic) void {
     self.switches.deinit();
     self.errors.deinit(self.allocator);
-    self.uniqueIds.deinit(self.allocator);
 }
 
-pub fn resolve(self: *Semantic, ast: *AST) [][]const u8 {
+pub fn resolve(self: *Semantic, ast: *AST) void {
     var context: Context = .init(self.allocator);
     defer context.deinit();
 
     resolveFirstPass(self, ast, &context);
     resolveSecondPass(self, ast, &context);
-
-    return self.uniqueIds.toOwnedSlice(self.allocator) catch allocError();
 }
 
 fn resolveFirstPass(self: *Semantic, ast: *AST, context: *Context) void {
@@ -82,8 +79,8 @@ fn resolveDeclaration(self: *Semantic, decl: *Declaration, context: *Context) vo
             return;
         }
     }
-    const unique = self.generateUnique(context.function, name);
-    context.*.getScopeMut().variables.put(name, .{ .unique = unique }) catch allocError();
+    decl.tag = self.generateUnique(context.function, name);
+    context.*.getScopeMut().variables.put(name, .{ .unique = decl.tag.? }) catch allocError();
 
     if (decl.init) |*initExpr| {
         self.resolveExpression(initExpr, context);
@@ -98,9 +95,9 @@ fn resolveDeclaration(self: *Semantic, decl: *Declaration, context: *Context) vo
 fn resolveStatement1P(self: *Semantic, statement: *Statement, context: *Context) void {
     switch (statement.*) {
         .Compound => |*compound| {
-            const newTag = self.generateUnique(context.function, "while");
+            compound.*.tag = self.generateUnique(context.function, "block");
 
-            context.pushScope(.Block, newTag);
+            context.pushScope(.Block, compound.tag.?);
             defer context.popScope();
 
             for (compound.items) |*item| {
@@ -120,17 +117,16 @@ fn resolveStatement1P(self: *Semantic, statement: *Statement, context: *Context)
             }
         },
         .Label => |*lbl| {
-            const tag = statement.Label.tag;
-            if (context.labels.get(tag)) |entry| {
+            const name = statement.Label.name;
+            if (context.labels.get(name)) |entry| {
                 if (entry.insideScope) {
-                    self.errors.append(self.allocator, .{ .lineIndex = lbl.lineIndex, .type = .Redeclaration, .name = tag }) catch allocError();
+                    self.errors.append(self.allocator, .{ .lineIndex = lbl.lineIndex, .type = .Redeclaration, .name = name }) catch allocError();
                     return;
                 }
             }
-            const unique = self.generateUnique(context.function, tag);
-            context.labels.put(tag, .{ .unique = unique }) catch allocError();
+            lbl.*.tag = self.generateUnique(context.function, name);
+            context.labels.put(name, .{ .unique = lbl.tag.? }) catch allocError();
 
-            lbl.*.tag = unique;
 
             self.resolveStatement1P(lbl.body, context);
         },
@@ -147,10 +143,9 @@ fn resolveStatement1P(self: *Semantic, statement: *Statement, context: *Context)
             self.errors.append(self.allocator, .{ .lineIndex = cont.lineIndex, .type = .Continue }) catch allocError();
         },
         .DoWhile => |*doWhl| {
-            const newTag = self.generateUnique(context.function, "doWhile");
-            doWhl.tag = newTag;
+            doWhl.tag = self.generateUnique(context.function, "doWhile");
 
-            context.pushScope(.Loop, newTag);
+            context.pushScope(.Loop, doWhl.tag.?);
 
             self.resolveStatement1P(doWhl.body, context);
             self.resolveExpression(&doWhl.cond, context);
@@ -158,17 +153,15 @@ fn resolveStatement1P(self: *Semantic, statement: *Statement, context: *Context)
         .While => |*whl| {
             self.resolveExpression(&whl.cond, context);
 
-            const newTag = self.generateUnique(context.function, "while");
-            whl.tag = newTag;
+            whl.*.tag = self.generateUnique(context.function, "while");
 
-            context.pushScope(.Loop, newTag);
+            context.pushScope(.Loop, whl.tag.?);
             self.resolveStatement1P(whl.body, context);
         },
         .For => |*f| {
-            const newTag = self.generateUnique(context.function, "for");
-            f.tag = newTag;
+            f.*.tag = self.generateUnique(context.function, "for");
 
-            context.pushScope(.Loop, newTag);
+            context.pushScope(.Loop, f.tag.?);
             defer context.popScope();
 
             switch (f.init) {
@@ -186,21 +179,18 @@ fn resolveStatement1P(self: *Semantic, statement: *Statement, context: *Context)
         .Switch => |*swtch| {
             self.resolveExpression(&swtch.cond, context);
 
-            const newTag = self.generateUnique(context.function, "switch");
-            swtch.tag = newTag;
+            swtch.tag = self.generateUnique(context.function, "switch");
 
-            context.pushScope(.Switch, newTag);
+            context.pushScope(.Switch, swtch.tag.?);
             defer context.popScope();
 
-            self.switches.put(swtch.tag, swtch) catch allocError();
+            self.switches.put(swtch.tag.?, swtch) catch allocError();
 
             self.resolveStatement1P(swtch.body, context);
         },
         .Case => |*case| if (context.getSwitchTag()) |switchTag| {
             const cond = if (case.cond) |cond| cond.Constant else "default";
-            const newTag = self.allocator.print("{s}.{s}", .{switchTag, cond}) catch allocError();
-            self.uniqueIds.append(self.allocator, newTag) catch allocError();
-            case.tag = newTag;
+            case.*.tag = self.allocator.print("{s}.{s}", .{switchTag, cond}) catch allocError();
 
             const parentSwitch = self.switches.get(switchTag) orelse unreachable;
             parentSwitch.*.addCase(case) catch {
@@ -310,9 +300,8 @@ pub fn reportAnyErrors(self: Semantic, lines: [][]const u8) void {
 }
 
 fn generateUnique(self: *Semantic, function: []const u8, name: []const u8) []u8 {
-    const unique = self.allocator.print("{s}.{s}.{d}", .{ function, name, self.uniqueIds.items.len }) catch allocError();
-    self.uniqueIds.append(self.allocator, unique) catch allocError();
-    return unique;
+    defer self.idCounter += 1;
+    return self.allocator.print("{s}.{s}.{d}", .{ function, name, self.idCounter }) catch allocError();
 }
 
 pub fn allocError() noreturn {
