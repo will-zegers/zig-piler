@@ -291,6 +291,25 @@ fn resolveExpression(self: *Semantic, expr: *Expression, context: *Context) void
     }
 }
 
+pub fn reportAnyErrors(self: Semantic, lines: [][]const u8) void {
+    if (self.errors.items.len > 0) {
+        for (self.errors.items) |err| {
+            switch (err.type) {
+                .Break => std.log.err("'break' statement outside of loop or switch statement", .{}),
+                .CaseOutside => std.log.err("'case' or 'default' label outside of switch statement", .{}),
+                .CaseDuplicate => std.log.err("Duplicate 'case' or 'default'", .{}),
+                .Continue => std.log.err("'continue' statement outside of loop statement", .{}),
+                .NotAssignable => std.log.err("Expression is not an assignable lvalue", .{}),
+                .Redeclaration => std.log.err("Redeclaration of '{s}'", .{err.name.?}),
+                .UndeclaredIdentifier => std.log.err("Use of undeclared identifier '{s}'", .{err.name.?}),
+            }
+            const index = err.lineIndex;
+            std.log.err(" {d} | {s}\n", .{ index + 1, lines[index] });
+        }
+        std.process.exit(1);
+    }
+}
+
 fn generateUnique(self: *Semantic, function: []const u8, name: []const u8) []u8 {
     const unique = self.allocator.print("{s}.{s}.{d}", .{ function, name, self.uniqueIds.items.len }) catch allocError();
     self.uniqueIds.append(self.allocator, unique) catch allocError();
