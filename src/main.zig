@@ -16,8 +16,9 @@ const Stage = enum(usize) {
     Validate,
     TACky,
     CodeGen,
-    ToFile,
-    Compile,
+    ToSource,
+    ToLibrary,
+    ToExecutable,
 
     fn includes(self: Stage, other: Stage) bool {
         return @intFromEnum(self) >= @intFromEnum(other);
@@ -27,15 +28,18 @@ const Stage = enum(usize) {
 fn usage() noreturn {
     std.log.info(
         \\usage: zig-piler [options] file
-        \\        --lex        Tokenize the input
-        \\        --parse      Parse input tokens (no semantic analysis)
-        \\        --validate   Parse with semantic analysis
-        \\        --tacky      Generate intermediate representation
-        \\        --codegen    Generate output from the assembler
-        \\        --compile    (default) Run all stages and compile to binary
-        \\        -S           Produce only the source file, don't compile
-        \\        -d, --debug  Output debug information
-        \\        -h, --help   Print this help message
+        \\        -h, --help    Print this help message
+        \\        -d, --debug   Output debug information
+        \\  If multiple of the following stage flags are set, the compiler will run the
+        \\  most advanced stage (based on the order below)
+        \\        --lex         Tokenize the input
+        \\        --parse       Parse input tokens (no semantic analysis)
+        \\        --validate    Parse with semantic analysis
+        \\        --tacky       Generate intermediate representation
+        \\        --codegen     Generate output from the assembler
+        \\        -S            Produce only the source file, don't compile
+        \\        -c            Run all stages and compile to .o library
+        \\        -e            (default) Run all stages and compile to executable
     , .{});
 
     std.process.exit(0);
@@ -50,24 +54,30 @@ pub fn main(init: std.process.Init) !void {
     var inputFile: []const u8 = "";
     var debug = false;
 
-    var stage: Stage = .Compile;
+    var stage: Stage = .ToExecutable;
     _ = args.skip(); // skip the executable name
     while (args.next()) |arg| {
         if (mem.eql(u8, "--lex", arg))
             stage = .Lex
-        else if (mem.eql(u8, "--parse", arg))
+        else if (mem.eql(u8, "--parse", arg) and !stage.includes(.Parse))
             stage = .Parse
-        else if (mem.eql(u8, "--validate", arg))
+        else if (mem.eql(u8, "--validate", arg) and !stage.includes(.Validate))
             stage = .Validate
-        else if (mem.eql(u8, "--tacky", arg))
+        else if (mem.eql(u8, "--tacky", arg) and !stage.includes(.TACky))
             stage = .TACky
-        else if (mem.eql(u8, "--codegen", arg))
+        else if (mem.eql(u8, "--codegen", arg) and !stage.includes(.CodeGen))
             stage = .CodeGen
         else if (mem.eql(u8, "-S", arg))
-            stage = .ToFile
+            stage = .ToSource
+        else if (mem.eql(u8, "-c", arg))
+            stage = .ToLibrary
+        else if (mem.eql(u8, "-e", arg))
+            stage = .ToExecutable
         else if (mem.eql(u8, "-d", arg) or mem.eql(u8, "--debug", arg))
             debug = true
         else if (mem.eql(u8, "-h", arg) or mem.eql(u8, "--help", arg))
+            usage()
+        else if (mem.startsWith(u8, arg, "-"))
             usage()
         else
             inputFile = arg;
@@ -175,15 +185,16 @@ pub fn main(init: std.process.Init) !void {
         }
     } else return;
 
-    if (stage.includes(.ToFile)) {
+    if (stage.includes(.ToSource)) {
         std.log.info("Writing source to '{s}'", .{outputSource});
         var ce = try CodeEmitter.init(allocator, assembly);
         defer ce.deinit();
-        try ce.writeToFile(init.io, outputSource);
+        try ce.writeToFile(init.io, "/dev/stdout");
     } else return;
 
-    if (stage.includes(.Compile)) {
-        var cmd = try std.process.spawn(init.io, .{ .argv = &.{ "gcc", outputSource, "-o", outputBinary } });
+    if (stage.includes(.ToExecutable) or stage.includes(.ToLibrary)) {
+        const flag = if (stage == .ToLibrary) "-c" else "";
+        var cmd = try std.process.spawn(init.io, .{ .argv = &.{ "gcc", flag, outputSource, "-o", outputBinary } });
         const status = try cmd.wait(init.io);
         if (status.exited != 0) {
             std.log.err("Failed to compile {s}", .{outputBinary});
