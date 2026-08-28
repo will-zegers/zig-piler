@@ -189,12 +189,15 @@ pub fn main(init: std.process.Init) !void {
         std.log.info("Writing source to '{s}'", .{outputSource});
         var ce = try CodeEmitter.init(allocator, assembly);
         defer ce.deinit();
-        try ce.writeToFile(init.io, "/dev/stdout");
+        try ce.writeToFile(init.io, outputSource);
     } else return;
 
     if (stage.includes(.ToExecutable) or stage.includes(.ToLibrary)) {
-        const flag = if (stage == .ToLibrary) "-c" else "";
-        var cmd = try std.process.spawn(init.io, .{ .argv = &.{ "gcc", flag, outputSource, "-o", outputBinary } });
+        var cmd = if (stage == .ToLibrary)
+            try std.process.spawn(init.io, .{ .argv = &.{ "gcc", "-c", outputSource, "-o", outputBinary } })
+        else
+            try std.process.spawn(init.io, .{ .argv = &.{ "gcc", outputSource, "-o", outputBinary } });
+
         const status = try cmd.wait(init.io);
         if (status.exited != 0) {
             std.log.err("Failed to compile {s}", .{outputBinary});
