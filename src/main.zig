@@ -2,13 +2,13 @@ const std = @import("std");
 const Io = std.Io;
 const mem = std.mem;
 
+const Debugger = @import("Debugger.zig");
 const Lexer = @import("Lexer.zig");
 const Parser = @import("Parser.zig");
+const Semantic = @import("Semantic.zig");
 const TAC = @import("TAC.zig");
 const Assembler = @import("Assembler.zig");
 const CodeEmitter = @import("CodeEmitter.zig");
-const Debugger = @import("Debugger.zig");
-const Semantic = @import("Semantic.zig");
 
 const Stage = enum(usize) {
     Lex,
@@ -30,8 +30,8 @@ fn usage() noreturn {
         \\usage: zig-piler [options] file
         \\        -h, --help    Print this help message
         \\        -d, --debug   Output debug information
-        \\  If multiple of the following stage flags are set, the compiler will run the
-        \\  most advanced stage (based on the order below)
+        \\  Only one of the following flags should be used to specify where the compiler
+        \\  should stop. Otherwise, it will use the last flag given in the command
         \\        --lex         Tokenize the input
         \\        --parse       Parse input tokens (no semantic analysis)
         \\        --validate    Parse with semantic analysis
@@ -57,15 +57,19 @@ pub fn main(init: std.process.Init) !void {
     var stage: Stage = .ToExecutable;
     _ = args.skip(); // skip the executable name
     while (args.next()) |arg| {
-        if (mem.eql(u8, "--lex", arg))
+        if (mem.eql(u8, "-h", arg) or mem.eql(u8, "--help", arg))
+            usage()
+        else if (mem.eql(u8, "-d", arg) or mem.eql(u8, "--debug", arg))
+            debug = true
+        else if (mem.eql(u8, "--lex", arg))
             stage = .Lex
-        else if (mem.eql(u8, "--parse", arg) and !stage.includes(.Parse))
+        else if (mem.eql(u8, "--parse", arg))
             stage = .Parse
-        else if (mem.eql(u8, "--validate", arg) and !stage.includes(.Validate))
+        else if (mem.eql(u8, "--validate", arg))
             stage = .Validate
-        else if (mem.eql(u8, "--tacky", arg) and !stage.includes(.TACky))
+        else if (mem.eql(u8, "--tacky", arg))
             stage = .TACky
-        else if (mem.eql(u8, "--codegen", arg) and !stage.includes(.CodeGen))
+        else if (mem.eql(u8, "--codegen", arg))
             stage = .CodeGen
         else if (mem.eql(u8, "-S", arg))
             stage = .ToSource
@@ -73,12 +77,6 @@ pub fn main(init: std.process.Init) !void {
             stage = .ToLibrary
         else if (mem.eql(u8, "-e", arg))
             stage = .ToExecutable
-        else if (mem.eql(u8, "-d", arg) or mem.eql(u8, "--debug", arg))
-            debug = true
-        else if (mem.eql(u8, "-h", arg) or mem.eql(u8, "--help", arg))
-            usage()
-        else if (mem.startsWith(u8, arg, "-"))
-            usage()
         else
             inputFile = arg;
     }
@@ -141,7 +139,7 @@ pub fn main(init: std.process.Init) !void {
         std.log.info("Running parser...", .{});
         ast = Parser.parse(allocator, &tokens) catch {
             const index = tokens.lineIndex;
-            std.log.err(" {d} | {s}\n", .{ index, lines[index] });
+            std.log.err(" {d} | {s}\n", .{ index + 1, lines[index] });
             std.process.exit(1);
         };
 
