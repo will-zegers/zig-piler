@@ -8,7 +8,8 @@ const Token = @import("Lexer.zig").Token;
 const TokenIterator = Token.Iterator;
 
 pub fn printLexerTokens(tokens: *TokenIterator) void {
-    while (tokens.next()) |token| {
+    while (!tokens.eofReached()) {
+        const token = tokens.next();
         std.debug.print("{any}: {s}\n", .{ token.type, token.symbol });
     }
 }

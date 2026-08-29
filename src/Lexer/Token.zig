@@ -48,7 +48,11 @@ pub const Iterator = struct {
     items: []const Token,
     index: usize = 0,
 
-    pub fn next(self: *Iterator) ?Token {
+    pub fn deinit(self: *Iterator) void {
+        self.allocator.free(self.items);
+    }
+
+    pub fn next(self: *Iterator) Token {
         if (self.index < self.items.len) {
             const token = self.items[self.index];
 
@@ -56,25 +60,23 @@ pub const Iterator = struct {
             self.lineIndex = token.lineIndex;
 
             return token;
-        }
-        return null;
+        } else unexpectedEOF();
     }
 
-    pub fn deinit(self: *Iterator) void {
-        self.allocator.free(self.items);
+    pub fn eofReached(self: Iterator) bool {
+        return self.index >= self.items.len;
     }
 
     /// Needed for some of the trickier parses. 'count' is the number of
     /// indices to look ahead. So 0 is equivalent to calling 'peek', 1 will
     /// give the token after it without consuming any in betweeen, etc.
-    pub fn lookAhead(self: Iterator, count: usize) ?Token {
+    pub fn lookAhead(self: Iterator, count: usize) Token {
         if (self.index + count < self.items.len) {
             return self.items[self.index + count];
-        }
-        return null;
+        } else unexpectedEOF();
     }
 
-    pub fn peek(self: Iterator) ?Token {
+    pub fn peek(self: Iterator) Token {
         return self.lookAhead(0);
     }
 
@@ -87,3 +89,8 @@ pub const Iterator = struct {
         self.lineIndex = 0;
     }
 };
+
+fn unexpectedEOF() noreturn {
+    std.log.err("Unexpected end of file", .{});
+    std.process.exit(1);
+}

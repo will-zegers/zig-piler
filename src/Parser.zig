@@ -9,7 +9,6 @@ const allocError = common.allocError;
 const expect = common.expect;
 const identifier = common.identifier;
 const int = common.int;
-const unexpectedEOF = common.unexpectedEOF;
 
 const expression = @import("Parser/expression.zig");
 pub const Expression = expression.Expression;
@@ -35,7 +34,8 @@ pub const AST = struct {
 
 pub fn parse(allocator: Allocator, tokens: *TokenIterator) ParsingError!AST {
     const program = try Program.init(allocator, tokens);
-    if (tokens.peek()) |token| {
+    if (!tokens.eofReached()) {
+        const token = tokens.next();
         std.log.err("Unexpected token(s) at end of file: {s}", .{token.symbol});
         std.process.exit(1);
     }
@@ -49,7 +49,7 @@ pub const Program = struct {
 
     pub fn init(allocator: Allocator, tokens: *TokenIterator) ParsingError!Program {
         var functions: std.ArrayList(FunDecl) = .empty;
-        while (tokens.peek() != null) {
+        while (!tokens.eofReached()) {
             functions.append(allocator, try .parse(allocator, tokens)) catch allocError();
         }
         return .{ .allocator = allocator, .functions = functions.toOwnedSlice(allocator) catch allocError() };
@@ -73,7 +73,7 @@ pub const FunDecl = struct {
     pub fn parse(allocator: Allocator, tokens: *TokenIterator) ParsingError!FunDecl {
         try expect(.Int, tokens.next());
 
-        const token = tokens.next() orelse unexpectedEOF();
+        const token = tokens.next();
         try expect(.Identifier, token);
 
         try expect(.OpenParenthesis, tokens.next());
@@ -95,16 +95,16 @@ pub const FunDecl = struct {
     fn parseParamsList(allocator: Allocator, tokens: *TokenIterator) ParsingError![]identifier {
         var params: std.ArrayList(identifier) = .empty;
 
-        var nextToken = tokens.peek() orelse unexpectedEOF();
+        var nextToken = tokens.peek();
         if (nextToken.type != .Void) {
             while (true) {
                 try expect(.Int, tokens.next());
 
-                nextToken = tokens.next() orelse unexpectedEOF();
+                nextToken = tokens.next();
                 try expect(.Identifier, nextToken);
                 params.append(allocator, nextToken.symbol) catch allocError();
 
-                nextToken = tokens.peek() orelse unexpectedEOF();
+                nextToken = tokens.peek();
 
                 if (nextToken.type == .CloseParenthesis) break;
                 try expect(.Comma, tokens.next());
@@ -117,7 +117,7 @@ pub const FunDecl = struct {
     }
 
     fn parseBody(allocator: Allocator, tokens: *TokenIterator) ParsingError!?Block {
-        const nextToken = tokens.peek() orelse unexpectedEOF();
+        const nextToken = tokens.peek();
         if (nextToken.type != .Semicolon) return try .parse(allocator, tokens);
 
         try expect(.Semicolon, tokens.next());
@@ -135,7 +135,7 @@ pub const Declaration = union(DeclarationTag) {
         // which be of the form "int" <identifier> "(" (i.e., the 'marker' be an open paranthesis).
         // If not, assume it a variable declaration of the form "int" <identifier> (";" | "=") and
         // try to parse it as such;
-        const markerToken = tokens.lookAhead(2) orelse unexpectedEOF();
+        const markerToken = tokens.lookAhead(2);
         return switch (markerToken.type) {
             .OpenParenthesis => .{ .FunDecl = try .parse(allocator, tokens) },
             else => .{ .VarDecl = try .parse(allocator, tokens) },
@@ -160,7 +160,7 @@ pub const VarDecl = struct {
     pub fn parse(allocator: Allocator, tokens: *TokenIterator) ParsingError!VarDecl {
         try expect(.Int, tokens.next());
 
-        const token = tokens.peek() orelse unexpectedEOF();
+        const token = tokens.peek();
         try expect(.Identifier, token);
 
         const init = try Assignment.fromDecl(allocator, tokens);
@@ -184,9 +184,7 @@ pub const Block = struct {
         var blockList: ArrayList(BlockItem) = .empty;
 
         try expect(.OpenBrace, tokens.next());
-        while (tokens.peek()) |nextToken| {
-            if (.CloseBrace == nextToken.type) break;
-
+        while (tokens.peek().type != .CloseBrace) {
             const blockItem = try BlockItem.parse(allocator, tokens);
             blockList.append(allocator, blockItem) catch allocError();
         }
@@ -213,7 +211,7 @@ pub const BlockItem = union(BlockItemTag) {
     Statement: Statement,
 
     pub fn parse(allocator: Allocator, tokens: *TokenIterator) ParsingError!BlockItem {
-        const nextToken = tokens.peek() orelse unexpectedEOF();
+        const nextToken = tokens.peek();
         return if (.Int == nextToken.type)
             .{ .Declaration = try .parse(allocator, tokens) }
         else
@@ -234,7 +232,7 @@ pub const Break = struct {
     tag: ?[]const u8 = null, // this will get set during semantic analysis
 
     pub fn parse(allocator: Allocator, tokens: *TokenIterator) ParsingError!Break {
-        const token = tokens.next() orelse return unexpectedEOF();
+        const token = tokens.next();
         try expect(.Semicolon, tokens.next());
         return .{ .allocator = allocator, .lineIndex = token.lineIndex };
     }
@@ -248,7 +246,7 @@ pub const Continue = struct {
     tag: ?[]const u8 = null, // this will get set during semantic analysis
 
     pub fn parse(allocator: Allocator, tokens: *TokenIterator) ParsingError!Continue {
-        const token = tokens.next() orelse return unexpectedEOF();
+        const token = tokens.next();
         try expect(.Semicolon, tokens.next());
         return .{ .allocator = allocator, .lineIndex = token.lineIndex };
     }
@@ -292,7 +290,7 @@ const ForInit = union(ForInitTag) {
     Expression: ?Expression,
 
     pub fn parse(allocator: Allocator, tokens: *TokenIterator) ParsingError!ForInit {
-        const nextToken = tokens.peek() orelse unexpectedEOF();
+        const nextToken = tokens.peek();
         return switch (nextToken.type) {
             .Int => .{ .Declaration = .{ .VarDecl = try .parse(allocator, tokens) } },
             else => blk: {
@@ -328,11 +326,11 @@ pub const For = struct {
 
         const init: ForInit = try .parse(allocator, tokens);
 
-        var nextToken = tokens.peek() orelse unexpectedEOF();
+        var nextToken = tokens.peek();
         const cond = if (.Semicolon != nextToken.type) try Expression.parse(allocator, tokens, 0) else null;
         try expect(.Semicolon, tokens.next());
 
-        nextToken = tokens.peek() orelse unexpectedEOF();
+        nextToken = tokens.peek();
         const post = if (.CloseParenthesis != nextToken.type) try Expression.parse(allocator, tokens, 0) else null;
         try expect(.CloseParenthesis, tokens.next());
 
@@ -388,7 +386,7 @@ pub const Goto = struct {
     pub fn parse(tokens: *TokenIterator) ParsingError!Goto {
         try expect(.Goto, tokens.next());
 
-        const token = tokens.next() orelse unexpectedEOF();
+        const token = tokens.next();
         try expect(.Identifier, token);
         const self: Goto = .{ .target = token.symbol, .lineIndex = token.lineIndex };
 
@@ -414,7 +412,7 @@ pub const If = struct {
         thenStmt.* = try .parse(allocator, tokens);
 
         var elseStmt: ?*Statement = null;
-        const nextToken = tokens.peek() orelse unexpectedEOF();
+        const nextToken = tokens.peek();
         if (.Else == nextToken.type) { // if-else...
             tokens.skip(); // discard the 'else' token
 
@@ -492,7 +490,7 @@ pub const Case = struct {
     body: ?*Statement,
 
     pub fn parse(allocator: Allocator, tokens: *TokenIterator) ParsingError!Case {
-        var nextToken = tokens.next() orelse unexpectedEOF();
+        var nextToken = tokens.next();
         const cond: ?Expression = switch (nextToken.type) {
             .Case => try Expression.parse(allocator, tokens, 0),
             .Default => null, // 'default' is just treated as special "case" with no cond expr
@@ -508,7 +506,7 @@ pub const Case = struct {
         try expect(.Colon, tokens.next());
 
         var body: ?*Statement = null;
-        nextToken = tokens.peek() orelse unexpectedEOF();
+        nextToken = tokens.peek();
         if (nextToken.type != .Case and nextToken.type != .Default) {
             body = allocator.create(Statement) catch allocError();
             body.?.* = try Statement.parse(allocator, tokens);
@@ -592,7 +590,7 @@ pub const Statement = union(StatementTag) {
     Null: void, // needed to represent empty semicolon-delimited statements
 
     pub fn parse(allocator: Allocator, tokens: *TokenIterator) ParsingError!Statement {
-        const nextToken = tokens.peek() orelse unexpectedEOF();
+        const nextToken = tokens.peek();
         return switch (nextToken.type) {
             .Break => .{ .Break = try .parse(allocator, tokens) },
             .Case, .Default => .{ .Case = try .parse(allocator, tokens) },
@@ -609,9 +607,9 @@ pub const Statement = union(StatementTag) {
             .Identifier => blk: { // <identifier> ':' <statement>
                 // We need to check if the token after the the identifier is a ':', in which case process the
                 // the token stream as a label; otherwise, parse it as an expression
-                const markerToken = tokens.lookAhead(1) orelse unexpectedEOF();
+                const markerToken = tokens.lookAhead(1);
                 if (markerToken.type == .Colon) {
-                    const ident = tokens.next() orelse unexpectedEOF();
+                    const ident = tokens.next();
                     break :blk .{ .Label = try .parse(allocator, ident, tokens) };
                 } else {
                     const expr: Statement = .{ .Expression = try Expression.parse(allocator, tokens, 0) };
