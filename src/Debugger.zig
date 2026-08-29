@@ -14,11 +14,10 @@ pub fn printLexerTokens(tokens: *TokenIterator) void {
 }
 
 pub fn printParserAST(ast: Parser.AST) void {
-    const function = ast.tree.function;
+    const functions = ast.tree.functions;
     print("{any}(\n", .{@TypeOf(ast.tree)});
-    print("  {any}(\n", .{@TypeOf(function)});
-    for (function.body.items) |blockItem| {
-        printBlockItem(blockItem, 4);
+    for (functions) |function| {
+        printDeclaration(.{ .FunDecl = function }, 4);
     }
     print("  )\n", .{});
     print(")\n", .{});
@@ -33,15 +32,37 @@ fn printBlockItem(blockItem: Parser.BlockItem, indent: usize) void {
 
     switch (blockItem) {
         .Statement => |statement| printStatement(statement, indent),
-        .Declaration => |decl| {
-            print("{s}{any}(", .{ indentStr, @TypeOf(decl) });
-            if (decl.init) |init| {
+        .Declaration => |decl| printDeclaration(decl, indent),
+    }
+}
+
+fn printDeclaration(decl: Parser.Declaration, indent: usize) void {
+    const indentStr = std.heap.page_allocator.alloc(u8, indent) catch allocError();
+    for (indentStr, 0..) |_, i| {
+        indentStr[i] = ' ';
+    }
+
+    switch (decl) {
+        .VarDecl => |varDecl| {
+            print("{s}{any}(", .{ indentStr, @TypeOf(varDecl) });
+            if (varDecl.init) |init| {
                 print("\n", .{});
-                printExpression(init, 8);
+                printExpression(init, indent + 2);
                 print("{s})\n", .{indentStr});
             } else {
-                print("{s}{s})\n", .{ indentStr, decl.name });
+                print("{s}{s})\n", .{ indentStr, varDecl.name });
             }
+        },
+        .FunDecl => |funDecl| {
+            print("{s}{any} {s}(", .{ indentStr, @TypeOf(funDecl), funDecl.name });
+            for (funDecl.params) |param| {
+                print("{s} ", .{param});
+            }
+            print(")\n", .{});
+            if (funDecl.body) |body| {
+                printStatement(.{ .Compound = body }, indent + 2);
+            } else print(");\n", .{});
+            print("{s})\n", .{indentStr});
         },
     }
 }
@@ -68,17 +89,17 @@ fn printStatement(statement: Parser.Statement, indent: usize) void {
             print("{s}{any}(\n", .{ indentStr, @TypeOf(ifStmt) });
             print("{s}  condition:\n", .{indentStr});
             printExpression(ifStmt.condition, indent + 4);
-            print("{s}  thenStmt=\n", .{indentStr});
+            print("{s}  thenStmt:\n", .{indentStr});
             printStatement(ifStmt.thenStmt.*, indent + 4);
             if (ifStmt.elseStmt != null) {
-                print("\n{s}  else:\n", .{indentStr});
+                print("{s}  else:\n", .{indentStr});
                 printStatement(ifStmt.elseStmt.?.*, indent + 4);
             }
             print("{s})\n", .{indentStr});
         },
         .Return => |ret| {
-            print("{s}{any}(expr:\n", .{ indentStr, @TypeOf(ret) });
-            printExpression(ret.expr, indent + 4);
+            print("{s}{any}(\n", .{ indentStr, @TypeOf(ret) });
+            printExpression(ret.expr, indent + 2);
             print("{s})\n", .{indentStr});
         },
         .Null => |nul| print("{s}{any}()\n", .{ indentStr, @TypeOf(nul) }),
@@ -108,7 +129,7 @@ fn printStatement(statement: Parser.Statement, indent: usize) void {
             print("{s}{any}( {s}\n", .{ indentStr, @TypeOf(f), if (f.tag) |tag| tag else "null" });
             switch (f.init) {
                 .Declaration => |decl| {
-                    if (decl.init) |init| {
+                    if (decl.VarDecl.init) |init| {
                         print("  {s}init:\n", .{indentStr});
                         printExpression(init, 6);
                     }
@@ -207,180 +228,188 @@ fn printExpression(expr: Parser.Expression, indent: usize) void {
             printExpression(ternary.elseStmt.*, indent + 4);
             print("{s})\n", .{indentStr});
         },
+        .FunctionCall => |funCall| {
+            print("\n  {s}{s}(\n", .{ indentStr, funCall.name });
+            for (funCall.args) |arg| {
+                printExpression(arg, indent + 4);
+            }
+            print("  {s})\n", .{indentStr});
+            print("{s})\n", .{indentStr});
+        },
     }
 }
 
 pub fn printTAC(ir: TAC.Tacky) void {
     const program = ir;
-    const function = program.function;
-    const body = function.body;
     print("{any} (\n", .{@TypeOf(program)});
-    print("  {any} (\n", .{@TypeOf(function)});
-    print("    name: {s}\n", .{function.name});
-    print("    body:\n", .{});
-    for (body.items) |instr| {
-        print("      {s} (", .{@tagName(instr)});
-        switch (instr) {
-            .Unary => |unary| {
-                print("operator={any}, ", .{unary.operator});
-                switch (unary.src) {
-                    .Constant => |src| print("src: {any}({s}), ", .{ @TypeOf(src), src }),
-                    .Var => |src| print("src: {s}, ", .{src}),
-                }
-                switch (unary.dst) {
-                    .Constant => |dst| print("src: {any}({s})", .{ @TypeOf(dst), dst }),
-                    .Var => |dst| print("dst: {s}", .{dst}),
-                }
-                print(")\n", .{});
-            },
-            .Return => |ret| {
-                switch (ret.val) {
-                    .Constant => |factor| print("val: {any}({s}))\n", .{ @TypeOf(factor), factor }),
-                    .Var => |name| print("val: {s})\n", .{name}),
-                }
-            },
-            .Binary => |binary| {
-                print("operator={any}, ", .{binary.operator});
-                switch (binary.src1) {
-                    .Constant => |src1| print("src1: {s} ", .{src1}),
-                    .Var => |src1| print("src1: {s} ", .{src1}),
-                }
-                switch (binary.src2) {
-                    .Constant => |src2| print("src2: {s} ", .{src2}),
-                    .Var => |src2| print("src2: {s} ", .{src2}),
-                }
-                switch (binary.dst) {
-                    .Constant => |dst| print("dst: {s}", .{dst}),
-                    .Var => |dst| print("dst: {s}", .{dst}),
-                }
-                print(")\n", .{});
-            },
-            .Copy => |copy| {
-                switch (copy.src) {
-                    .Constant => |src| print("src: {s} ", .{src}),
-                    .Var => |src| print("src: {s} ", .{src}),
-                }
-                switch (copy.dst) {
-                    .Constant => |dst| print("dst: {s}", .{dst}),
-                    .Var => |dst| print("dst: {s}", .{dst}),
-                }
-                print(")\n", .{});
-            },
-            .Label => |label| {
-                print("name: {s})\n", .{label.identifier});
-            },
-            .Jump => |jump| {
-                print("label: {s})\n", .{jump.target});
-            },
-            .JumpIfZero => |jump| {
-                switch (jump.condition) {
-                    .Constant => |cond| print("cond: {any}({s}) ", .{ @TypeOf(cond), cond }),
-                    .Var => |cond| print("cond: {s} ", .{cond}),
-                }
-                print("label={s})\n", .{jump.target});
-            },
-            .JumpIfNotZero => |jump| {
-                switch (jump.condition) {
-                    .Constant => |cond| print("cond: {any}({s}) ", .{ @TypeOf(cond), cond }),
-                    .Var => |cond| print("cond: {s} ", .{cond}),
-                }
-                print("label: {s})\n", .{jump.target});
-            },
+    for (program.functions) |function| {
+        print("  {any} (\n", .{@TypeOf(function)});
+        print("    name: {s}\n", .{function.name});
+        print("    body:\n", .{});
+        for (function.body.items) |instr| {
+            print("      {s} (", .{@tagName(instr)});
+            switch (instr) {
+                .Unary => |unary| {
+                    print("operator={any}, ", .{unary.operator});
+                    switch (unary.src) {
+                        .Constant => |src| print("src: {any}({s}), ", .{ @TypeOf(src), src }),
+                        .Var => |src| print("src: {s}, ", .{src}),
+                    }
+                    switch (unary.dst) {
+                        .Constant => |dst| print("src: {any}({s})", .{ @TypeOf(dst), dst }),
+                        .Var => |dst| print("dst: {s}", .{dst}),
+                    }
+                    print(")\n", .{});
+                },
+                .Return => |ret| {
+                    switch (ret.val) {
+                        .Constant => |factor| print("val: {any}({s}))\n", .{ @TypeOf(factor), factor }),
+                        .Var => |name| print("val: {s})\n", .{name}),
+                    }
+                },
+                .Binary => |binary| {
+                    print("operator={any}, ", .{binary.operator});
+                    switch (binary.src1) {
+                        .Constant => |src1| print("src1: {s} ", .{src1}),
+                        .Var => |src1| print("src1: {s} ", .{src1}),
+                    }
+                    switch (binary.src2) {
+                        .Constant => |src2| print("src2: {s} ", .{src2}),
+                        .Var => |src2| print("src2: {s} ", .{src2}),
+                    }
+                    switch (binary.dst) {
+                        .Constant => |dst| print("dst: {s}", .{dst}),
+                        .Var => |dst| print("dst: {s}", .{dst}),
+                    }
+                    print(")\n", .{});
+                },
+                .Copy => |copy| {
+                    switch (copy.src) {
+                        .Constant => |src| print("src: {s} ", .{src}),
+                        .Var => |src| print("src: {s} ", .{src}),
+                    }
+                    switch (copy.dst) {
+                        .Constant => |dst| print("dst: {s}", .{dst}),
+                        .Var => |dst| print("dst: {s}", .{dst}),
+                    }
+                    print(")\n", .{});
+                },
+                .Label => |label| {
+                    print("name: {s})\n", .{label.identifier});
+                },
+                .Jump => |jump| {
+                    print("label: {s})\n", .{jump.target});
+                },
+                .JumpIfZero => |jump| {
+                    switch (jump.condition) {
+                        .Constant => |cond| print("cond: {any}({s}) ", .{ @TypeOf(cond), cond }),
+                        .Var => |cond| print("cond: {s} ", .{cond}),
+                    }
+                    print("label={s})\n", .{jump.target});
+                },
+                .JumpIfNotZero => |jump| {
+                    switch (jump.condition) {
+                        .Constant => |cond| print("cond: {any}({s}) ", .{ @TypeOf(cond), cond }),
+                        .Var => |cond| print("cond: {s} ", .{cond}),
+                    }
+                    print("label: {s})\n", .{jump.target});
+                },
+            }
         }
+        print("    )\n", .{});
+        print("  )\n", .{});
     }
-    print("    )\n", .{});
-    print("  )\n", .{});
     print(")\n", .{});
 }
 
 pub fn printAssemblerAST(ast: Assembler.AST) void {
     const program = ast;
-    const function = program.function;
-
     print("{any} (\n", .{@TypeOf(program)});
-    print("  {any} (\n", .{@TypeOf(function)});
-    print("    name={s}\n", .{function.name});
-    print("    instructions=[\n", .{});
+    for (program.functions) |function| {
+        print("  {any} (\n", .{@TypeOf(function)});
+        print("    name={s}\n", .{function.name});
+        print("    instructions=[\n", .{});
 
-    for (function.instructions) |instr| {
-        print("      {s} (", .{@tagName(instr)});
-        switch (instr) {
-            .Ret, .Cqo => {},
-            .Mov => |mov| {
-                switch (mov.src) {
-                    .Imm => |imm| print("src: Imm({s}) ", .{imm}),
-                    .Pseudo => |reg| print("src: Pseudo({s}) ", .{reg}),
-                    .Reg => |reg| print("src: Reg({s}) ", .{@tagName(reg)}),
-                    .Stack => |stack| print("src: Stack({d}) ", .{stack}),
-                }
-                switch (mov.dst) {
-                    .Imm => |imm| print("dst: Imm({s})", .{imm}),
-                    .Pseudo => |reg| print("dst: Pseudo({s})", .{reg}),
-                    .Reg => |reg| print("dst: Reg({s})", .{@tagName(reg)}),
-                    .Stack => |stack| print("dst: Stack({d})", .{stack}),
-                }
-            },
-            .Unary => |unary| {
-                print("operator={s} ", .{@tagName(unary.operator)});
-                switch (unary.operand) {
-                    .Imm => |imm| print("dst: Imm({s})", .{imm}),
-                    .Pseudo => |reg| print("dst: Pseudo({s})", .{reg}),
-                    .Reg => |reg| print("dst: Reg({s})", .{@tagName(reg)}),
-                    .Stack => |stack| print("dst: Stack({d})", .{stack}),
-                }
-            },
-            .AllocStack => |allocStack| {
-                print("int: {d}", .{allocStack.stackPointer});
-            },
-            .Binary => |binary| {
-                print("operator: {s} ", .{@tagName(binary.operator)});
-                switch (binary.src) {
-                    .Imm => |imm| print("src: Imm({s}) ", .{imm}),
-                    .Pseudo => |reg| print("src: Pseudo({s}) ", .{reg}),
-                    .Reg => |reg| print("src: Reg({s}) ", .{@tagName(reg)}),
-                    .Stack => |stack| print("src: Stack({d}) ", .{stack}),
-                }
-                switch (binary.dst) {
-                    .Imm => |imm| print("dst: Imm({s})", .{imm}),
-                    .Pseudo => |reg| print("dst: Pseudo({s})", .{reg}),
-                    .Reg => |reg| print("dst: Reg({s})", .{@tagName(reg)}),
-                    .Stack => |stack| print("dst: Stack({d})", .{stack}),
-                }
-            },
-            .Idiv => |idiv| {
-                switch (idiv.operand) {
-                    .Imm => |imm| print("src: Imm({s})", .{imm}),
-                    .Pseudo => |reg| print("src: Pseudo({s})", .{reg}),
-                    .Reg => |reg| print("src: Reg({s})", .{@tagName(reg)}),
-                    .Stack => |stack| print("src: Stack({d})", .{stack}),
-                }
-            },
-            .Cmp => |cmp| {
-                std.debug.print("arg1: {any}, arg2: {any}", .{ cmp.arg1, cmp.arg2 });
-            },
-            .Jmp => |jmp| {
-                std.debug.print("target: {s}", .{jmp.target});
-            },
-            .JmpCC => |jmp| {
-                std.debug.print("condition: {s}, target: {s}", .{ @tagName(jmp.condition), jmp.target });
-            },
-            .SetCC => |set| {
-                switch (set.operand) {
-                    .Imm => std.debug.print("condition: {s}, target: Imm({d})", .{ @tagName(set.condition), set.operand.Stack }),
-                    .Pseudo => std.debug.print("condition: {s}, target: Pseudo({d})", .{ @tagName(set.condition), set.operand.Stack }),
-                    .Reg => std.debug.print("condition: {s}, target: Reg({d})", .{ @tagName(set.condition), set.operand.Stack }),
-                    .Stack => std.debug.print("condition: {s}, target: Stack({d})", .{ @tagName(set.condition), set.operand.Stack }),
-                }
-            },
-            .Label => |label| {
-                std.debug.print("id: {s}", .{label.id});
-            },
+        for (function.instructions) |instr| {
+            print("      {s} (", .{@tagName(instr)});
+            switch (instr) {
+                .Ret, .Cqo => {},
+                .Mov => |mov| {
+                    switch (mov.src) {
+                        .Imm => |imm| print("src: Imm({s}) ", .{imm}),
+                        .Pseudo => |reg| print("src: Pseudo({s}) ", .{reg}),
+                        .Reg => |reg| print("src: Reg({s}) ", .{@tagName(reg)}),
+                        .Stack => |stack| print("src: Stack({d}) ", .{stack}),
+                    }
+                    switch (mov.dst) {
+                        .Imm => |imm| print("dst: Imm({s})", .{imm}),
+                        .Pseudo => |reg| print("dst: Pseudo({s})", .{reg}),
+                        .Reg => |reg| print("dst: Reg({s})", .{@tagName(reg)}),
+                        .Stack => |stack| print("dst: Stack({d})", .{stack}),
+                    }
+                },
+                .Unary => |unary| {
+                    print("operator={s} ", .{@tagName(unary.operator)});
+                    switch (unary.operand) {
+                        .Imm => |imm| print("dst: Imm({s})", .{imm}),
+                        .Pseudo => |reg| print("dst: Pseudo({s})", .{reg}),
+                        .Reg => |reg| print("dst: Reg({s})", .{@tagName(reg)}),
+                        .Stack => |stack| print("dst: Stack({d})", .{stack}),
+                    }
+                },
+                .AllocStack => |allocStack| {
+                    print("int: {d}", .{allocStack.stackPointer});
+                },
+                .Binary => |binary| {
+                    print("operator: {s} ", .{@tagName(binary.operator)});
+                    switch (binary.src) {
+                        .Imm => |imm| print("src: Imm({s}) ", .{imm}),
+                        .Pseudo => |reg| print("src: Pseudo({s}) ", .{reg}),
+                        .Reg => |reg| print("src: Reg({s}) ", .{@tagName(reg)}),
+                        .Stack => |stack| print("src: Stack({d}) ", .{stack}),
+                    }
+                    switch (binary.dst) {
+                        .Imm => |imm| print("dst: Imm({s})", .{imm}),
+                        .Pseudo => |reg| print("dst: Pseudo({s})", .{reg}),
+                        .Reg => |reg| print("dst: Reg({s})", .{@tagName(reg)}),
+                        .Stack => |stack| print("dst: Stack({d})", .{stack}),
+                    }
+                },
+                .Idiv => |idiv| {
+                    switch (idiv.operand) {
+                        .Imm => |imm| print("src: Imm({s})", .{imm}),
+                        .Pseudo => |reg| print("src: Pseudo({s})", .{reg}),
+                        .Reg => |reg| print("src: Reg({s})", .{@tagName(reg)}),
+                        .Stack => |stack| print("src: Stack({d})", .{stack}),
+                    }
+                },
+                .Cmp => |cmp| {
+                    std.debug.print("arg1: {any}, arg2: {any}", .{ cmp.arg1, cmp.arg2 });
+                },
+                .Jmp => |jmp| {
+                    std.debug.print("target: {s}", .{jmp.target});
+                },
+                .JmpCC => |jmp| {
+                    std.debug.print("condition: {s}, target: {s}", .{ @tagName(jmp.condition), jmp.target });
+                },
+                .SetCC => |set| {
+                    switch (set.operand) {
+                        .Imm => std.debug.print("condition: {s}, target: Imm({d})", .{ @tagName(set.condition), set.operand.Stack }),
+                        .Pseudo => std.debug.print("condition: {s}, target: Pseudo({d})", .{ @tagName(set.condition), set.operand.Stack }),
+                        .Reg => std.debug.print("condition: {s}, target: Reg({d})", .{ @tagName(set.condition), set.operand.Stack }),
+                        .Stack => std.debug.print("condition: {s}, target: Stack({d})", .{ @tagName(set.condition), set.operand.Stack }),
+                    }
+                },
+                .Label => |label| {
+                    std.debug.print("id: {s}", .{label.id});
+                },
+            }
+            print(")\n", .{});
         }
-        print(")\n", .{});
-    }
 
-    print("    ]\n", .{});
-    print("  )\n", .{});
+        print("    ]\n", .{});
+        print("  )\n", .{});
+    }
     print(")\n", .{});
 }
 

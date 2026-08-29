@@ -45,37 +45,133 @@ pub fn parse(allocator: Allocator, tokens: *TokenIterator) ParsingError!AST {
 
 pub const Program = struct {
     allocator: Allocator,
-    function: Function,
+    functions: []FunDecl,
 
     pub fn init(allocator: Allocator, tokens: *TokenIterator) ParsingError!Program {
-        return .{ .allocator = allocator, .function = try .init(allocator, tokens) };
+        var functions: std.ArrayList(FunDecl) = .empty;
+        while (tokens.peek() != null) {
+            functions.append(allocator, try .parse(allocator, tokens)) catch allocError();
+        }
+        return .{ .allocator = allocator, .functions = functions.toOwnedSlice(allocator) catch allocError() };
     }
 
     pub fn deinit(self: *Program) void {
-        self.function.deinit();
+        for (self.functions) |*function| {
+            function.deinit();
+        }
+        self.allocator.free(self.functions);
     }
 };
 
-pub const Function = struct {
+pub const FunDecl = struct {
     allocator: Allocator,
+    lineIndex: usize,
     name: identifier,
-    body: Block,
+    params: []identifier,
+    body: ?Block,
 
-    pub fn init(allocator: Allocator, tokens: *TokenIterator) ParsingError!Function {
+    pub fn parse(allocator: Allocator, tokens: *TokenIterator) ParsingError!FunDecl {
         try expect(.Int, tokens.next());
 
         const token = tokens.next() orelse unexpectedEOF();
         try expect(.Identifier, token);
 
         try expect(.OpenParenthesis, tokens.next());
-        try expect(.Void, tokens.next());
+        const params = try parseParamsList(allocator, tokens);
         try expect(.CloseParenthesis, tokens.next());
+        const body = try parseBody(allocator, tokens);
 
-        return .{ .allocator = allocator, .name = token.symbol, .body = try .parse(allocator, tokens) };
+        return .{ .allocator = allocator, .name = token.symbol, .params = params, .body = body, .lineIndex = token.lineIndex };
     }
 
-    pub fn deinit(self: *Function) void {
-        self.body.deinit();
+    pub fn deinit(self: *FunDecl) void {
+        if (self.body) |*body| {
+            body.deinit();
+        }
+
+        self.allocator.free(self.params);
+    }
+
+    fn parseParamsList(allocator: Allocator, tokens: *TokenIterator) ParsingError![]identifier {
+        var params: std.ArrayList(identifier) = .empty;
+
+        var nextToken = tokens.peek() orelse unexpectedEOF();
+        if (nextToken.type != .Void) {
+            while (true) {
+                try expect(.Int, tokens.next());
+
+                nextToken = tokens.next() orelse unexpectedEOF();
+                try expect(.Identifier, nextToken);
+                params.append(allocator, nextToken.symbol) catch allocError();
+
+                nextToken = tokens.peek() orelse unexpectedEOF();
+
+                if (nextToken.type == .CloseParenthesis) break;
+                try expect(.Comma, tokens.next());
+            }
+        } else {
+            tokens.skip(); // No params, skip the void token
+        }
+
+        return params.toOwnedSlice(allocator) catch allocError();
+    }
+
+    fn parseBody(allocator: Allocator, tokens: *TokenIterator) ParsingError!?Block {
+        const nextToken = tokens.peek() orelse unexpectedEOF();
+        if (nextToken.type != .Semicolon) return try .parse(allocator, tokens);
+
+        try expect(.Semicolon, tokens.next());
+        return null;
+    }
+};
+
+pub const DeclarationTag = enum { FunDecl, VarDecl };
+pub const Declaration = union(DeclarationTag) {
+    FunDecl: FunDecl,
+    VarDecl: VarDecl,
+
+    pub fn parse(allocator: Allocator, tokens: *TokenIterator) ParsingError!Declaration {
+        // We need to look a couple tokens ahead to determine if this is a function declaration,
+        // which be of the form "int" <identifier> "(" (i.e., the 'marker' be an open paranthesis).
+        // If not, assume it a variable declaration of the form "int" <identifier> (";" | "=") and
+        // try to parse it as such;
+        const markerToken = tokens.lookAhead(2) orelse unexpectedEOF();
+        return switch (markerToken.type) {
+            .OpenParenthesis => .{ .FunDecl = try .parse(allocator, tokens) },
+            else => .{ .VarDecl = try .parse(allocator, tokens) },
+        };
+    }
+
+    pub fn deinit(self: *Declaration) void {
+        switch (self.*) {
+            .FunDecl => self.*.FunDecl.deinit(),
+            .VarDecl => self.*.VarDecl.deinit(),
+        }
+    }
+};
+
+pub const VarDecl = struct {
+    allocator: Allocator,
+    lineIndex: usize,
+    tag: ?[]const u8 = null,
+    name: identifier,
+    init: ?Expression,
+
+    pub fn parse(allocator: Allocator, tokens: *TokenIterator) ParsingError!VarDecl {
+        try expect(.Int, tokens.next());
+
+        const token = tokens.peek() orelse unexpectedEOF();
+        try expect(.Identifier, token);
+
+        const init = try Assignment.fromDecl(allocator, tokens);
+        try expect(.Semicolon, tokens.next());
+
+        return .{ .allocator = allocator, .name = token.symbol, .init = init, .lineIndex = token.lineIndex };
+    }
+
+    pub fn deinit(self: *VarDecl) void {
+        if (self.tag) |tag| self.allocator.free(tag);
+        if (self.*.init) |*init| Expression.deinit(init);
     }
 };
 
@@ -127,32 +223,8 @@ pub const BlockItem = union(BlockItemTag) {
     pub fn deinit(self: *BlockItem) void {
         switch (self.*) {
             .Statement => |*statement| Statement.deinit(statement),
-            .Declaration => |*decl| decl.deinit(),
+            .Declaration => |*decl| Declaration.deinit(decl),
         }
-    }
-};
-
-pub const Declaration = struct {
-    allocator: Allocator,
-    lineIndex: usize,
-    tag: ?[]const u8 = null,
-    name: identifier,
-    init: ?Expression,
-
-    pub fn parse(allocator: Allocator, tokens: *TokenIterator) ParsingError!Declaration {
-        try expect(.Int, tokens.next());
-        const token = tokens.peek() orelse unexpectedEOF();
-        try expect(.Identifier, token);
-
-        const init = try Assignment.parse(allocator, tokens);
-        try expect(.Semicolon, tokens.next());
-
-        return .{ .allocator = allocator, .name = token.symbol, .init = init, .lineIndex = token.lineIndex };
-    }
-
-    pub fn deinit(self: *Declaration) void {
-        if (self.tag) |tag| self.allocator.free(tag);
-        if (self.*.init) |*init| Expression.deinit(init);
     }
 };
 
@@ -222,7 +294,7 @@ const ForInit = union(ForInitTag) {
     pub fn parse(allocator: Allocator, tokens: *TokenIterator) ParsingError!ForInit {
         const nextToken = tokens.peek() orelse unexpectedEOF();
         return switch (nextToken.type) {
-            .Int => .{ .Declaration = try .parse(allocator, tokens) },
+            .Int => .{ .Declaration = .{ .VarDecl = try .parse(allocator, tokens) } },
             else => blk: {
                 const expr: ?Expression = if (.Semicolon != nextToken.type)
                     try .parse(allocator, tokens, 0)
@@ -237,7 +309,7 @@ const ForInit = union(ForInitTag) {
     pub fn deinit(self: *ForInit) void {
         switch (self.*) {
             .Expression => if (self.*.Expression) |*expr| Expression.deinit(expr),
-            .Declaration => self.*.Declaration.deinit(),
+            .Declaration => |*decl| Declaration.deinit(decl),
         }
     }
 };
@@ -520,7 +592,7 @@ pub const Statement = union(StatementTag) {
     Null: void, // needed to represent empty semicolon-delimited statements
 
     pub fn parse(allocator: Allocator, tokens: *TokenIterator) ParsingError!Statement {
-        var nextToken = tokens.peek() orelse unexpectedEOF();
+        const nextToken = tokens.peek() orelse unexpectedEOF();
         return switch (nextToken.type) {
             .Break => .{ .Break = try .parse(allocator, tokens) },
             .Case, .Default => .{ .Case = try .parse(allocator, tokens) },
@@ -535,12 +607,13 @@ pub const Statement = union(StatementTag) {
             .Semicolon => .{ .Null = tokens.skip() },
             .Switch => .{ .Switch = try .parse(allocator, tokens) },
             .Identifier => blk: { // <identifier> ':' <statement>
-                const ident = tokens.next() orelse unexpectedEOF();
-                nextToken = tokens.peek() orelse unexpectedEOF();
-                if (nextToken.type == .Colon) { // labeled statement of the form <identifier> ':' <statement>
+                // We need to check if the token after the the identifier is a ':', in which case process the
+                // the token stream as a label; otherwise, parse it as an expression
+                const markerToken = tokens.lookAhead(1) orelse unexpectedEOF();
+                if (markerToken.type == .Colon) {
+                    const ident = tokens.next() orelse unexpectedEOF();
                     break :blk .{ .Label = try .parse(allocator, ident, tokens) };
-                } else { // otherwise parse it as an expression of the form <expr> ';'
-                    tokens.rewind();
+                } else {
                     const expr: Statement = .{ .Expression = try Expression.parse(allocator, tokens, 0) };
                     try expect(.Semicolon, tokens.next());
                     break :blk expr;

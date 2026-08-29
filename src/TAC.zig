@@ -23,43 +23,36 @@ const Instructions = ArrayList(Instruction);
 
 pub const Tacky = struct {
     allocator: Allocator,
-    function: Function,
-    tags: [][]const u8,
-    labels: [][]const u8,
+    functions: []Function,
 
     pub fn deinit(self: *Tacky) void {
-        for (self.tags) |item| {
-            self.allocator.free(item);
+        for (self.functions) |*function| {
+            function.deinit();
         }
-        self.allocator.free(self.tags);
-
-        for (self.labels) |item| {
-            self.allocator.free(item);
-        }
-        self.allocator.free(self.labels);
-
-        self.function.deinit();
+        self.allocator.free(self.functions);
     }
 };
 
 allocator: Allocator,
 
 pub fn init(allocator: Allocator, ast: Parser.AST) Tacky {
-    var program: Program = .init(allocator, ast);
+    const program: Program = .init(allocator, ast);
     return .{
         .allocator = allocator,
-        .function = program.function,
-        .tags = program.function.tags.toOwnedSlice(allocator) catch allocError(),
-        .labels = program.function.labels.toOwnedSlice(allocator) catch allocError(),
+        .functions = program.functions,
     };
 }
 
 const Program = struct {
     allocator: Allocator,
-    function: Function,
+    functions: []Function,
 
     pub fn init(allocator: Allocator, ast: Parser.AST) Program {
-        return .{ .allocator = allocator, .function = .init(allocator, ast) };
+        var functions: std.ArrayList(Function) = .empty;
+        for (ast.tree.functions) |function| {
+            functions.append(allocator, .init(allocator, function)) catch allocError();
+        }
+        return .{ .allocator = allocator, .functions = functions.toOwnedSlice(allocator) catch allocError() };
     }
 
     pub fn deinit(self: *Program) void {
@@ -74,32 +67,51 @@ pub const Function = struct {
     tags: Tags,
     labels: Labels,
 
-    pub fn init(allocator: Allocator, ast: Parser.AST) Function {
-        var function: Function = .{
+    pub fn init(allocator: Allocator, function: Parser.FunDecl) Function {
+        var func: Function = .{
             .allocator = allocator,
-            .name = ast.tree.function.name,
+            .name = function.name,
             .body = .empty,
             .tags = .empty,
             .labels = .empty,
         };
 
-        for (ast.tree.function.body.items) |blockItem| {
-            switch (blockItem) {
-                .Statement => |stmt| function.emitStatement(stmt) catch allocError(),
-                .Declaration => |decl| {
-                    if (decl.init) |initExpr| {
-                        _ = function.emitExpression(initExpr) catch allocError();
-                    }
-                },
+        if (function.body) |body| {
+            for (body.items) |blockItem| {
+                switch (blockItem) {
+                    .Declaration => |decl| func.emitDeclaration(decl),
+                    .Statement => |stmt| func.emitStatement(stmt) catch allocError(),
+                }
             }
         }
-        function.body.append(allocator, .{ .Return = .{ .val = .{ .Constant = "0" } } }) catch allocError();
+        func.body.append(allocator, .{ .Return = .{ .val = .{ .Constant = "0" } } }) catch allocError();
 
-        return function;
+        return func;
     }
 
     pub fn deinit(self: *Function) void {
         defer self.body.deinit(self.allocator);
+
+        for (self.tags.items) |item| {
+            self.allocator.free(item);
+        }
+        self.tags.deinit(self.allocator);
+
+        for (self.labels.items) |item| {
+            self.allocator.free(item);
+        }
+        self.labels.deinit(self.allocator);
+    }
+
+    fn emitDeclaration(self: *Function, decl: Parser.Declaration) void {
+        switch (decl) {
+            .VarDecl => |varDecl| {
+                if (varDecl.init) |initExpr| {
+                    _ = self.emitExpression(initExpr) catch allocError();
+                }
+            },
+            .FunDecl => unreachable,
+        }
     }
 
     fn emitStatement(self: *Function, stmt: Parser.Statement) !void {
@@ -108,12 +120,8 @@ pub const Function = struct {
         switch (stmt) {
             .Compound => |compound| for (compound.items) |item| {
                 switch (item) {
+                    .Declaration => self.emitDeclaration(item.Declaration),
                     .Statement => try self.emitStatement(item.Statement),
-                    .Declaration => |decl| {
-                        if (decl.init) |initExpr| {
-                            _ = self.emitExpression(initExpr) catch allocError();
-                        }
-                    },
                 }
             },
             .Return => |ret| {
@@ -189,9 +197,7 @@ pub const Function = struct {
             },
             .For => |f| {
                 switch (f.init) {
-                    .Declaration => |decl| if (decl.init) |declInit| {
-                        _ = try self.emitExpression(declInit);
-                    },
+                    .Declaration => self.emitDeclaration(f.init.Declaration),
                     .Expression => |expr| if (expr) |exprInit| {
                         _ = try self.emitExpression(exprInit);
                     },
@@ -372,6 +378,7 @@ pub const Function = struct {
 
                 return dst;
             },
+            .FunctionCall => unreachable,
         }
     }
 

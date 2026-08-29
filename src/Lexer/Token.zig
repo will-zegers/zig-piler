@@ -16,6 +16,7 @@ pub const Type = enum {
     CloseBrace,
     CloseParenthesis,
     Colon,
+    Comma,
     Constant,
     Continue,
     Default,
@@ -63,21 +64,22 @@ pub const Iterator = struct {
         self.allocator.free(self.items);
     }
 
-    pub fn peek(self: *Iterator) ?Token {
-        if (self.index < self.items.len) {
-            return self.items[self.index];
+    /// Needed for some of the trickier parses. 'count' is the number of
+    /// indices to look ahead. So 0 is equivalent to calling 'peek', 1 will
+    /// give the token after it without consuming any in betweeen, etc.
+    pub fn lookAhead(self: Iterator, count: usize) ?Token {
+        if (self.index + count < self.items.len) {
+            return self.items[self.index + count];
         }
         return null;
     }
 
-    pub fn skip(self: *Iterator) void {
-        self.index += 1;
+    pub fn peek(self: Iterator) ?Token {
+        return self.lookAhead(0);
     }
 
-    pub fn rewind(self: *Iterator) void {
-        if (self.index > 0) {
-            self.index -= 1;
-        }
+    pub fn skip(self: *Iterator) void {
+        self.index += 1;
     }
 
     pub fn reset(self: *Iterator) void {

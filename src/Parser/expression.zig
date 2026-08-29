@@ -21,6 +21,7 @@ pub const ExpressionTag = enum {
     Binary,
     Assignment,
     Ternary,
+    FunctionCall,
 };
 
 pub const Expression = union(ExpressionTag) {
@@ -30,6 +31,7 @@ pub const Expression = union(ExpressionTag) {
     Binary: Binary,
     Assignment: Assignment,
     Ternary: Ternary,
+    FunctionCall: FunctionCall,
 
     /// Evaluates expression from left-to-right for arithmetic, or right-to-left for assignment, operators.
     /// This is a recursive descent parser that uses the precedence climbing algorithm.
@@ -88,6 +90,7 @@ pub const Expression = union(ExpressionTag) {
             .Binary => expr.*.Binary.deinit(),
             .Assignment => expr.*.Assignment.deinit(),
             .Ternary => expr.*.Ternary.deinit(),
+            .FunctionCall => expr.*.FunctionCall.deinit(),
         }
     }
 };
@@ -259,7 +262,7 @@ pub const Assignment = struct {
         Expression.deinit(self.rhs);
     }
 
-    pub fn parse(allocator: Allocator, tokens: *TokenIterator) ParsingError!?Expression {
+    pub fn fromDecl(allocator: Allocator, tokens: *TokenIterator) ParsingError!?Expression {
         const lhs = try parseFactor(allocator, tokens);
         if (lhs != .Var) {
             std.log.err("Expression type {any} is not an assignable lvalue", .{lhs});
@@ -304,6 +307,44 @@ pub const Ternary = struct {
     }
 };
 
+pub const FunctionCall = struct {
+    allocator: Allocator,
+    name: identifier,
+    args: []Expression,
+
+    pub fn parse(allocator: Allocator, name: identifier, tokens: *TokenIterator) ParsingError!FunctionCall {
+        try expect(.OpenParenthesis, tokens.next());
+        const args = try parseArgumentList(allocator, tokens);
+        try expect(.CloseParenthesis, tokens.next());
+
+        return .{ .allocator = allocator, .name = name, .args = args };
+    }
+
+    pub fn deinit(self: *FunctionCall) void {
+        for (self.args) |*arg| {
+            Expression.deinit(arg);
+        }
+        self.allocator.free(self.args);
+    }
+
+    fn parseArgumentList(allocator: Allocator, tokens: *TokenIterator) ParsingError![]Expression {
+        var args: std.ArrayList(Expression) = .empty;
+
+        var nextToken = tokens.peek() orelse unexpectedEOF();
+        if (nextToken.type != .CloseParenthesis) {
+            while (true) {
+                args.append(allocator, try .parse(allocator, tokens, 0)) catch allocError();
+
+                nextToken = tokens.peek() orelse unexpectedEOF();
+                if (nextToken.type == .CloseParenthesis) break;
+                try expect(.Comma, tokens.next());
+            }
+        }
+
+        return args.toOwnedSlice(allocator) catch allocError();
+    }
+};
+
 fn parseFactor(allocator: Allocator, tokens: *TokenIterator) ParsingError!Expression {
     const token = tokens.next() orelse return unexpectedEOF();
     const expr: Expression = switch (token.type) {
@@ -312,7 +353,14 @@ fn parseFactor(allocator: Allocator, tokens: *TokenIterator) ParsingError!Expres
             const right = try parseFactor(allocator, tokens);
             break :blk .{ .Unary = try Unary.initPre(allocator, token, right) };
         },
-        .Identifier => .{ .Var = .{ .name = token.symbol, .lineIndex = token.lineIndex } },
+        .Identifier => blk: {
+            const nextToken = tokens.peek() orelse unexpectedEOF();
+            if (nextToken.type == .OpenParenthesis) {
+                break :blk .{ .FunctionCall = try .parse(allocator, token.symbol, tokens) };
+            } else {
+                break :blk .{ .Var = .{ .name = token.symbol, .lineIndex = token.lineIndex } };
+            }
+        },
         .OpenParenthesis => blk: { // '(' <expr> ')'
             const expr = try Expression.parse(allocator, tokens, 0);
             const next = tokens.next() orelse return unexpectedEOF();

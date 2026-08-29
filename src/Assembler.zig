@@ -26,31 +26,39 @@ const WORD_SIZE: isize = 8;
 
 pub const AST = struct {
     allocator: Allocator,
-    function: Function,
+    functions: []Function,
 
     pub fn deinit(self: *AST) void {
-        self.function.deinit();
+        for (self.functions) |*function| {
+            function.deinit();
+        }
+        self.allocator.free(self.functions);
     }
 };
 
 pub fn codeGen(allocator: Allocator, ast: TAC.Tacky) AST {
     const program: Program = .init(allocator, ast);
-    return .{ .allocator = allocator, .function = program.function };
+    return .{ .allocator = allocator, .functions = program.functions };
 }
 
 const Program = struct {
     allocator: Allocator,
-    function: Function,
+    functions: []Function,
 
     pub fn init(allocator: Allocator, program: TAC.Tacky) Program {
+        var functions: std.ArrayList(Function) = .empty;
+        for (program.functions) |function| {
+            functions.append(allocator, .init(allocator, function)) catch allocError();
+        }
+
         return .{
             .allocator = allocator,
-            .function = Function.init(allocator, program.function)
+            .functions = functions.toOwnedSlice(allocator) catch allocError(),
         };
     }
 };
 
-const Function = struct {
+pub const Function = struct {
     allocator: Allocator,
     name: []const u8,
     instructions: []Instruction,

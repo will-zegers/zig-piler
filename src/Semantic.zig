@@ -4,6 +4,7 @@ const Allocator = std.mem.Allocator;
 
 const Parser = @import("Parser.zig");
 const Declaration = Parser.Declaration;
+const VarDecl = Parser.VarDecl;
 const Statement = Parser.Statement;
 const Expression = Parser.Expression;
 const Switch = Parser.Switch;
@@ -52,26 +53,40 @@ pub fn resolve(self: *Semantic, ast: *AST) void {
 }
 
 fn resolveFirstPass(self: *Semantic, ast: *AST, context: *Context) void {
-    const body = ast.tree.function.body.items;
-    for (body) |*block| {
-        switch (block.*) {
-            .Statement => |*statement| self.resolveStatement1P(statement, context),
-            .Declaration => |*declaration| self.resolveDeclaration(declaration, context),
+    for (ast.tree.functions) |function| {
+        if (function.body) |body| {
+            for (body.items) |*block| {
+                switch (block.*) {
+                    .Statement => |*statement| self.resolveStatement1P(statement, context),
+                    .Declaration => |*declaration| self.resolveDeclaration(declaration, context),
+                }
+            }
         }
     }
 }
 
 fn resolveSecondPass(self: *Semantic, ast: *AST, context: *Context) void {
-    const body = ast.tree.function.body.items;
-    for (body) |*block| {
-        switch (block.*) {
-            .Statement => |*statement| self.resolveStatement2P(statement, context),
-            .Declaration => {},
+    for (ast.tree.functions) |function| {
+        if (function.body) |body| {
+            for (body.items) |*block| {
+                switch (block.*) {
+                    .Statement => |*statement| self.resolveStatement2P(statement, context),
+                    else => {},
+                }
+            }
         }
     }
 }
 
 fn resolveDeclaration(self: *Semantic, decl: *Declaration, context: *Context) void {
+    switch (decl.*) {
+        .VarDecl => |*varDecl|  resolveVarDecl(self, varDecl, context),
+        .FunDecl => unreachable,
+    }
+}
+
+
+fn resolveVarDecl(self: *Semantic, decl: *VarDecl, context: *Context) void {
     const name = decl.name;
     if (context.getScope().variables.get(name)) |entry| {
         if (entry.insideScope) {
@@ -165,7 +180,7 @@ fn resolveStatement1P(self: *Semantic, statement: *Statement, context: *Context)
             defer context.popScope();
 
             switch (f.init) {
-                .Declaration => self.resolveDeclaration(&f.init.Declaration, context),
+                .Declaration => |*decl| self.resolveDeclaration(decl, context),
                 .Expression => if (f.init.Expression) |*expr| {
                     self.resolveExpression(expr, context);
                 },
@@ -277,6 +292,7 @@ fn resolveExpression(self: *Semantic, expr: *Expression, context: *Context) void
             self.resolveExpression(ternary.thenStmt, context);
             self.resolveExpression(ternary.elseStmt, context);
         },
+        .FunctionCall => unreachable,
     }
 }
 

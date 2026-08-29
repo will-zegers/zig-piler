@@ -13,7 +13,19 @@ allocator: Allocator,
 instructions: ArrayList([]const u8),
 
 pub fn init(allocator: Allocator, ast: Assembler.AST) !CodeEmitter {
-    const assembly = ast.function.instructions;
+    var instructions: ArrayList([]const u8) = .empty;
+    for (ast.functions) |function| {
+        const slice = try emit(allocator, function);
+        defer allocator.free(slice);
+
+        try instructions.appendSlice(allocator, slice);
+    }
+
+    return .{ .allocator = allocator, .instructions = instructions };
+}
+
+pub fn emit(allocator: Allocator, function: Assembler.Function) ![][]const u8 {
+    const assembly = function.instructions;
 
     // Assembly instructions will be 1:1 with the []const u8 entries in the emitted code, plus
     // a few bookkeeping and prelude/epilogue instructions
@@ -26,7 +38,7 @@ pub fn init(allocator: Allocator, ast: Assembler.AST) !CodeEmitter {
         \\  movq    %rsp, %rbp
     ;
 
-    const functionDefinition = try allocator.print(functionDefTemplate, .{ast.function.name});
+    const functionDefinition = try allocator.print(functionDefTemplate, .{function.name});
     const localPrefix = switch (builtin.os.tag) {
         .linux => ".L",
         else => unreachable, // only running this on linux atm
@@ -183,7 +195,7 @@ pub fn init(allocator: Allocator, ast: Assembler.AST) !CodeEmitter {
     }
     instructions.appendAssumeCapacity(try allocator.dupe(u8, "\n")); // need newline at end of file
 
-    return .{ .allocator = allocator, .instructions = instructions };
+    return instructions.toOwnedSlice(allocator) catch allocError();
 }
 
 fn getOperandString(allocator: Allocator, operand: Assembler.Operand) []const u8 {
