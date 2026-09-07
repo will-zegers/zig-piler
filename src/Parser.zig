@@ -63,6 +63,31 @@ pub const Program = struct {
     }
 };
 
+pub const DeclarationTag = enum { FunDecl, VarDecl };
+pub const Declaration = union(DeclarationTag) {
+    FunDecl: FunDecl,
+    VarDecl: VarDecl,
+
+    pub fn parse(allocator: Allocator, tokens: *TokenIterator) ParsingError!Declaration {
+        // We need to look a couple tokens ahead to determine if this is a function declaration,
+        // which be of the form "int" <identifier> "(" (i.e., the 'marker' be an open paranthesis).
+        // If not, assume it a variable declaration of the form "int" <identifier> (";" | "=") and
+        // try to parse it as such;
+        const markerToken = tokens.lookAhead(2);
+        return switch (markerToken.type) {
+            .OpenParenthesis => .{ .FunDecl = try .parse(allocator, tokens) },
+            else => .{ .VarDecl = try .parse(allocator, tokens) },
+        };
+    }
+
+    pub fn deinit(self: *Declaration) void {
+        switch (self.*) {
+            .FunDecl => self.*.FunDecl.deinit(),
+            .VarDecl => self.*.VarDecl.deinit(),
+        }
+    }
+};
+
 pub const FunDecl = struct {
     allocator: Allocator,
     lineIndex: usize,
@@ -125,31 +150,6 @@ pub const FunDecl = struct {
     }
 };
 
-pub const DeclarationTag = enum { FunDecl, VarDecl };
-pub const Declaration = union(DeclarationTag) {
-    FunDecl: FunDecl,
-    VarDecl: VarDecl,
-
-    pub fn parse(allocator: Allocator, tokens: *TokenIterator) ParsingError!Declaration {
-        // We need to look a couple tokens ahead to determine if this is a function declaration,
-        // which be of the form "int" <identifier> "(" (i.e., the 'marker' be an open paranthesis).
-        // If not, assume it a variable declaration of the form "int" <identifier> (";" | "=") and
-        // try to parse it as such;
-        const markerToken = tokens.lookAhead(2);
-        return switch (markerToken.type) {
-            .OpenParenthesis => .{ .FunDecl = try .parse(allocator, tokens) },
-            else => .{ .VarDecl = try .parse(allocator, tokens) },
-        };
-    }
-
-    pub fn deinit(self: *Declaration) void {
-        switch (self.*) {
-            .FunDecl => self.*.FunDecl.deinit(),
-            .VarDecl => self.*.VarDecl.deinit(),
-        }
-    }
-};
-
 pub const VarDecl = struct {
     allocator: Allocator,
     lineIndex: usize,
@@ -172,6 +172,27 @@ pub const VarDecl = struct {
     pub fn deinit(self: *VarDecl) void {
         if (self.tag) |tag| self.allocator.free(tag);
         if (self.*.init) |*init| Expression.deinit(init);
+    }
+};
+
+pub const BlockItemTag = enum { Declaration, Statement };
+pub const BlockItem = union(BlockItemTag) {
+    Declaration: Declaration,
+    Statement: Statement,
+
+    pub fn parse(allocator: Allocator, tokens: *TokenIterator) ParsingError!BlockItem {
+        const nextToken = tokens.peek();
+        return if (.Int == nextToken.type)
+            .{ .Declaration = try .parse(allocator, tokens) }
+        else
+            .{ .Statement = try .parse(allocator, tokens) };
+    }
+
+    pub fn deinit(self: *BlockItem) void {
+        switch (self.*) {
+            .Statement => |*statement| Statement.deinit(statement),
+            .Declaration => |*decl| Declaration.deinit(decl),
+        }
     }
 };
 
@@ -205,50 +226,27 @@ pub const Block = struct {
     }
 };
 
-pub const BlockItemTag = enum { Declaration, Statement };
-pub const BlockItem = union(BlockItemTag) {
-    Declaration: Declaration,
-    Statement: Statement,
-
-    pub fn parse(allocator: Allocator, tokens: *TokenIterator) ParsingError!BlockItem {
-        const nextToken = tokens.peek();
-        return if (.Int == nextToken.type)
-            .{ .Declaration = try .parse(allocator, tokens) }
-        else
-            .{ .Statement = try .parse(allocator, tokens) };
-    }
-
-    pub fn deinit(self: *BlockItem) void {
-        switch (self.*) {
-            .Statement => |*statement| Statement.deinit(statement),
-            .Declaration => |*decl| Declaration.deinit(decl),
-        }
-    }
-};
-
 pub const Break = struct {
-    allocator: Allocator,
     lineIndex: usize,
     tag: ?[]const u8 = null, // this will get set during semantic analysis
 
-    pub fn parse(allocator: Allocator, tokens: *TokenIterator) ParsingError!Break {
+    pub fn parse(tokens: *TokenIterator) ParsingError!Break {
         const token = tokens.next();
         try expect(.Semicolon, tokens.next());
-        return .{ .allocator = allocator, .lineIndex = token.lineIndex };
+        return .{ .lineIndex = token.lineIndex };
     }
 
     // no deinit needed since the tag is owned by the enclosing loop/switch
 };
 
 pub const Continue = struct {
-    allocator: Allocator,
     lineIndex: usize,
     tag: ?[]const u8 = null, // this will get set during semantic analysis
 
-    pub fn parse(allocator: Allocator, tokens: *TokenIterator) ParsingError!Continue {
+    pub fn parse(tokens: *TokenIterator) ParsingError!Continue {
         const token = tokens.next();
         try expect(.Semicolon, tokens.next());
-        return .{ .allocator = allocator, .lineIndex = token.lineIndex };
+        return .{ .lineIndex = token.lineIndex };
     }
 
     // no deinit needed since the tag is owned by the enclosing loop
@@ -592,10 +590,10 @@ pub const Statement = union(StatementTag) {
     pub fn parse(allocator: Allocator, tokens: *TokenIterator) ParsingError!Statement {
         const nextToken = tokens.peek();
         return switch (nextToken.type) {
-            .Break => .{ .Break = try .parse(allocator, tokens) },
+            .Break => .{ .Break = try .parse(tokens) },
             .Case, .Default => .{ .Case = try .parse(allocator, tokens) },
             .OpenBrace => .{ .Compound = try .parse(allocator, tokens) },
-            .Continue => .{ .Continue = try .parse(allocator, tokens) },
+            .Continue => .{ .Continue = try .parse(tokens) },
             .Do => .{ .DoWhile = try .parse(allocator, tokens) },
             .Goto => .{ .Goto = try .parse(tokens) },
             .For => .{ .For = try .parse(allocator, tokens) },

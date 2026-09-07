@@ -4,6 +4,7 @@ const Allocator = std.mem.Allocator;
 
 const Parser = @import("Parser.zig");
 const Declaration = Parser.Declaration;
+const FunDecl = Parser.FunDecl;
 const VarDecl = Parser.VarDecl;
 const Statement = Parser.Statement;
 const Expression = Parser.Expression;
@@ -80,22 +81,21 @@ fn resolveSecondPass(self: *Semantic, ast: *AST, context: *Context) void {
 
 fn resolveDeclaration(self: *Semantic, decl: *Declaration, context: *Context) void {
     switch (decl.*) {
-        .VarDecl => |*varDecl|  resolveVarDecl(self, varDecl, context),
         .FunDecl => unreachable,
+        .VarDecl => |*varDecl|  resolveVarDecl(self, varDecl, context),
     }
 }
 
-
 fn resolveVarDecl(self: *Semantic, decl: *VarDecl, context: *Context) void {
     const name = decl.name;
-    if (context.getScope().variables.get(name)) |entry| {
-        if (entry.insideScope) {
+    if (context.getScope().identifiers.get(name)) |entry| {
+        if (entry.fromCurrentScope) {
             self.errors.append(self.allocator, .{ .lineIndex = decl.lineIndex, .type = .Redeclaration, .name = name }) catch allocError();
             return;
         }
     }
-    decl.tag = self.generateUnique(context.function, name);
-    context.*.getScopeMut().variables.put(name, .{ .unique = decl.tag.? }) catch allocError();
+    decl.tag = self.generateUnique(context.scope, name);
+    context.*.getScopeMut().identifiers.put(name, .{ .unique = decl.tag.? }) catch allocError();
 
     if (decl.init) |*initExpr| {
         self.resolveExpression(initExpr, context);
@@ -103,14 +103,14 @@ fn resolveVarDecl(self: *Semantic, decl: *VarDecl, context: *Context) void {
 }
 
 /// On first-pass:
-///   1) ensure that variables are declared, in scope, and resolve them to unique names
+///   1) ensure that identifiers are declared, in scope, and resolve them to unique names
 ///   2) collect all declared labels into a map structure for resolution in pass 2 (since
 ///      labels may be used before they're declared, i.e. gotos)
 ///   3) collect all individual cases into their respective switch statements for use in TAC gen
 fn resolveStatement1P(self: *Semantic, statement: *Statement, context: *Context) void {
     switch (statement.*) {
         .Compound => |*compound| {
-            compound.*.tag = self.generateUnique(context.function, "block");
+            compound.*.tag = self.generateUnique(context.scope, "block");
 
             context.pushScope(.Block, compound.tag.?);
             defer context.popScope();
@@ -134,12 +134,12 @@ fn resolveStatement1P(self: *Semantic, statement: *Statement, context: *Context)
         .Label => |*lbl| {
             const name = statement.Label.name;
             if (context.labels.get(name)) |entry| {
-                if (entry.insideScope) {
+                if (entry.fromCurrentScope) {
                     self.errors.append(self.allocator, .{ .lineIndex = lbl.lineIndex, .type = .Redeclaration, .name = name }) catch allocError();
                     return;
                 }
             }
-            lbl.*.tag = self.generateUnique(context.function, name);
+            lbl.*.tag = self.generateUnique(context.scope, name);
             context.labels.put(name, .{ .unique = lbl.tag.? }) catch allocError();
 
 
@@ -158,7 +158,7 @@ fn resolveStatement1P(self: *Semantic, statement: *Statement, context: *Context)
             self.errors.append(self.allocator, .{ .lineIndex = cont.lineIndex, .type = .Continue }) catch allocError();
         },
         .DoWhile => |*doWhl| {
-            doWhl.tag = self.generateUnique(context.function, "doWhile");
+            doWhl.tag = self.generateUnique(context.scope, "doWhile");
 
             context.pushScope(.Loop, doWhl.tag.?);
 
@@ -168,13 +168,13 @@ fn resolveStatement1P(self: *Semantic, statement: *Statement, context: *Context)
         .While => |*whl| {
             self.resolveExpression(&whl.cond, context);
 
-            whl.*.tag = self.generateUnique(context.function, "while");
+            whl.*.tag = self.generateUnique(context.scope, "while");
 
             context.pushScope(.Loop, whl.tag.?);
             self.resolveStatement1P(whl.body, context);
         },
         .For => |*f| {
-            f.*.tag = self.generateUnique(context.function, "for");
+            f.*.tag = self.generateUnique(context.scope, "for");
 
             context.pushScope(.Loop, f.tag.?);
             defer context.popScope();
@@ -194,7 +194,7 @@ fn resolveStatement1P(self: *Semantic, statement: *Statement, context: *Context)
         .Switch => |*swtch| {
             self.resolveExpression(&swtch.cond, context);
 
-            swtch.tag = self.generateUnique(context.function, "switch");
+            swtch.tag = self.generateUnique(context.scope, "switch");
 
             context.pushScope(.Switch, swtch.tag.?);
             defer context.popScope();
@@ -269,7 +269,7 @@ fn resolveExpression(self: *Semantic, expr: *Expression, context: *Context) void
             self.resolveExpression(binary.right, context);
         },
         .Var => |*v| {
-            if (context.getScope().variables.get(v.*.name)) |entry| {
+            if (context.getScope().identifiers.get(v.*.name)) |entry| {
                 v.*.name = entry.unique;
             } else {
                 self.errors.append(self.allocator, .{ .lineIndex = v.*.lineIndex, .type = .UndeclaredIdentifier, .name = v.*.name }) catch allocError();
@@ -292,7 +292,20 @@ fn resolveExpression(self: *Semantic, expr: *Expression, context: *Context) void
             self.resolveExpression(ternary.thenStmt, context);
             self.resolveExpression(ternary.elseStmt, context);
         },
-        .FunctionCall => unreachable,
+        .FunctionCall => |*func| {
+            const scope = context.getScope();
+            if (scope.identifiers.contains(func.name)) {
+                for (func.args) |*arg| {
+                    self.resolveExpression(arg, context);
+                }
+            } else {
+                self.errors.append(self.allocator, .{
+                    .lineIndex = func.lineIndex,
+                    .type = .UndeclaredIdentifier,
+                    .name = func.name,
+                }) catch allocError();
+            }
+        },
     }
 }
 
@@ -315,9 +328,9 @@ pub fn reportAnyErrors(self: Semantic, lines: [][]const u8) void {
     }
 }
 
-fn generateUnique(self: *Semantic, function: []const u8, name: []const u8) []u8 {
+fn generateUnique(self: *Semantic, scope: []const u8, name: []const u8) []u8 {
     defer self.idCounter += 1;
-    return self.allocator.print("{s}.{s}.{d}", .{ function, name, self.idCounter }) catch allocError();
+    return self.allocator.print("{s}.{s}.{d}", .{ scope, name, self.idCounter }) catch allocError();
 }
 
 pub fn allocError() noreturn {

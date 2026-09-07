@@ -94,6 +94,39 @@ pub const Expression = union(ExpressionTag) {
     }
 };
 
+fn parseFactor(allocator: Allocator, tokens: *TokenIterator) ParsingError!Expression {
+    const token = tokens.next();
+    const expr: Expression = switch (token.type) {
+        .Constant => .{ .Constant = token.symbol },
+        .UnaryOp => blk: { // '~'|'!'|'-'|'++'|'--' <factor>
+            const right = try parseFactor(allocator, tokens);
+            break :blk .{ .Unary = try Unary.initPre(allocator, token, right) };
+        },
+        .Identifier => blk: {
+            const nextToken = tokens.peek();
+            if (nextToken.type == .OpenParenthesis) {
+                break :blk .{ .FunctionCall = try .parse(allocator, tokens) };
+            } else {
+                break :blk .{ .Var = .{ .name = token.symbol, .lineIndex = token.lineIndex } };
+            }
+        },
+        .OpenParenthesis => blk: { // '(' <expr> ')'
+            const expr = try Expression.parse(allocator, tokens, 0);
+            const next = tokens.next();
+            if (next.type != .CloseParenthesis) return unexpectedToken(token);
+            break :blk expr;
+        },
+        else => return unexpectedToken(token),
+    };
+
+    const nextToken = tokens.peek();
+    if (nextToken.type == .UnaryOp) { // '~'|'!'|'-'|'++'|'--' <factor> '++'|'--'
+        return .{ .Unary = try .initPost(allocator, tokens.next(), expr) };
+    }
+
+    return expr;
+}
+
 pub const Constant = int;
 
 pub const Var = struct {
@@ -308,15 +341,18 @@ pub const Ternary = struct {
 
 pub const FunctionCall = struct {
     allocator: Allocator,
+    lineIndex: usize,
     name: identifier,
     args: []Expression,
 
-    pub fn parse(allocator: Allocator, name: identifier, tokens: *TokenIterator) ParsingError!FunctionCall {
+    pub fn parse(allocator: Allocator, tokens: *TokenIterator) ParsingError!FunctionCall {
+        const name = tokens.next();
+        try expect(.Identifier, name);
         try expect(.OpenParenthesis, tokens.next());
         const args = try parseArgumentList(allocator, tokens);
         try expect(.CloseParenthesis, tokens.next());
 
-        return .{ .allocator = allocator, .name = name, .args = args };
+        return .{ .allocator = allocator, .lineIndex = name.lineIndex, .name = name.symbol, .args = args };
     }
 
     pub fn deinit(self: *FunctionCall) void {
@@ -343,39 +379,6 @@ pub const FunctionCall = struct {
         return args.toOwnedSlice(allocator) catch allocError();
     }
 };
-
-fn parseFactor(allocator: Allocator, tokens: *TokenIterator) ParsingError!Expression {
-    const token = tokens.next();
-    const expr: Expression = switch (token.type) {
-        .Constant => .{ .Constant = token.symbol },
-        .UnaryOp => blk: { // '~'|'!'|'-'|'++'|'--' <factor>
-            const right = try parseFactor(allocator, tokens);
-            break :blk .{ .Unary = try Unary.initPre(allocator, token, right) };
-        },
-        .Identifier => blk: {
-            const nextToken = tokens.peek();
-            if (nextToken.type == .OpenParenthesis) {
-                break :blk .{ .FunctionCall = try .parse(allocator, token.symbol, tokens) };
-            } else {
-                break :blk .{ .Var = .{ .name = token.symbol, .lineIndex = token.lineIndex } };
-            }
-        },
-        .OpenParenthesis => blk: { // '(' <expr> ')'
-            const expr = try Expression.parse(allocator, tokens, 0);
-            const next = tokens.next();
-            if (next.type != .CloseParenthesis) return unexpectedToken(token);
-            break :blk expr;
-        },
-        else => return unexpectedToken(token),
-    };
-
-    const nextToken = tokens.peek();
-    if (nextToken.type == .UnaryOp) { // '~'|'!'|'-'|'++'|'--' <factor> '++'|'--'
-        return .{ .Unary = try .initPost(allocator, tokens.next(), expr) };
-    }
-
-    return expr;
-}
 
 fn unexpectedToken(token: Token) ParsingError {
     std.log.err("Got unexpected {any} token '{s}'", .{ token.type, token.symbol });

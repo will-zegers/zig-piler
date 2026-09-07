@@ -5,7 +5,7 @@ const Token = @This();
 
 type: Type,
 symbol: []const u8,
-precedence: usize = 0, // higher number means higher precedence, 0 means no precedence (e.g. for identifiers and constants)
+precedence: usize = 0, // scale of 0 (no precedence) to 160 (highest precedence)
 associativity: enum { LeftToRight, RightToLeft, None } = .None,
 lineIndex: usize = 0, // used for tracking the line number of the token in the source code for error reporting during parsing
 
