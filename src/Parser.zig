@@ -151,7 +151,6 @@ pub const FunDecl = struct {
 pub const VarDecl = struct {
     allocator: Allocator,
     lineIndex: usize,
-    tag: ?[]const u8 = null,
     name: identifier,
     init: ?Expression = null,
 
@@ -173,11 +172,13 @@ pub const VarDecl = struct {
         const token = tokens.next();
         try expect(.Identifier, token);
 
-        return .{ .allocator = allocator, .lineIndex = token.lineIndex, .name = token.symbol };
+        const name = allocator.dupe(u8, token.symbol) catch allocError();
+
+        return .{ .allocator = allocator, .lineIndex = token.lineIndex, .name = name };
     }
 
     pub fn deinit(self: *VarDecl) void {
-        if (self.tag) |tag| self.allocator.free(tag);
+        self.allocator.free(self.name);
         if (self.*.init) |*init| Expression.deinit(init);
     }
 };

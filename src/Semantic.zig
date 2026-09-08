@@ -19,9 +19,10 @@ const IdentifierMap = Context.IdentifierMap;
 const AST = Parser.AST;
 
 allocator: Allocator,
-switches: std.StringHashMap(*Switch),
+lines: [][]const u8,
 idCounter: usize = 0,
-errors: std.ArrayList(SemanticError) = .empty,
+errorFlag: bool = false,
+switches: std.StringHashMap(*Switch),
 
 const SemanticError = struct {
     lineIndex: usize,
@@ -38,13 +39,12 @@ const SemanticError = struct {
     name: ?[]const u8 = null,
 };
 
-pub fn init(allocator: Allocator) Semantic {
-    return .{ .allocator = allocator, .switches = .init(allocator) };
+pub fn init(allocator: Allocator, lines: [][]const u8) Semantic {
+    return .{ .allocator = allocator, .switches = .init(allocator), .lines = lines };
 }
 
 pub fn deinit(self: *Semantic) void {
     self.switches.deinit();
-    self.errors.deinit(self.allocator);
 }
 
 pub fn resolve(self: *Semantic, ast: *AST) void {
@@ -53,12 +53,12 @@ pub fn resolve(self: *Semantic, ast: *AST) void {
 
     resolveFirstPass(self, ast, &context);
     resolveSecondPass(self, ast, &context);
+
+    if (self.errorFlag) std.process.exit(1);
 }
 
 fn resolveFirstPass(self: *Semantic, ast: *AST, context: *Context) void {
-    for (ast.tree.functions) |*function| {
-        self.resolveFunDecl(function, context);
-    }
+    for (ast.tree.functions) |*function| self.resolveFunDecl(function, context);
 }
 
 fn resolveSecondPass(self: *Semantic, ast: *AST, context: *Context) void {
@@ -85,11 +85,7 @@ fn resolveFunDecl(self: *Semantic, decl: *FunDecl, context: *Context) void {
     const scope = context.*.getScopeMut();
     if (scope.*.identifiers.get(decl.name)) |entry| {
         if (entry.fromCurrentScope and !entry.hasLinkage) {
-            self.errors.append(self.allocator, .{
-                .lineIndex = decl.lineIndex,
-                .type = .Redeclaration,
-                .name = decl.name,
-            }) catch allocError();
+            self.reportError(.{ .lineIndex = decl.lineIndex, .type = .Redeclaration, .name = decl.name });
             return;
         }
     }
@@ -110,26 +106,25 @@ fn resolveFunDecl(self: *Semantic, decl: *FunDecl, context: *Context) void {
 
     if (decl.body) |*body| {
         if (!std.mem.eql(u8, "_global", scope.tag)) {
-            self.errors.append(self.allocator, .{
-                .lineIndex = decl.lineIndex,
-                .type = .NestedFunction,
-            }) catch allocError();
-        } else self.resolveBlockIdentifiers(body, context);
+            self.reportError(.{ .lineIndex = decl.lineIndex, .type = .NestedFunction });
+            return;
+        }
+        self.resolveBlockIdentifiers(body, context);
     }
 }
 
 fn resolveVarDecl(self: *Semantic, decl: *VarDecl, context: *Context) void {
-    const name = decl.name;
+    const name = decl.name; // cache the parsed name
     if (context.getScope().identifiers.get(name)) |entry| {
-        std.debug.print("{s} {any}\n", .{name, context.*.getScope().identifiers.get(name)});
         if (entry.fromCurrentScope) {
-            self.errors.append(self.allocator, .{ .lineIndex = decl.lineIndex, .type = .Redeclaration, .name = name }) catch allocError();
+            self.reportError(.{ .lineIndex = decl.lineIndex, .type = .Redeclaration, .name = decl.name });
             return;
         }
     }
-    decl.name = self.generateUnique(context.getScope().tag, name);
-    decl.tag = decl.name;
-    context.*.getScopeMut().identifiers.put(name, .{ .unique = decl.tag.? }) catch allocError();
+
+    decl.name = self.generateUnique(context.getScope().tag, name); // add a unique tag to the name
+    // add the parsed name and now unique name as a key-value pair
+    context.*.getScopeMut().identifiers.put(name, .{ .unique = decl.name }) catch allocError();
 
     if (decl.init) |*initExpr| {
         self.resolveExpression(initExpr, context);
@@ -182,7 +177,7 @@ fn identifierResolutionPass(self: *Semantic, statement: *Statement, context: *Co
             const name = statement.Label.name;
             if (context.labels.get(name)) |entry| {
                 if (entry.fromCurrentScope) {
-                    self.errors.append(self.allocator, .{ .lineIndex = lbl.lineIndex, .type = .Redeclaration, .name = name }) catch allocError();
+                    self.reportError(.{ .lineIndex = lbl.lineIndex, .type = .Redeclaration, .name = name });
                     return;
                 }
             }
@@ -195,12 +190,12 @@ fn identifierResolutionPass(self: *Semantic, statement: *Statement, context: *Co
         .Break => |*brk| if (context.getBreakTag()) |tag| {
             brk.tag = tag;
         } else {
-            self.errors.append(self.allocator, .{ .lineIndex = brk.lineIndex, .type = .Break }) catch allocError();
+            self.reportError(.{ .lineIndex = brk.lineIndex, .type = .Break });
         },
         .Continue => |*cont| if (context.getContinueTag()) |tag| {
             cont.tag = tag;
         } else {
-            self.errors.append(self.allocator, .{ .lineIndex = cont.lineIndex, .type = .Continue }) catch allocError();
+            self.reportError(.{ .lineIndex = cont.lineIndex, .type = .Continue });
         },
         .DoWhile => |*doWhl| {
             doWhl.tag = self.generateUnique(context.getScope().tag, "doWhile");
@@ -253,16 +248,11 @@ fn identifierResolutionPass(self: *Semantic, statement: *Statement, context: *Co
             case.*.tag = self.allocator.print("{s}.{s}", .{switchTag, cond}) catch allocError();
 
             const parentSwitch = self.switches.get(switchTag) orelse unreachable;
-            parentSwitch.*.addCase(case) catch {
-                self.errors.append(self.allocator, .{
-                    .lineIndex = case.lineIndex,
-                    .type = .CaseDuplicate,
-                }) catch allocError();
-            };
+            parentSwitch.*.addCase(case) catch self.reportError(.{ .lineIndex = case.lineIndex, .type = .CaseDuplicate, });
 
             if (case.body) |body| self.identifierResolutionPass(body, context);
         } else {
-            self.errors.append(self.allocator, .{ .lineIndex = case.lineIndex, .type = .CaseOutside }) catch allocError();
+            self.reportError(.{ .lineIndex = case.lineIndex, .type = .CaseOutside });
         },
     }
 }
@@ -275,7 +265,7 @@ fn labelResolutionPass(self: *Semantic, statement: *Statement, context: *Context
             if (context.labels.get(goto.*.target)) |entry| {
                 goto.*.target = entry.unique;
             } else {
-                self.errors.append(self.allocator, .{ .lineIndex = goto.*.lineIndex, .type = .UndeclaredIdentifier, .name = goto.*.target }) catch allocError();
+                self.reportError(.{ .lineIndex = goto.*.lineIndex, .type = .UndeclaredIdentifier, .name = goto.*.target });
             }
         },
         .If => |*ifStmt| {
@@ -296,7 +286,7 @@ fn resolveExpression(self: *Semantic, expr: *Expression, context: *Context) void
     switch (expr.*) {
         .Assignment => |*assign| {
             if (assign.lhs.* != .Var) {
-                self.errors.append(self.allocator, .{ .lineIndex = assign.lineIndex, .type = .NotAssignable }) catch allocError();
+                self.reportError(.{ .lineIndex = assign.lineIndex, .type = .NotAssignable });
             }
 
             self.resolveExpression(assign.lhs, context);
@@ -310,14 +300,14 @@ fn resolveExpression(self: *Semantic, expr: *Expression, context: *Context) void
             if (context.getScope().identifiers.get(v.*.name)) |entry| {
                 v.*.name = entry.unique;
             } else {
-                self.errors.append(self.allocator, .{ .lineIndex = v.*.lineIndex, .type = .UndeclaredIdentifier, .name = v.*.name }) catch allocError();
+                self.reportError(.{ .lineIndex = v.*.lineIndex, .type = .UndeclaredIdentifier, .name = v.*.name });
             }
         },
         .Unary => |unary| {
             switch (unary.operator) {
                 .Inc, .Dec => {
                     if (unary.operand.* != .Var) {
-                        self.errors.append(self.allocator, .{ .lineIndex = unary.lineIndex, .type = .NotAssignable }) catch allocError();
+                        self.reportError(.{ .lineIndex = unary.lineIndex, .type = .NotAssignable });
                     }
                 },
                 else => {},
@@ -343,34 +333,27 @@ fn resolveExpression(self: *Semantic, expr: *Expression, context: *Context) void
                     self.resolveExpression(arg, context);
                 }
             } else {
-                self.errors.append(self.allocator, .{
-                    .lineIndex = func.lineIndex,
-                    .type = .UndeclaredIdentifier,
-                    .name = func.name,
-                }) catch allocError();
+                self.reportError(.{ .lineIndex = func.lineIndex, .type = .UndeclaredIdentifier, .name = func.name, });
             }
         },
     }
 }
 
-pub fn reportAnyErrors(self: Semantic, lines: [][]const u8) void {
-    if (self.errors.items.len > 0) {
-        for (self.errors.items) |err| {
-            switch (err.type) {
-                .Break => std.log.err("'break' statement outside of loop or switch statement", .{}),
-                .CaseOutside => std.log.err("'case' or 'default' label outside of switch statement", .{}),
-                .CaseDuplicate => std.log.err("Duplicate 'case' or 'default'", .{}),
-                .Continue => std.log.err("'continue' statement outside of loop statement", .{}),
-                .NotAssignable => std.log.err("Expression is not an assignable lvalue", .{}),
-                .NestedFunction => std.log.err("Function definitions may only exist at the top level", .{}),
-                .Redeclaration => std.log.err("Redeclaration of '{s}'", .{err.name.?}),
-                .UndeclaredIdentifier => std.log.err("Use of undeclared identifier '{s}'", .{err.name.?}),
-            }
-            const index = err.lineIndex;
-            std.log.err(" {d} | {s}\n", .{ index + 1, lines[index] });
-        }
-        std.process.exit(1);
+fn reportError(self: *Semantic, err: SemanticError) void {
+    switch (err.type) {
+        .Break => std.log.err("'break' statement outside of loop or switch statement", .{}),
+        .CaseOutside => std.log.err("'case' or 'default' label outside of switch statement", .{}),
+        .CaseDuplicate => std.log.err("Duplicate 'case' or 'default'", .{}),
+        .Continue => std.log.err("'continue' statement outside of loop statement", .{}),
+        .NotAssignable => std.log.err("Expression is not an assignable lvalue", .{}),
+        .NestedFunction => std.log.err("Function definitions may only exist at the top level", .{}),
+        .Redeclaration => std.log.err("Redeclaration of '{s}'", .{err.name.?}),
+        .UndeclaredIdentifier => std.log.err("Use of undeclared identifier '{s}'", .{err.name.?}),
     }
+    const index = err.lineIndex;
+    std.log.err(" {d} | {s}\n", .{ index + 1, self.lines[index] });
+
+    self.errorFlag = true;
 }
 
 fn generateUnique(self: *Semantic, scope: []const u8, name: []const u8) []u8 {

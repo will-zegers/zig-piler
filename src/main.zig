@@ -81,11 +81,10 @@ pub fn main(init: std.process.Init) !void {
 
     if (stage.includes(.Validate)) {
         std.log.info("Running semantic analysis...", .{});
-        var semantic = Semantic.init(allocator);
+        var semantic = Semantic.init(allocator, lines);
         defer semantic.deinit();
 
         semantic.resolve(&ast);
-        semantic.reportAnyErrors(lines);
 
         if (debug) {
             std.debug.print("-------parsed-------\n", .{});
