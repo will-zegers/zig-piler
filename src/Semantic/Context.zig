@@ -13,6 +13,7 @@ const IdentifierMap = std.StringHashMap(Entry);
 
 const ScopeType = enum {
     Global,
+    Function,
     Block,
     Loop,
     Switch,
@@ -26,7 +27,6 @@ const Scope = struct {
 
 allocator: Allocator,
 labels: IdentifierMap,
-scope: []const u8 = "",
 stack: std.ArrayList(Scope),
 
 pub fn init(allocator: Allocator) Context {
@@ -34,7 +34,7 @@ pub fn init(allocator: Allocator) Context {
     stack.append(allocator, .{
         .type = .Block,
         .identifiers = .init(allocator),
-        .tag = "",
+        .tag = "_global",
     }) catch allocError();
 
     return .{ .allocator = allocator, .labels = .init(allocator), .stack = stack };

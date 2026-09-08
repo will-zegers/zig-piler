@@ -57,7 +57,7 @@ fn printDeclaration(decl: Parser.Declaration, indent: usize) void {
         .FunDecl => |funDecl| {
             print("{s}{any} {s}(", .{ indentStr, @TypeOf(funDecl), funDecl.name });
             for (funDecl.params) |param| {
-                print("{s} ", .{param});
+                print("{s} ", .{param.name});
             }
             print(")\n", .{});
             if (funDecl.body) |body| {

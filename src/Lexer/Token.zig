@@ -84,6 +84,10 @@ pub const Iterator = struct {
         self.index += 1;
     }
 
+    pub fn rewind(self: *Iterator) void {
+        self.index -= 1;
+    }
+
     pub fn reset(self: *Iterator) void {
         self.index = 0;
         self.lineIndex = 0;

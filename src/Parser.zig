@@ -92,21 +92,28 @@ pub const FunDecl = struct {
     allocator: Allocator,
     lineIndex: usize,
     name: identifier,
-    params: []identifier,
+    params: []VarDecl,
     body: ?Block,
 
     pub fn parse(allocator: Allocator, tokens: *TokenIterator) ParsingError!FunDecl {
         try expect(.Int, tokens.next());
 
-        const token = tokens.next();
-        try expect(.Identifier, token);
+        const name = tokens.next();
+        try expect(.Identifier, name);
 
         try expect(.OpenParenthesis, tokens.next());
         const params = try parseParamsList(allocator, tokens);
         try expect(.CloseParenthesis, tokens.next());
-        const body = try parseBody(allocator, tokens);
 
-        return .{ .allocator = allocator, .name = token.symbol, .params = params, .body = body, .lineIndex = token.lineIndex };
+        const token = tokens.peek();
+        const body: ?Block = if (token.type == .OpenBrace)
+            try Block.parse(allocator, tokens)
+        else blk: {
+            try expect(.Semicolon, tokens.next());
+            break :blk null;
+        };
+
+        return .{ .allocator = allocator, .name = name.symbol, .params = params, .body = body, .lineIndex = token.lineIndex };
     }
 
     pub fn deinit(self: *FunDecl) void {
@@ -114,20 +121,19 @@ pub const FunDecl = struct {
             body.deinit();
         }
 
+        for (self.params) |*param| {
+            param.deinit();
+        }
         self.allocator.free(self.params);
     }
 
-    fn parseParamsList(allocator: Allocator, tokens: *TokenIterator) ParsingError![]identifier {
-        var params: std.ArrayList(identifier) = .empty;
+    fn parseParamsList(allocator: Allocator, tokens: *TokenIterator) ParsingError![]VarDecl {
+        var params: std.ArrayList(VarDecl) = .empty;
 
         var nextToken = tokens.peek();
         if (nextToken.type != .Void) {
             while (true) {
-                try expect(.Int, tokens.next());
-
-                nextToken = tokens.next();
-                try expect(.Identifier, nextToken);
-                params.append(allocator, nextToken.symbol) catch allocError();
+                params.append(allocator, try .asParam(allocator, tokens)) catch allocError();
 
                 nextToken = tokens.peek();
 
@@ -140,14 +146,6 @@ pub const FunDecl = struct {
 
         return params.toOwnedSlice(allocator) catch allocError();
     }
-
-    fn parseBody(allocator: Allocator, tokens: *TokenIterator) ParsingError!?Block {
-        const nextToken = tokens.peek();
-        if (nextToken.type != .Semicolon) return try .parse(allocator, tokens);
-
-        try expect(.Semicolon, tokens.next());
-        return null;
-    }
 };
 
 pub const VarDecl = struct {
@@ -155,7 +153,7 @@ pub const VarDecl = struct {
     lineIndex: usize,
     tag: ?[]const u8 = null,
     name: identifier,
-    init: ?Expression,
+    init: ?Expression = null,
 
     pub fn parse(allocator: Allocator, tokens: *TokenIterator) ParsingError!VarDecl {
         try expect(.Int, tokens.next());
@@ -166,7 +164,16 @@ pub const VarDecl = struct {
         const init = try Assignment.fromDecl(allocator, tokens);
         try expect(.Semicolon, tokens.next());
 
-        return .{ .allocator = allocator, .name = token.symbol, .init = init, .lineIndex = token.lineIndex };
+        return .{ .allocator = allocator, .lineIndex = token.lineIndex, .name = token.symbol, .init = init };
+    }
+
+    pub fn asParam(allocator: Allocator, tokens: *TokenIterator) ParsingError!VarDecl {
+        try expect(.Int, tokens.next());
+
+        const token = tokens.next();
+        try expect(.Identifier, token);
+
+        return .{ .allocator = allocator, .lineIndex = token.lineIndex, .name = token.symbol };
     }
 
     pub fn deinit(self: *VarDecl) void {

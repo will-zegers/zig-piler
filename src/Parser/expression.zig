@@ -104,9 +104,10 @@ fn parseFactor(allocator: Allocator, tokens: *TokenIterator) ParsingError!Expres
         },
         .Identifier => blk: {
             const nextToken = tokens.peek();
-            if (nextToken.type == .OpenParenthesis) {
+            if (nextToken.type == .OpenParenthesis) { // check if this a function call
+                tokens.rewind(); // back up to process all parts of the function call
                 break :blk .{ .FunctionCall = try .parse(allocator, tokens) };
-            } else {
+            } else { // otherwise it's just a plain variable
                 break :blk .{ .Var = .{ .name = token.symbol, .lineIndex = token.lineIndex } };
             }
         },

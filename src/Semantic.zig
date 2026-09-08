@@ -3,6 +3,7 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 
 const Parser = @import("Parser.zig");
+const Block = Parser.Block;
 const Declaration = Parser.Declaration;
 const FunDecl = Parser.FunDecl;
 const VarDecl = Parser.VarDecl;
@@ -31,6 +32,7 @@ const SemanticError = struct {
         Continue,
         Redeclaration,
         UndeclaredIdentifier,
+        NestedFunction,
         NotAssignable,
     },
     name: ?[]const u8 = null,
@@ -54,15 +56,8 @@ pub fn resolve(self: *Semantic, ast: *AST) void {
 }
 
 fn resolveFirstPass(self: *Semantic, ast: *AST, context: *Context) void {
-    for (ast.tree.functions) |function| {
-        if (function.body) |body| {
-            for (body.items) |*block| {
-                switch (block.*) {
-                    .Statement => |*statement| self.resolveStatement1P(statement, context),
-                    .Declaration => |*declaration| self.resolveDeclaration(declaration, context),
-                }
-            }
-        }
+    for (ast.tree.functions) |*function| {
+        self.resolveFunDecl(function, context);
     }
 }
 
@@ -71,7 +66,7 @@ fn resolveSecondPass(self: *Semantic, ast: *AST, context: *Context) void {
         if (function.body) |body| {
             for (body.items) |*block| {
                 switch (block.*) {
-                    .Statement => |*statement| self.resolveStatement2P(statement, context),
+                    .Statement => |*statement| self.labelResolutionPass(statement, context),
                     else => {},
                 }
             }
@@ -81,24 +76,81 @@ fn resolveSecondPass(self: *Semantic, ast: *AST, context: *Context) void {
 
 fn resolveDeclaration(self: *Semantic, decl: *Declaration, context: *Context) void {
     switch (decl.*) {
-        .FunDecl => unreachable,
-        .VarDecl => |*varDecl|  resolveVarDecl(self, varDecl, context),
+        .FunDecl => |*funDecl| self.resolveFunDecl(funDecl, context),
+        .VarDecl => |*varDecl|  self.resolveVarDecl(varDecl, context),
+    }
+}
+
+fn resolveFunDecl(self: *Semantic, decl: *FunDecl, context: *Context) void {
+    const scope = context.*.getScopeMut();
+    if (scope.*.identifiers.get(decl.name)) |entry| {
+        if (entry.fromCurrentScope and !entry.hasLinkage) {
+            self.errors.append(self.allocator, .{
+                .lineIndex = decl.lineIndex,
+                .type = .Redeclaration,
+                .name = decl.name,
+            }) catch allocError();
+            return;
+        }
+    }
+
+    scope.*.identifiers.put(decl.name, .{
+        .unique = decl.name,
+        .fromCurrentScope = true,
+        .hasLinkage = true
+    }) catch allocError();
+
+
+    context.pushScope(.Function, decl.name);
+    defer context.popScope();
+
+    for (decl.params) |*param| {
+        self.resolveVarDecl(param, context);
+    }
+
+    if (decl.body) |*body| {
+        if (!std.mem.eql(u8, "_global", scope.tag)) {
+            self.errors.append(self.allocator, .{
+                .lineIndex = decl.lineIndex,
+                .type = .NestedFunction,
+            }) catch allocError();
+        } else self.resolveBlockIdentifiers(body, context);
     }
 }
 
 fn resolveVarDecl(self: *Semantic, decl: *VarDecl, context: *Context) void {
     const name = decl.name;
     if (context.getScope().identifiers.get(name)) |entry| {
+        std.debug.print("{s} {any}\n", .{name, context.*.getScope().identifiers.get(name)});
         if (entry.fromCurrentScope) {
             self.errors.append(self.allocator, .{ .lineIndex = decl.lineIndex, .type = .Redeclaration, .name = name }) catch allocError();
             return;
         }
     }
-    decl.tag = self.generateUnique(context.scope, name);
+    decl.name = self.generateUnique(context.getScope().tag, name);
+    decl.tag = decl.name;
     context.*.getScopeMut().identifiers.put(name, .{ .unique = decl.tag.? }) catch allocError();
 
     if (decl.init) |*initExpr| {
         self.resolveExpression(initExpr, context);
+    }
+}
+
+fn resolveBlockIdentifiers(self: *Semantic, block: *Block, context: *Context) void {
+    for (block.items) |*item| {
+        switch (item.*) {
+            .Statement => |*stmt| self.identifierResolutionPass(stmt, context),
+            .Declaration => |*decl| self.resolveDeclaration(decl, context),
+        }
+    }
+}
+
+fn resolveBlockLabels(self: *Semantic, block: *Block, context: *Context) void {
+    for (block.items) |*item| {
+        switch (item.*) {
+            .Statement => |*stmt| self.labelResolutionPass(stmt, context),
+            .Declaration => {},
+        }
     }
 }
 
@@ -107,28 +159,23 @@ fn resolveVarDecl(self: *Semantic, decl: *VarDecl, context: *Context) void {
 ///   2) collect all declared labels into a map structure for resolution in pass 2 (since
 ///      labels may be used before they're declared, i.e. gotos)
 ///   3) collect all individual cases into their respective switch statements for use in TAC gen
-fn resolveStatement1P(self: *Semantic, statement: *Statement, context: *Context) void {
+fn identifierResolutionPass(self: *Semantic, statement: *Statement, context: *Context) void {
     switch (statement.*) {
         .Compound => |*compound| {
-            compound.*.tag = self.generateUnique(context.scope, "block");
+            compound.*.tag = self.generateUnique(context.getScope().tag, "compound");
 
             context.pushScope(.Block, compound.tag.?);
             defer context.popScope();
 
-            for (compound.items) |*item| {
-                switch (item.*) {
-                    .Statement => |*stmt| self.resolveStatement1P(stmt, context),
-                    .Declaration => |*decl| self.resolveDeclaration(decl, context),
-                }
-            }
+            self.resolveBlockIdentifiers(compound, context);
         },
         .Return => |*ret| self.resolveExpression(&ret.expr, context),
         .Expression => |*expr| self.resolveExpression(expr, context),
         .If => |*ifStmt| {
             self.resolveExpression(&ifStmt.condition, context);
-            self.resolveStatement1P(ifStmt.thenStmt, context);
+            self.identifierResolutionPass(ifStmt.thenStmt, context);
             if (ifStmt.elseStmt) |*elseStmt| {
-                self.resolveStatement1P(elseStmt.*, context);
+                self.identifierResolutionPass(elseStmt.*, context);
             }
         },
         .Label => |*lbl| {
@@ -139,11 +186,11 @@ fn resolveStatement1P(self: *Semantic, statement: *Statement, context: *Context)
                     return;
                 }
             }
-            lbl.*.tag = self.generateUnique(context.scope, name);
+            lbl.*.tag = self.generateUnique(context.getScope().tag, name);
             context.labels.put(name, .{ .unique = lbl.tag.? }) catch allocError();
 
 
-            self.resolveStatement1P(lbl.body, context);
+            self.identifierResolutionPass(lbl.body, context);
         },
         .Break => |*brk| if (context.getBreakTag()) |tag| {
             brk.tag = tag;
@@ -151,30 +198,28 @@ fn resolveStatement1P(self: *Semantic, statement: *Statement, context: *Context)
             self.errors.append(self.allocator, .{ .lineIndex = brk.lineIndex, .type = .Break }) catch allocError();
         },
         .Continue => |*cont| if (context.getContinueTag()) |tag| {
-            if (std.mem.indexOf(u8, tag, "switch")) |_| {
-                self.errors.append(self.allocator, .{ .lineIndex = cont.lineIndex, .type = .Continue }) catch allocError();
-            } else cont.tag = tag;
+            cont.tag = tag;
         } else {
             self.errors.append(self.allocator, .{ .lineIndex = cont.lineIndex, .type = .Continue }) catch allocError();
         },
         .DoWhile => |*doWhl| {
-            doWhl.tag = self.generateUnique(context.scope, "doWhile");
+            doWhl.tag = self.generateUnique(context.getScope().tag, "doWhile");
 
             context.pushScope(.Loop, doWhl.tag.?);
 
-            self.resolveStatement1P(doWhl.body, context);
+            self.identifierResolutionPass(doWhl.body, context);
             self.resolveExpression(&doWhl.cond, context);
         },
         .While => |*whl| {
             self.resolveExpression(&whl.cond, context);
 
-            whl.*.tag = self.generateUnique(context.scope, "while");
+            whl.*.tag = self.generateUnique(context.getScope().tag, "while");
 
             context.pushScope(.Loop, whl.tag.?);
-            self.resolveStatement1P(whl.body, context);
+            self.identifierResolutionPass(whl.body, context);
         },
         .For => |*f| {
-            f.*.tag = self.generateUnique(context.scope, "for");
+            f.*.tag = self.generateUnique(context.getScope().tag, "for");
 
             context.pushScope(.Loop, f.tag.?);
             defer context.popScope();
@@ -188,20 +233,20 @@ fn resolveStatement1P(self: *Semantic, statement: *Statement, context: *Context)
             if (f.cond) |*cond| self.resolveExpression(cond, context);
             if (f.post) |*post| self.resolveExpression(post, context);
 
-            self.resolveStatement1P(f.body, context);
+            self.identifierResolutionPass(f.body, context);
         },
         .Goto, .Null => {}, // gotos are resolved on the second pass
         .Switch => |*swtch| {
             self.resolveExpression(&swtch.cond, context);
 
-            swtch.tag = self.generateUnique(context.scope, "switch");
+            swtch.tag = self.generateUnique(context.getScope().tag, "switch");
 
             context.pushScope(.Switch, swtch.tag.?);
             defer context.popScope();
 
             self.switches.put(swtch.tag.?, swtch) catch allocError();
 
-            self.resolveStatement1P(swtch.body, context);
+            self.identifierResolutionPass(swtch.body, context);
         },
         .Case => |*case| if (context.getSwitchTag()) |switchTag| {
             const cond = if (case.cond) |cond| cond.Constant else "default";
@@ -215,7 +260,7 @@ fn resolveStatement1P(self: *Semantic, statement: *Statement, context: *Context)
                 }) catch allocError();
             };
 
-            if (case.body) |body| self.resolveStatement1P(body, context);
+            if (case.body) |body| self.identifierResolutionPass(body, context);
         } else {
             self.errors.append(self.allocator, .{ .lineIndex = case.lineIndex, .type = .CaseOutside }) catch allocError();
         },
@@ -223,16 +268,9 @@ fn resolveStatement1P(self: *Semantic, statement: *Statement, context: *Context)
 }
 
 /// On second pass: resolve all labels to their unique names, using the map from the 1st pass
-fn resolveStatement2P(self: *Semantic, statement: *Statement, context: *Context) void {
+fn labelResolutionPass(self: *Semantic, statement: *Statement, context: *Context) void {
     switch (statement.*) {
-        .Compound => |*compound| {
-            for (compound.items) |*item| {
-                switch (item.*) {
-                    .Statement => |*stmt| self.resolveStatement2P(stmt, context),
-                    .Declaration => {},
-                }
-            }
-        },
+        .Compound => |*compound| self.resolveBlockLabels(compound, context),
         .Goto => |*goto| {
             if (context.labels.get(goto.*.target)) |entry| {
                 goto.*.target = entry.unique;
@@ -241,15 +279,15 @@ fn resolveStatement2P(self: *Semantic, statement: *Statement, context: *Context)
             }
         },
         .If => |*ifStmt| {
-            self.resolveStatement2P(ifStmt.thenStmt, context);
-            if (ifStmt.elseStmt) |*elseStmt| self.resolveStatement2P(elseStmt.*, context);
+            self.labelResolutionPass(ifStmt.thenStmt, context);
+            if (ifStmt.elseStmt) |*elseStmt| self.labelResolutionPass(elseStmt.*, context);
         },
-        .Switch => |*swtch| self.resolveStatement2P(swtch.body, context),
-        .Case => |*case| if (case.body) |body| self.resolveStatement2P(body, context),
-        .Label => |*label| self.resolveStatement2P(label.body, context),
-        .DoWhile, => |*loop| self.resolveStatement2P(loop.body, context),
-        .For, => |*loop| self.resolveStatement2P(loop.body, context),
-        .While => |*loop| self.resolveStatement2P(loop.body, context),
+        .Switch => |*swtch| self.labelResolutionPass(swtch.body, context),
+        .Case => |*case| if (case.body) |body| self.labelResolutionPass(body, context),
+        .Label => |*label| self.labelResolutionPass(label.body, context),
+        .DoWhile, => |*loop| self.labelResolutionPass(loop.body, context),
+        .For, => |*loop| self.labelResolutionPass(loop.body, context),
+        .While => |*loop| self.labelResolutionPass(loop.body, context),
         else => {},
     }
 }
@@ -294,7 +332,13 @@ fn resolveExpression(self: *Semantic, expr: *Expression, context: *Context) void
         },
         .FunctionCall => |*func| {
             const scope = context.getScope();
-            if (scope.identifiers.contains(func.name)) {
+            if (scope.identifiers.get(func.name)) |*entry| {
+                // The 'name' and 'unique' attributes should be the same for
+                // externally linked identifiers in a valid program, but may
+                // differ for invalid (e.g. calling a variable identifier as
+                // a function). This will be detected during type-checking
+                func.name = entry.unique;
+
                 for (func.args) |*arg| {
                     self.resolveExpression(arg, context);
                 }
@@ -318,6 +362,7 @@ pub fn reportAnyErrors(self: Semantic, lines: [][]const u8) void {
                 .CaseDuplicate => std.log.err("Duplicate 'case' or 'default'", .{}),
                 .Continue => std.log.err("'continue' statement outside of loop statement", .{}),
                 .NotAssignable => std.log.err("Expression is not an assignable lvalue", .{}),
+                .NestedFunction => std.log.err("Function definitions may only exist at the top level", .{}),
                 .Redeclaration => std.log.err("Redeclaration of '{s}'", .{err.name.?}),
                 .UndeclaredIdentifier => std.log.err("Use of undeclared identifier '{s}'", .{err.name.?}),
             }
