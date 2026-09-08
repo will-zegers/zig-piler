@@ -25,90 +25,20 @@ const Stage = enum(usize) {
     }
 };
 
-fn usage() noreturn {
-    std.log.info(
-        \\usage: zig-piler [options] file
-        \\        -h, --help    Print this help message
-        \\        -d, --debug   Output debug information
-        \\  Only one of the following flags should be used to specify where the compiler
-        \\  should stop. Otherwise, it will use the last flag given in the command
-        \\        --lex         Tokenize the input
-        \\        --parse       Parse input tokens (no semantic analysis)
-        \\        --validate    Parse with semantic analysis
-        \\        --tacky       Generate intermediate representation
-        \\        --codegen     Generate output from the assembler
-        \\        -S            Produce only the source file, don't compile
-        \\        -c            Run all stages and compile to .o library
-        \\        -e            (default) Run all stages and compile to executable
-    , .{});
-
-    std.process.exit(0);
-}
-
 pub fn main(init: std.process.Init) !void {
     const allocator = init.gpa;
 
-    var args = try init.minimal.args.iterateAllocator(allocator);
-    defer args.deinit();
+    const args = processArgs(init);
+    const debug = args.debug;
+    const stage = args.stage;
+    const inputFile = args.inputFile;
 
-    var inputFile: []const u8 = "";
-    var debug = false;
-
-    var stage: Stage = .ToExecutable;
-    _ = args.skip(); // skip the executable name
-    while (args.next()) |arg| {
-        if (mem.eql(u8, "-h", arg) or mem.eql(u8, "--help", arg))
-            usage()
-        else if (mem.eql(u8, "-d", arg) or mem.eql(u8, "--debug", arg))
-            debug = true
-        else if (mem.eql(u8, "--lex", arg))
-            stage = .Lex
-        else if (mem.eql(u8, "--parse", arg))
-            stage = .Parse
-        else if (mem.eql(u8, "--validate", arg))
-            stage = .Validate
-        else if (mem.eql(u8, "--tacky", arg))
-            stage = .TACky
-        else if (mem.eql(u8, "--codegen", arg))
-            stage = .CodeGen
-        else if (mem.eql(u8, "-S", arg))
-            stage = .ToSource
-        else if (mem.eql(u8, "-c", arg))
-            stage = .ToLibrary
-        else if (mem.eql(u8, "-e", arg))
-            stage = .ToExecutable
-        else
-            inputFile = arg;
-    }
-
-    if (inputFile.len == 0) usage();
-    std.Io.Dir.cwd().access(init.io, inputFile, .{}) catch |e| switch (e) {
-        error.FileNotFound => {
-            std.log.err("{s}: No such file or directory", .{inputFile});
-            std.process.exit(1);
-        },
-        else => return e,
-    };
-
-    const outputBinary: []const u8 = try getOutputBinary(allocator, inputFile);
-    defer allocator.free(outputBinary);
-
-    const outputSource = try allocator.print("{s}.s", .{outputBinary});
-    defer allocator.free(outputSource);
-
-    const text = try std.Io.Dir.cwd().readFileAlloc(init.io, inputFile, allocator, .unlimited);
-    const textZ = try allocator.dupeSentinel(u8, text, 0);
-    defer allocator.free(textZ);
-    allocator.free(text);
-
-    var list: std.ArrayList([]const u8) = .empty;
-
-    var it = std.mem.splitScalar(u8, textZ, '\n');
-    while (it.next()) |line| {
-        try list.append(allocator, line);
-    }
-    const lines = try list.toOwnedSlice(allocator);
-    defer allocator.free(lines);
+    const files = try processFiles(allocator, init.io, inputFile);
+    defer files.deinit(allocator);
+    const text = files.text;
+    const lines = files.lines;
+    const outputSrc = files.outputSrc;
+    const outputBin = files.outputBin;
 
     var tokens: Lexer.Token.Iterator = undefined;
     var ast: Parser.AST = undefined;
@@ -126,7 +56,7 @@ pub fn main(init: std.process.Init) !void {
         var lexer = try Lexer.init(allocator);
         defer lexer.deinit();
 
-        tokens = try lexer.tokenize(textZ);
+        tokens = try lexer.tokenize(text);
 
         if (debug) {
             std.debug.print("-------tokens-------\n", .{});
@@ -184,36 +114,141 @@ pub fn main(init: std.process.Init) !void {
     } else return;
 
     if (stage.includes(.ToSource)) {
-        std.log.info("Writing source to '{s}'", .{outputSource});
+        std.log.info("Writing source to '{s}'", .{outputSrc});
         var ce = try CodeEmitter.init(allocator, assembly);
         defer ce.deinit();
-        try ce.writeToFile(init.io, outputSource);
+        try ce.writeToFile(init.io, outputSrc);
     } else return;
 
     if (stage.includes(.ToExecutable) or stage.includes(.ToLibrary)) {
         var cmd = if (stage == .ToLibrary)
-            try std.process.spawn(init.io, .{ .argv = &.{ "gcc", "-c", outputSource, "-o", outputBinary } })
+            try std.process.spawn(init.io, .{ .argv = &.{ "gcc", "-c", outputSrc, "-o", outputBin } })
         else
-            try std.process.spawn(init.io, .{ .argv = &.{ "gcc", outputSource, "-o", outputBinary } });
+            try std.process.spawn(init.io, .{ .argv = &.{ "gcc", outputSrc, "-o", outputBin } });
 
         const status = try cmd.wait(init.io);
         if (status.exited != 0) {
-            std.log.err("Failed to compile {s}", .{outputBinary});
+            std.log.err("Failed to compile {s}", .{outputBin});
             std.process.exit(status.exited);
         } else {
-            std.log.info("'{s}' successfully compiled!", .{outputBinary});
+            std.log.info("'{s}' successfully compiled!", .{outputBin});
         }
     }
 }
 
+const Args = struct {
+    debug: bool = false,
+    stage: Stage = .ToExecutable,
+    inputFile: []const u8 = "",
+};
+
+fn processArgs(init: std.process.Init) Args {
+    var args: Args = .{};
+
+    var argsIt = try init.minimal.args.iterateAllocator(init.gpa);
+    defer argsIt.deinit();
+
+    _ = argsIt.skip(); // skip the executable name
+    while (argsIt.next()) |arg| {
+        if (mem.eql(u8, "-h", arg) or mem.eql(u8, "--help", arg))
+            usage()
+        else if (mem.eql(u8, "-d", arg) or mem.eql(u8, "--debug", arg))
+            args.debug = true
+        else if (mem.eql(u8, "--lex", arg))
+            args.stage = .Lex
+        else if (mem.eql(u8, "--parse", arg))
+            args.stage = .Parse
+        else if (mem.eql(u8, "--validate", arg))
+            args.stage = .Validate
+        else if (mem.eql(u8, "--tacky", arg))
+            args.stage = .TACky
+        else if (mem.eql(u8, "--codegen", arg))
+            args.stage = .CodeGen
+        else if (mem.eql(u8, "-S", arg))
+            args.stage = .ToSource
+        else if (mem.eql(u8, "-c", arg))
+            args.stage = .ToLibrary
+        else if (mem.eql(u8, "-e", arg))
+            args.stage = .ToExecutable
+        else
+            args.inputFile = arg;
+    }
+
+    if (args.inputFile.len == 0) usage();
+
+    return args;
+}
+
+fn usage() noreturn {
+    std.log.info(
+        \\usage: zig-piler [options] file
+        \\        -h, --help    Print this help message
+        \\        -d, --debug   Output debug information
+        \\  Only one of the following flags should be used to specify where the compiler
+        \\  should stop. Otherwise, it will use the last flag given in the command
+        \\        --lex         Tokenize the input
+        \\        --parse       Parse input tokens (no semantic analysis)
+        \\        --validate    Parse with semantic analysis
+        \\        --tacky       Generate intermediate representation
+        \\        --codegen     Generate output from the assembler
+        \\        -S            Produce only the source file, don't compile
+        \\        -c            Run all stages and compile to .o library
+        \\        -e            (default) Run all stages and compile to executable
+    , .{});
+
+    std.process.exit(0);
+}
+
+const Files = struct {
+    text: [:0]const u8,
+    lines: [][]const u8,
+    outputSrc: []const u8,
+    outputBin: []const u8,
+
+    pub fn deinit(self: Files, allocator: std.mem.Allocator) void {
+        allocator.free(self.text);
+        allocator.free(self.lines);
+        allocator.free(self.outputSrc);
+        allocator.free(self.outputBin);
+    }
+};
+
+/// Based on the provided input file, gather up all the necessary input (text
+/// that will be fed to the lexer, a list of file lines for error reporting)
+/// and names for output files (binary and source .s files)
+fn processFiles(
+    allocator: std.mem.Allocator,
+    io: std.Io,
+    inputFile: []const u8,
+) !Files {
+    const rawText = try std.Io.Dir.cwd().readFileAlloc(io, inputFile, allocator, .unlimited);
+    defer allocator.free(rawText);
+
+    const text = try allocator.dupeSentinel(u8, rawText, 0);
+
+    const outputBin: []const u8 = try getOutputBinary(allocator, inputFile);
+    const outputSrc = try allocator.print("{s}.s", .{outputBin});
+
+    var it = std.mem.splitScalar(u8, text, '\n');
+    var list: std.ArrayList([]const u8) = .empty;
+    while (it.next()) |line| {
+        try list.append(allocator, line);
+    }
+    const lines = try list.toOwnedSlice(allocator);
+
+    return .{ .text = text, .lines = lines, .outputSrc = outputSrc, .outputBin = outputBin };
+}
+
+/// Based on the input file name, generate an output binary name based on the last
+/// position of '.' (e.g. compiled output for "myprogram.c" will be "myprogram")
 fn getOutputBinary(allocator: std.mem.Allocator, inputFile: []const u8) ![]const u8 {
-    var outputBinary = inputFile;
+    var outputBin = inputFile;
     for (1..inputFile.len + 1) |i| {
         const backIndex = inputFile.len - i;
         if (inputFile[backIndex] == '.') {
-            outputBinary = inputFile[0..backIndex];
+            outputBin = inputFile[0..backIndex];
             break;
         }
     }
-    return try allocator.print("{s}", .{outputBinary});
+    return try allocator.print("{s}", .{outputBin});
 }
