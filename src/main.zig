@@ -46,7 +46,7 @@ pub fn main(init: std.process.Init) !void {
     var assembly: Assembler.AST = undefined;
     defer {
         if (stage.includes(.Lex)) tokens.deinit();
-        if (stage.includes(.Parse)) ast.deinit();
+        if (stage.includes(.Parse)) ast.deinit(allocator);
         if (stage.includes(.TACky)) tac.deinit();
         if (stage.includes(.CodeGen)) assembly.deinit();
     }

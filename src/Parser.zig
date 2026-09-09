@@ -27,8 +27,8 @@ pub const AST = struct {
     allocator: Allocator,
     tree: Program,
 
-    pub fn deinit(self: *AST) void {
-        self.tree.deinit();
+    pub fn deinit(self: *AST, allocator: Allocator) void {
+        self.tree.deinit(allocator);
     }
 };
 
@@ -44,7 +44,6 @@ pub fn parse(allocator: Allocator, tokens: *TokenIterator) ParsingError!AST {
 }
 
 pub const Program = struct {
-    allocator: Allocator,
     functions: []FunDecl,
 
     pub fn init(allocator: Allocator, tokens: *TokenIterator) ParsingError!Program {
@@ -52,14 +51,14 @@ pub const Program = struct {
         while (!tokens.eofReached()) {
             functions.append(allocator, try .parse(allocator, tokens)) catch allocError();
         }
-        return .{ .allocator = allocator, .functions = functions.toOwnedSlice(allocator) catch allocError() };
+        return .{ .functions = functions.toOwnedSlice(allocator) catch allocError() };
     }
 
-    pub fn deinit(self: *Program) void {
+    pub fn deinit(self: *Program, allocator: Allocator) void {
         for (self.functions) |*function| {
-            function.deinit();
+            function.deinit(allocator);
         }
-        self.allocator.free(self.functions);
+        allocator.free(self.functions);
     }
 };
 
@@ -80,16 +79,15 @@ pub const Declaration = union(DeclarationTag) {
         };
     }
 
-    pub fn deinit(self: *Declaration) void {
+    pub fn deinit(self: *Declaration, allocator: Allocator) void {
         switch (self.*) {
-            .FunDecl => self.*.FunDecl.deinit(),
-            .VarDecl => self.*.VarDecl.deinit(),
+            .FunDecl => self.*.FunDecl.deinit(allocator),
+            .VarDecl => self.*.VarDecl.deinit(allocator),
         }
     }
 };
 
 pub const FunDecl = struct {
-    allocator: Allocator,
     lineIndex: usize,
     name: identifier,
     params: []VarDecl,
@@ -113,18 +111,18 @@ pub const FunDecl = struct {
             break :blk null;
         };
 
-        return .{ .allocator = allocator, .name = name.symbol, .params = params, .body = body, .lineIndex = token.lineIndex };
+        return .{ .name = name.symbol, .params = params, .body = body, .lineIndex = token.lineIndex };
     }
 
-    pub fn deinit(self: *FunDecl) void {
+    pub fn deinit(self: *FunDecl, allocator: Allocator) void {
         if (self.body) |*body| {
-            body.deinit();
+            body.deinit(allocator);
         }
 
         for (self.params) |*param| {
-            param.deinit();
+            param.deinit(allocator);
         }
-        self.allocator.free(self.params);
+        allocator.free(self.params);
     }
 
     fn parseParamsList(allocator: Allocator, tokens: *TokenIterator) ParsingError![]VarDecl {
@@ -149,7 +147,6 @@ pub const FunDecl = struct {
 };
 
 pub const VarDecl = struct {
-    allocator: Allocator,
     lineIndex: usize,
     name: identifier,
     init: ?Expression = null,
@@ -163,7 +160,7 @@ pub const VarDecl = struct {
         const init = try Assignment.fromDecl(allocator, tokens);
         try expect(.Semicolon, tokens.next());
 
-        return .{ .allocator = allocator, .lineIndex = token.lineIndex, .name = token.symbol, .init = init };
+        return .{ .lineIndex = token.lineIndex, .name = token.symbol, .init = init };
     }
 
     pub fn asParam(allocator: Allocator, tokens: *TokenIterator) ParsingError!VarDecl {
@@ -174,12 +171,12 @@ pub const VarDecl = struct {
 
         const name = allocator.dupe(u8, token.symbol) catch allocError();
 
-        return .{ .allocator = allocator, .lineIndex = token.lineIndex, .name = name };
+        return .{ .lineIndex = token.lineIndex, .name = name };
     }
 
-    pub fn deinit(self: *VarDecl) void {
-        self.allocator.free(self.name);
-        if (self.*.init) |*init| Expression.deinit(init);
+    pub fn deinit(self: *VarDecl, allocator: Allocator) void {
+        allocator.free(self.name);
+        if (self.*.init) |*init| Expression.deinit(init, allocator);
     }
 };
 
@@ -196,16 +193,15 @@ pub const BlockItem = union(BlockItemTag) {
             .{ .Statement = try .parse(allocator, tokens) };
     }
 
-    pub fn deinit(self: *BlockItem) void {
+    pub fn deinit(self: *BlockItem, allocator: Allocator) void {
         switch (self.*) {
-            .Statement => |*statement| Statement.deinit(statement),
-            .Declaration => |*decl| Declaration.deinit(decl),
+            .Statement => |*statement| Statement.deinit(statement, allocator),
+            .Declaration => |*decl| Declaration.deinit(decl, allocator),
         }
     }
 };
 
 pub const Block = struct {
-    allocator: Allocator,
     tag: ?[]const u8 = null,
     items: []BlockItem,
 
@@ -220,17 +216,16 @@ pub const Block = struct {
         try expect(.CloseBrace, tokens.next());
 
         const items = blockList.toOwnedSlice(allocator) catch allocError();
-        return .{ .allocator = allocator, .items = items };
+        return .{ .items = items };
     }
 
-    pub fn deinit(self: *Block) void {
-        if (self.tag) |tag| self.allocator.free(tag);
-
-        defer self.allocator.free(self.items);
+    pub fn deinit(self: *Block, allocator: Allocator) void {
+        if (self.tag) |tag| allocator.free(tag);
 
         for (self.items) |*item| {
-            item.deinit();
+            item.deinit(allocator);
         }
+        allocator.free(self.items);
     }
 };
 
@@ -261,7 +256,6 @@ pub const Continue = struct {
 };
 
 pub const DoWhile = struct {
-    allocator: Allocator,
     tag: ?[]const u8 = null, // this will get set during semantic analysis
     body: *Statement,
     cond: Expression,
@@ -277,16 +271,16 @@ pub const DoWhile = struct {
         const cond = try Expression.parse(allocator, tokens, 0); // cond will be parsed in the '(' <expr> ')' form
         try expect(.Semicolon, tokens.peek());
 
-        return .{ .allocator = allocator, .body = body, .cond = cond };
+        return .{ .body = body, .cond = cond };
     }
 
-    pub fn deinit(self: *DoWhile) void {
-        if (self.tag) |tag| self.allocator.free(tag);
+    pub fn deinit(self: *DoWhile, allocator: Allocator) void {
+        if (self.tag) |tag| allocator.free(tag);
 
-        Statement.deinit(self.body);
-        self.allocator.destroy(self.body);
+        Statement.deinit(self.body, allocator);
+        allocator.destroy(self.body);
 
-        Expression.deinit(&self.cond);
+        Expression.deinit(&self.cond, allocator);
     }
 };
 
@@ -310,16 +304,16 @@ const ForInit = union(ForInitTag) {
         };
     }
 
-    pub fn deinit(self: *ForInit) void {
+    pub fn deinit(self: *ForInit, allocator: Allocator) void {
         switch (self.*) {
-            .Expression => if (self.*.Expression) |*expr| Expression.deinit(expr),
-            .Declaration => |*decl| Declaration.deinit(decl),
+            // TODO:
+            .Expression => if (self.*.Expression) |*expr| Expression.deinit(expr, allocator),
+            .Declaration => |*decl| Declaration.deinit(decl, allocator),
         }
     }
 };
 
 pub const For = struct {
-    allocator: Allocator,
     tag: ?[]const u8 = null, // this will get set during semantic analysis
     init: ForInit,
     cond: ?Expression,
@@ -343,23 +337,22 @@ pub const For = struct {
         const body = allocator.create(Statement) catch allocError();
         body.* = try Statement.parse(allocator, tokens);
 
-        return .{ .allocator = allocator, .init = init, .cond = cond, .post = post, .body = body };
+        return .{ .init = init, .cond = cond, .post = post, .body = body };
     }
 
-    pub fn deinit(self: *For) void {
-        if (self.tag) |tag| self.allocator.free(tag);
+    pub fn deinit(self: *For, allocator: Allocator) void {
+        if (self.tag) |tag| allocator.free(tag);
 
-        self.init.deinit();
-        if (self.cond) |*cond| Expression.deinit(cond);
-        if (self.post) |*post| Expression.deinit(post);
+        self.init.deinit(allocator);
+        if (self.cond) |*cond| Expression.deinit(cond, allocator);
+        if (self.post) |*post| Expression.deinit(post, allocator);
 
-        Statement.deinit(self.body);
-        self.allocator.destroy(self.body);
+        Statement.deinit(self.body, allocator);
+        allocator.destroy(self.body);
     }
 };
 
 pub const While = struct {
-    allocator: Allocator,
     tag: ?[]const u8 = null, // this will get set during semantic analysis
     cond: Expression,
     body: *Statement,
@@ -372,16 +365,16 @@ pub const While = struct {
         const body = allocator.create(Statement) catch allocError();
         body.* = try Statement.parse(allocator, tokens);
 
-        return .{ .allocator = allocator, .cond = cond, .body = body };
+        return .{ .cond = cond, .body = body };
     }
 
-    pub fn deinit(self: *While) void {
-        if (self.tag) |tag| self.allocator.free(tag);
+    pub fn deinit(self: *While, allocator: Allocator) void {
+        if (self.tag) |tag| allocator.free(tag);
 
-        Expression.deinit(&self.cond);
+        Expression.deinit(&self.cond, allocator);
 
-        Statement.deinit(self.body);
-        self.allocator.destroy(self.body);
+        Statement.deinit(self.body, allocator);
+        allocator.destroy(self.body);
     }
 };
 
@@ -403,7 +396,6 @@ pub const Goto = struct {
 };
 
 pub const If = struct {
-    allocator: Allocator,
     condition: Expression,
     thenStmt: *Statement,
     elseStmt: ?*Statement,
@@ -427,25 +419,22 @@ pub const If = struct {
         }
         // no need to check for close parenthesis, since it's handled by the expression parser
 
-        return .{ .allocator = allocator, .condition = condition, .thenStmt = thenStmt, .elseStmt = elseStmt };
+        return .{ .condition = condition, .thenStmt = thenStmt, .elseStmt = elseStmt };
     }
 
-    pub fn deinit(self: *If) void {
-        defer {
-            self.allocator.destroy(self.thenStmt);
-        }
+    pub fn deinit(self: *If, allocator: Allocator) void {
+        defer allocator.destroy(self.thenStmt);
 
-        Expression.deinit(&self.condition);
-        Statement.deinit(self.thenStmt);
+        Expression.deinit(&self.condition, allocator);
+        Statement.deinit(self.thenStmt, allocator);
         if (self.elseStmt) |*elseStmt| {
-            defer self.allocator.destroy(elseStmt.*);
-            Statement.deinit(elseStmt.*);
+            defer allocator.destroy(elseStmt.*);
+            Statement.deinit(elseStmt.*, allocator);
         }
     }
 };
 
 pub const Switch = struct {
-    allocator: Allocator,
     tag: ?[]const u8 = null,
     cond: Expression,
     body: *Statement,
@@ -461,10 +450,10 @@ pub const Switch = struct {
         const body = allocator.create(Statement) catch allocError();
         body.* = try Statement.parse(allocator, tokens);
 
-        return .{ .allocator = allocator, .cond = cond, .body = body };
+        return .{ .cond = cond, .body = body };
     }
 
-    pub fn addCase(self: *Switch, case: *Case) ParsingError!void {
+    pub fn addCase(self: *Switch, allocator: Allocator, case: *Case) ParsingError!void {
         for (self.cases.items) |child| { // ensure this is not a duplicate case
             if (std.mem.eql(u8, child.tag.?, case.*.tag.?)) return ParsingError.DuplicateCase;
         }
@@ -472,24 +461,23 @@ pub const Switch = struct {
         // a case with no conditional signifies a default statement
         if (case.cond == null) self.defaultTag = case.tag;
 
-        self.cases.append(self.allocator, case) catch allocError();
+        self.cases.append(allocator, case) catch allocError();
     }
 
-    pub fn deinit(self: *Switch) void {
-        if (self.tag) |tag| self.allocator.free(tag);
+    pub fn deinit(self: *Switch, allocator: Allocator) void {
+        if (self.tag) |tag| allocator.free(tag);
 
-        Expression.deinit(&self.cond);
+        Expression.deinit(&self.cond, allocator);
 
-        Statement.deinit(self.body);
-        self.allocator.destroy(self.body);
+        Statement.deinit(self.body, allocator);
+        allocator.destroy(self.body);
 
         // Case statement entries in '.cases' already delloc'd in the body dealloc
-        self.cases.deinit(self.allocator);
+        self.cases.deinit(allocator);
     }
 };
 
 pub const Case = struct {
-    allocator: Allocator,
     lineIndex: usize,
     tag: ?[]const u8 = null,
     cond: ?Expression,
@@ -518,25 +506,24 @@ pub const Case = struct {
             body.?.* = try Statement.parse(allocator, tokens);
         }
 
-        return .{ .allocator = allocator, .lineIndex = lineIndex, .cond = cond, .body = body };
+        return .{ .lineIndex = lineIndex, .cond = cond, .body = body };
     }
 
-    pub fn deinit(self: *Case) void {
-        if (self.tag) |tag| self.allocator.free(tag);
+    pub fn deinit(self: *Case, allocator: Allocator) void {
+        if (self.tag) |tag| allocator.free(tag);
 
         if (self.cond) |*cond| {
-            Expression.deinit(cond);
+            Expression.deinit(cond, allocator);
         }
 
         if (self.body) |body| {
-            Statement.deinit(body);
-            self.allocator.destroy(body);
+            Statement.deinit(body, allocator);
+            allocator.destroy(body);
         }
     }
 };
 
 pub const Label = struct {
-    allocator: Allocator,
     lineIndex: usize,
     name: []const u8,
     tag: ?[]const u8 = null,
@@ -549,32 +536,31 @@ pub const Label = struct {
         const body = allocator.create(Statement) catch allocError();
         body.* = try Statement.parse(allocator, tokens);
 
-        return .{ .allocator = allocator, .name = name.symbol, .body = body, .lineIndex = name.lineIndex };
+        return .{ .name = name.symbol, .body = body, .lineIndex = name.lineIndex };
     }
 
-    pub fn deinit(self: *Label) void {
-        if (self.tag) |tag| self.allocator.free(tag);
+    pub fn deinit(self: *Label, allocator: Allocator) void {
+        if (self.tag) |tag| allocator.free(tag);
 
-        defer self.allocator.destroy(self.body);
-        Statement.deinit(self.body);
+        defer allocator.destroy(self.body);
+        Statement.deinit(self.body, allocator);
     }
 };
 
 pub const Return = struct {
-    allocator: Allocator,
     expr: Expression,
 
     pub fn parse(allocator: Allocator, tokens: *TokenIterator) ParsingError!Return {
         try expect(.Return, tokens.next());
         const expr = try Expression.parse(allocator, tokens, 0);
-        const self: Return = .{ .allocator = allocator, .expr = expr };
+        const self: Return = .{ .expr = expr };
         try expect(.Semicolon, tokens.next());
 
         return self;
     }
 
-    pub fn deinit(self: *Return) void {
-        Expression.deinit(&self.expr);
+    pub fn deinit(self: *Return, allocator: Allocator) void {
+        Expression.deinit(&self.expr, allocator);
     }
 };
 
@@ -631,19 +617,20 @@ pub const Statement = union(StatementTag) {
         };
     }
 
-    pub fn deinit(statement: *Statement) void {
+    // TODO:
+    pub fn deinit(statement: *Statement, allocator: Allocator) void {
         switch (statement.*) {
-            .Compound => statement.*.Compound.deinit(),
-            .DoWhile => statement.*.DoWhile.deinit(),
-            .Expression => Expression.deinit(&statement.*.Expression),
-            .For => statement.*.For.deinit(),
-            .If => statement.*.If.deinit(),
-            .Label => statement.*.Label.deinit(),
+            .Compound => statement.*.Compound.deinit(allocator),
+            .DoWhile => statement.*.DoWhile.deinit(allocator),
+            .Expression => Expression.deinit(&statement.*.Expression, allocator),
+            .For => statement.*.For.deinit(allocator),
+            .If => statement.*.If.deinit(allocator),
+            .Label => statement.*.Label.deinit(allocator),
             .Null, .Goto => {},
-            .Return => statement.*.Return.deinit(),
-            .While => statement.*.While.deinit(),
-            .Switch => statement.*.Switch.deinit(),
-            .Case => statement.*.Case.deinit(),
+            .Return => statement.*.Return.deinit(allocator),
+            .While => statement.*.While.deinit(allocator),
+            .Switch => statement.*.Switch.deinit(allocator),
+            .Case => statement.*.Case.deinit(allocator),
             .Break, .Continue => {},
         }
     }

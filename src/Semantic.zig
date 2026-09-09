@@ -248,7 +248,7 @@ fn identifierResolutionPass(self: *Semantic, statement: *Statement, context: *Co
             case.*.tag = self.allocator.print("{s}.{s}", .{switchTag, cond}) catch allocError();
 
             const parentSwitch = self.switches.get(switchTag) orelse unreachable;
-            parentSwitch.*.addCase(case) catch self.reportError(.{ .lineIndex = case.lineIndex, .type = .CaseDuplicate, });
+            parentSwitch.*.addCase(self.allocator, case) catch self.reportError(.{ .lineIndex = case.lineIndex, .type = .CaseDuplicate, });
 
             if (case.body) |body| self.identifierResolutionPass(body, context);
         } else {

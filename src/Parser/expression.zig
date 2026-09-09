@@ -82,14 +82,14 @@ pub const Expression = union(ExpressionTag) {
         return left;
     }
 
-    pub fn deinit(expr: *Expression) void {
+    pub fn deinit(expr: *Expression, allocator: Allocator) void {
         switch (expr.*) {
             .Constant, .Var => {},
-            .Unary => expr.*.Unary.deinit(),
-            .Binary => expr.*.Binary.deinit(),
-            .Assignment => expr.*.Assignment.deinit(),
-            .Ternary => expr.*.Ternary.deinit(),
-            .FunctionCall => expr.*.FunctionCall.deinit(),
+            .Unary => expr.*.Unary.deinit(allocator),
+            .Binary => expr.*.Binary.deinit(allocator),
+            .Assignment => expr.*.Assignment.deinit(allocator),
+            .Ternary => expr.*.Ternary.deinit(allocator),
+            .FunctionCall => expr.*.FunctionCall.deinit(allocator),
         }
     }
 };
@@ -152,7 +152,6 @@ pub const Unary = struct {
         .{ "--", .Dec },
     });
 
-    allocator: Allocator,
     operator: Operator,
     operand: *Expression,
     type: enum { Pre, Post },
@@ -165,7 +164,7 @@ pub const Unary = struct {
         operand.* = right;
 
         const operator: Operator = OperatorMap.get(token.symbol) orelse return unexpectedToken(token);
-        return .{ .allocator = allocator, .operator = operator, .operand = operand, .type = .Post, .lineIndex = token.lineIndex };
+        return .{ .operator = operator, .operand = operand, .type = .Post, .lineIndex = token.lineIndex };
     }
 
     pub fn initPre(allocator: Allocator, token: Token, left: Expression) ParsingError!Unary {
@@ -173,13 +172,13 @@ pub const Unary = struct {
         operand.* = left;
 
         const operator: Operator = OperatorMap.get(token.symbol) orelse return unexpectedToken(token);
-        return .{ .allocator = allocator, .operator = operator, .operand = operand, .type = .Pre, .lineIndex = token.lineIndex };
+        return .{ .operator = operator, .operand = operand, .type = .Pre, .lineIndex = token.lineIndex };
     }
 
-    pub fn deinit(self: *Unary) void {
-        defer self.allocator.destroy(self.operand);
+    pub fn deinit(self: *Unary, allocator: Allocator) void {
+        defer allocator.destroy(self.operand);
 
-        Expression.deinit(self.operand);
+        Expression.deinit(self.operand, allocator);
     }
 };
 
@@ -226,7 +225,6 @@ pub const Binary = struct {
         .{ "^", .Xor },
     });
 
-    allocator: Allocator,
     operator: Operator,
     left: *Expression,
     right: *Expression,
@@ -240,15 +238,15 @@ pub const Binary = struct {
         const rightPtr = allocator.create(Expression) catch allocError();
         rightPtr.* = right;
 
-        return .{ .allocator = allocator, .operator = operator, .left = leftPtr, .right = rightPtr };
+        return .{ .operator = operator, .left = leftPtr, .right = rightPtr };
     }
 
-    pub fn deinit(self: Binary) void {
-        defer self.allocator.destroy(self.left);
-        defer self.allocator.destroy(self.right);
+    pub fn deinit(self: Binary, allocator: Allocator) void {
+        defer allocator.destroy(self.left);
+        defer allocator.destroy(self.right);
 
-        Expression.deinit(self.left);
-        Expression.deinit(self.right);
+        Expression.deinit(self.left, allocator);
+        Expression.deinit(self.right, allocator);
     }
 };
 
@@ -266,7 +264,6 @@ pub const Assignment = struct {
         .{ "^=", Binary.Operator.Xor },
     });
 
-    allocator: Allocator,
     operator: ?Binary.Operator,
     lhs: *Expression,
     rhs: *Expression,
@@ -284,15 +281,15 @@ pub const Assignment = struct {
         const rhsPtr = allocator.create(Expression) catch allocError();
         rhsPtr.* = rhs;
 
-        return .{ .allocator = allocator, .operator = operator, .lhs = lhsPtr, .rhs = rhsPtr, .lineIndex = token.lineIndex };
+        return .{ .operator = operator, .lhs = lhsPtr, .rhs = rhsPtr, .lineIndex = token.lineIndex };
     }
 
-    pub fn deinit(self: Assignment) void {
-        defer self.allocator.destroy(self.lhs);
-        defer self.allocator.destroy(self.rhs);
+    pub fn deinit(self: Assignment, allocator: Allocator) void {
+        defer allocator.destroy(self.lhs);
+        defer allocator.destroy(self.rhs);
 
-        Expression.deinit(self.lhs);
-        Expression.deinit(self.rhs);
+        Expression.deinit(self.lhs, allocator);
+        Expression.deinit(self.rhs, allocator);
     }
 
     pub fn fromDecl(allocator: Allocator, tokens: *TokenIterator) ParsingError!?Expression {
@@ -311,7 +308,6 @@ pub const Assignment = struct {
 };
 
 pub const Ternary = struct {
-    allocator: Allocator,
     condition: *Expression,
     thenStmt: *Expression,
     elseStmt: *Expression,
@@ -326,22 +322,21 @@ pub const Ternary = struct {
         const elseStmt = allocator.create(Expression) catch allocError();
         elseStmt.* = right;
 
-        return .{ .allocator = allocator, .condition = condition, .thenStmt = thenStmt, .elseStmt = elseStmt };
+        return .{ .condition = condition, .thenStmt = thenStmt, .elseStmt = elseStmt };
     }
 
-    pub fn deinit(self: *Ternary) void {
-        defer self.allocator.destroy(self.condition);
-        defer self.allocator.destroy(self.thenStmt);
-        defer self.allocator.destroy(self.elseStmt);
+    pub fn deinit(self: *Ternary, allocator: Allocator) void {
+        defer allocator.destroy(self.condition);
+        defer allocator.destroy(self.thenStmt);
+        defer allocator.destroy(self.elseStmt);
 
-        Expression.deinit(self.condition);
-        Expression.deinit(self.thenStmt);
-        Expression.deinit(self.elseStmt);
+        Expression.deinit(self.condition, allocator);
+        Expression.deinit(self.thenStmt, allocator);
+        Expression.deinit(self.elseStmt, allocator);
     }
 };
 
 pub const FunctionCall = struct {
-    allocator: Allocator,
     lineIndex: usize,
     name: identifier,
     args: []Expression,
@@ -353,14 +348,14 @@ pub const FunctionCall = struct {
         const args = try parseArgumentList(allocator, tokens);
         try expect(.CloseParenthesis, tokens.next());
 
-        return .{ .allocator = allocator, .lineIndex = name.lineIndex, .name = name.symbol, .args = args };
+        return .{ .lineIndex = name.lineIndex, .name = name.symbol, .args = args };
     }
 
-    pub fn deinit(self: *FunctionCall) void {
+    pub fn deinit(self: *FunctionCall, allocator: Allocator) void {
         for (self.args) |*arg| {
-            Expression.deinit(arg);
+            Expression.deinit(arg, allocator);
         }
-        self.allocator.free(self.args);
+        allocator.free(self.args);
     }
 
     fn parseArgumentList(allocator: Allocator, tokens: *TokenIterator) ParsingError![]Expression {
