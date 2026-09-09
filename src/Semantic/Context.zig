@@ -1,6 +1,8 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 
+const Switch = @import("../Parser.zig").Switch;
+
 const Context = @This();
 
 const Entry = struct {
@@ -19,7 +21,7 @@ const ScopeType = enum {
     Switch,
 };
 
-const Scope = struct {
+pub const Scope = struct {
     type: ScopeType,
     identifiers: IdentifierMap,
     tag: []const u8,
@@ -28,6 +30,8 @@ const Scope = struct {
 allocator: Allocator,
 labels: IdentifierMap,
 stack: std.ArrayList(Scope),
+switchTags: std.StringHashMap(*Switch),
+counter: usize = 0,
 
 pub fn init(allocator: Allocator) Context {
     var stack: std.ArrayList(Scope) = .empty;
@@ -37,15 +41,16 @@ pub fn init(allocator: Allocator) Context {
         .tag = "_global",
     }) catch allocError();
 
-    return .{ .allocator = allocator, .labels = .init(allocator), .stack = stack };
+    return .{ .allocator = allocator, .labels = .init(allocator), .stack = stack, .switchTags = .init(allocator) };
 }
 
 pub fn deinit(self: *Context) void {
-    defer self.stack.deinit(self.allocator);
     for (self.stack.items) |*scope| {
         scope.identifiers.deinit();
     }
     self.labels.deinit();
+    self.stack.deinit(self.allocator);
+    self.switchTags.deinit();
 }
 
 pub fn getScope(self: Context) Scope {
