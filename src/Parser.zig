@@ -81,8 +81,8 @@ pub const Declaration = union(DeclarationTag) {
 
     pub fn deinit(self: *Declaration, allocator: Allocator) void {
         switch (self.*) {
-            .FunDecl => self.*.FunDecl.deinit(allocator),
-            .VarDecl => self.*.VarDecl.deinit(allocator),
+            .FunDecl => self.FunDecl.deinit(allocator),
+            .VarDecl => self.VarDecl.deinit(allocator),
         }
     }
 };
@@ -176,7 +176,7 @@ pub const VarDecl = struct {
 
     pub fn deinit(self: *VarDecl, allocator: Allocator) void {
         allocator.free(self.name);
-        if (self.*.init) |*init| Expression.deinit(init, allocator);
+        if (self.init) |*init| Expression.deinit(init, allocator);
     }
 };
 
@@ -307,7 +307,7 @@ const ForInit = union(ForInitTag) {
     pub fn deinit(self: *ForInit, allocator: Allocator) void {
         switch (self.*) {
             // TODO:
-            .Expression => if (self.*.Expression) |*expr| Expression.deinit(expr, allocator),
+            .Expression => if (self.Expression) |*expr| Expression.deinit(expr, allocator),
             .Declaration => |*decl| Declaration.deinit(decl, allocator),
         }
     }
@@ -455,7 +455,7 @@ pub const Switch = struct {
 
     pub fn addCase(self: *Switch, allocator: Allocator, case: *Case) ParsingError!void {
         for (self.cases.items) |child| { // ensure this is not a duplicate case
-            if (std.mem.eql(u8, child.tag.?, case.*.tag.?)) return ParsingError.DuplicateCase;
+            if (std.mem.eql(u8, child.tag.?, case.tag.?)) return ParsingError.DuplicateCase;
         }
 
         // a case with no conditional signifies a default statement
@@ -617,20 +617,19 @@ pub const Statement = union(StatementTag) {
         };
     }
 
-    // TODO:
     pub fn deinit(statement: *Statement, allocator: Allocator) void {
         switch (statement.*) {
-            .Compound => statement.*.Compound.deinit(allocator),
-            .DoWhile => statement.*.DoWhile.deinit(allocator),
-            .Expression => Expression.deinit(&statement.*.Expression, allocator),
-            .For => statement.*.For.deinit(allocator),
-            .If => statement.*.If.deinit(allocator),
-            .Label => statement.*.Label.deinit(allocator),
+            .Compound => statement.Compound.deinit(allocator),
+            .DoWhile => statement.DoWhile.deinit(allocator),
+            .Expression => Expression.deinit(&statement.Expression, allocator),
+            .For => statement.For.deinit(allocator),
+            .If => statement.If.deinit(allocator),
+            .Label => statement.Label.deinit(allocator),
             .Null, .Goto => {},
-            .Return => statement.*.Return.deinit(allocator),
-            .While => statement.*.While.deinit(allocator),
-            .Switch => statement.*.Switch.deinit(allocator),
-            .Case => statement.*.Case.deinit(allocator),
+            .Return => statement.Return.deinit(allocator),
+            .While => statement.While.deinit(allocator),
+            .Switch => statement.Switch.deinit(allocator),
+            .Case => statement.Case.deinit(allocator),
             .Break, .Continue => {},
         }
     }

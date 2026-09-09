@@ -85,11 +85,11 @@ pub const Expression = union(ExpressionTag) {
     pub fn deinit(expr: *Expression, allocator: Allocator) void {
         switch (expr.*) {
             .Constant, .Var => {},
-            .Unary => expr.*.Unary.deinit(allocator),
-            .Binary => expr.*.Binary.deinit(allocator),
-            .Assignment => expr.*.Assignment.deinit(allocator),
-            .Ternary => expr.*.Ternary.deinit(allocator),
-            .FunctionCall => expr.*.FunctionCall.deinit(allocator),
+            .Unary => expr.Unary.deinit(allocator),
+            .Binary => expr.Binary.deinit(allocator),
+            .Assignment => expr.Assignment.deinit(allocator),
+            .Ternary => expr.Ternary.deinit(allocator),
+            .FunctionCall => expr.FunctionCall.deinit(allocator),
         }
     }
 };

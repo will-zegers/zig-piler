@@ -97,8 +97,8 @@ pub fn getSwitchTag(self: Context) ?[]const u8 {
 pub fn pushScope(self: *Context, scopeType: ScopeType, tag: []const u8) void {
     const identifiers = self.getScope().identifiers.clone() catch allocError();
     var it = identifiers.valueIterator();
-    while (it.next()) |*entry| {
-        entry.*.fromCurrentScope = false;
+    while (it.next()) |entry| {
+        entry.fromCurrentScope = false;
     }
 
     self.stack.append(self.allocator, .{

@@ -236,10 +236,10 @@ pub const Function = struct {
                 const dst: Val = .{ .Var = self.nextTag() };
 
                 for (swtch.cases.items) |case| {
-                    if (case.*.cond) |cond| { // ignore 'default' for now
+                    if (case.cond) |cond| { // ignore 'default' for now
                         const e = try self.emitExpression(cond);
                         try self.body.append(self.allocator, .{ .Binary = .{ .operator = .Eq, .src1 = c, .src2 = e, .dst = dst } });
-                        try self.body.append(self.allocator, .{ .JumpIfNotZero = .{ .condition = dst, .target = case.*.tag.? } });
+                        try self.body.append(self.allocator, .{ .JumpIfNotZero = .{ .condition = dst, .target = case.tag.? } });
                     }
                 }
                 // jump to the default statement if one exists, else to the end of the switch statement

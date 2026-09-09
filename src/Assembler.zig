@@ -130,7 +130,7 @@ pub const Function = struct {
 
     fn replaceIfPseudo(map: *std.StringHashMap(isize), stackPointer: *isize, operand: *Operand) void {
         if (operand.* == .Pseudo) {
-            const key = operand.*.Pseudo;
+            const key = operand.Pseudo;
             if (map.get(key) == null) {
                 map.put(key, stackPointer.*) catch allocError();
                 stackPointer.* -= WORD_SIZE;

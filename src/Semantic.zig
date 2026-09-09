@@ -82,15 +82,15 @@ fn resolveDeclaration(self: *Semantic, decl: *Declaration, context: *Context) vo
 }
 
 fn resolveFunDecl(self: *Semantic, decl: *FunDecl, context: *Context) void {
-    const scope = context.*.getScopeMut();
-    if (scope.*.identifiers.get(decl.name)) |entry| {
+    const scope = context.getScopeMut();
+    if (scope.identifiers.get(decl.name)) |entry| {
         if (entry.fromCurrentScope and !entry.hasLinkage) {
             self.reportError(.{ .lineIndex = decl.lineIndex, .type = .Redeclaration, .name = decl.name });
             return;
         }
     }
 
-    scope.*.identifiers.put(decl.name, .{
+    scope.identifiers.put(decl.name, .{
         .unique = decl.name,
         .fromCurrentScope = true,
         .hasLinkage = true
@@ -124,7 +124,7 @@ fn resolveVarDecl(self: *Semantic, decl: *VarDecl, context: *Context) void {
 
     decl.name = self.generateUnique(context.getScope().tag, name); // add a unique tag to the name
     // add the parsed name and now unique name as a key-value pair
-    context.*.getScopeMut().identifiers.put(name, .{ .unique = decl.name }) catch allocError();
+    context.getScopeMut().identifiers.put(name, .{ .unique = decl.name }) catch allocError();
 
     if (decl.init) |*initExpr| {
         self.resolveExpression(initExpr, context);
@@ -157,7 +157,7 @@ fn resolveBlockLabels(self: *Semantic, block: *Block, context: *Context) void {
 fn identifierResolutionPass(self: *Semantic, statement: *Statement, context: *Context) void {
     switch (statement.*) {
         .Compound => |*compound| {
-            compound.*.tag = self.generateUnique(context.getScope().tag, "compound");
+            compound.tag = self.generateUnique(context.getScope().tag, "compound");
 
             context.pushScope(.Block, compound.tag.?);
             defer context.popScope();
@@ -181,7 +181,7 @@ fn identifierResolutionPass(self: *Semantic, statement: *Statement, context: *Co
                     return;
                 }
             }
-            lbl.*.tag = self.generateUnique(context.getScope().tag, name);
+            lbl.tag = self.generateUnique(context.getScope().tag, name);
             context.labels.put(name, .{ .unique = lbl.tag.? }) catch allocError();
 
 
@@ -208,13 +208,13 @@ fn identifierResolutionPass(self: *Semantic, statement: *Statement, context: *Co
         .While => |*whl| {
             self.resolveExpression(&whl.cond, context);
 
-            whl.*.tag = self.generateUnique(context.getScope().tag, "while");
+            whl.tag = self.generateUnique(context.getScope().tag, "while");
 
             context.pushScope(.Loop, whl.tag.?);
             self.identifierResolutionPass(whl.body, context);
         },
         .For => |*f| {
-            f.*.tag = self.generateUnique(context.getScope().tag, "for");
+            f.tag = self.generateUnique(context.getScope().tag, "for");
 
             context.pushScope(.Loop, f.tag.?);
             defer context.popScope();
@@ -245,10 +245,10 @@ fn identifierResolutionPass(self: *Semantic, statement: *Statement, context: *Co
         },
         .Case => |*case| if (context.getSwitchTag()) |switchTag| {
             const cond = if (case.cond) |cond| cond.Constant else "default";
-            case.*.tag = self.allocator.print("{s}.{s}", .{switchTag, cond}) catch allocError();
+            case.tag = self.allocator.print("{s}.{s}", .{switchTag, cond}) catch allocError();
 
             const parentSwitch = self.switches.get(switchTag) orelse unreachable;
-            parentSwitch.*.addCase(self.allocator, case) catch self.reportError(.{ .lineIndex = case.lineIndex, .type = .CaseDuplicate, });
+            parentSwitch.addCase(self.allocator, case) catch self.reportError(.{ .lineIndex = case.lineIndex, .type = .CaseDuplicate, });
 
             if (case.body) |body| self.identifierResolutionPass(body, context);
         } else {
@@ -262,10 +262,10 @@ fn labelResolutionPass(self: *Semantic, statement: *Statement, context: *Context
     switch (statement.*) {
         .Compound => |*compound| self.resolveBlockLabels(compound, context),
         .Goto => |*goto| {
-            if (context.labels.get(goto.*.target)) |entry| {
-                goto.*.target = entry.unique;
+            if (context.labels.get(goto.target)) |entry| {
+                goto.target = entry.unique;
             } else {
-                self.reportError(.{ .lineIndex = goto.*.lineIndex, .type = .UndeclaredIdentifier, .name = goto.*.target });
+                self.reportError(.{ .lineIndex = goto.lineIndex, .type = .UndeclaredIdentifier, .name = goto.target });
             }
         },
         .If => |*ifStmt| {
@@ -297,10 +297,10 @@ fn resolveExpression(self: *Semantic, expr: *Expression, context: *Context) void
             self.resolveExpression(binary.right, context);
         },
         .Var => |*v| {
-            if (context.getScope().identifiers.get(v.*.name)) |entry| {
-                v.*.name = entry.unique;
+            if (context.getScope().identifiers.get(v.name)) |entry| {
+                v.name = entry.unique;
             } else {
-                self.reportError(.{ .lineIndex = v.*.lineIndex, .type = .UndeclaredIdentifier, .name = v.*.name });
+                self.reportError(.{ .lineIndex = v.lineIndex, .type = .UndeclaredIdentifier, .name = v.name });
             }
         },
         .Unary => |unary| {
