@@ -1,6 +1,8 @@
 const std = @import("std");
-const Io = std.Io;
 const mem = std.mem;
+const Allocator = mem.Allocator;
+const ArrayList = std.ArrayList;
+const Io = std.Io;
 
 const Debugger = @import("Debugger.zig");
 const Lexer = @import("Lexer.zig");
@@ -203,7 +205,7 @@ const Files = struct {
     outputSrc: []const u8,
     outputBin: []const u8,
 
-    pub fn deinit(self: Files, allocator: std.mem.Allocator) void {
+    pub fn deinit(self: Files, allocator: Allocator) void {
         allocator.free(self.text);
         allocator.free(self.lines);
         allocator.free(self.outputSrc);
@@ -215,7 +217,7 @@ const Files = struct {
 /// that will be fed to the lexer, a list of file lines for error reporting)
 /// and names for output files (binary and source .s files)
 fn processFiles(
-    allocator: std.mem.Allocator,
+    allocator: Allocator,
     io: std.Io,
     inputFile: []const u8,
 ) !Files {
@@ -227,8 +229,8 @@ fn processFiles(
     const outputBin: []const u8 = try getOutputBinary(allocator, inputFile);
     const outputSrc = try allocator.print("{s}.s", .{outputBin});
 
-    var it = std.mem.splitScalar(u8, text, '\n');
-    var list: std.ArrayList([]const u8) = .empty;
+    var it = mem.splitScalar(u8, text, '\n');
+    var list: ArrayList([]const u8) = .empty;
     while (it.next()) |line| {
         try list.append(allocator, line);
     }
@@ -239,7 +241,7 @@ fn processFiles(
 
 /// Based on the input file name, generate an output binary name based on the last
 /// position of '.' (e.g. compiled output for "myprogram.c" will be "myprogram")
-fn getOutputBinary(allocator: std.mem.Allocator, inputFile: []const u8) ![]const u8 {
+fn getOutputBinary(allocator: Allocator, inputFile: []const u8) ![]const u8 {
     var outputBin = inputFile;
     for (1..inputFile.len + 1) |i| {
         const backIndex = inputFile.len - i;

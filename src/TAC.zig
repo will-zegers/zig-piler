@@ -1,7 +1,6 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const ArrayList = std.ArrayList;
-const fmt = std.fmt;
 
 const Parser = @import("Parser.zig");
 const instruction = @import("TAC/instruction.zig");
@@ -48,7 +47,7 @@ const Program = struct {
     functions: []Function,
 
     pub fn init(allocator: Allocator, ast: Parser.AST) Program {
-        var functions: std.ArrayList(Function) = .empty;
+        var functions: ArrayList(Function) = .empty;
         for (ast.tree.functions) |function| {
             functions.append(allocator, .init(allocator, function)) catch allocError();
         }

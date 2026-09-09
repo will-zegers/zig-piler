@@ -1,9 +1,10 @@
 // zig fmt: off
 const std = @import("std");
-const builtin = @import("builtin");
-const Io = std.Io;
-const Allocator = std.mem.Allocator;
+const mem = std.mem;
+const Allocator = mem.Allocator;
 const ArrayList = std.ArrayList;
+const Io = std.Io;
+const builtin = @import("builtin");
 
 const Assembler = @import("Assembler.zig");
 
@@ -208,7 +209,7 @@ fn getOperandString(allocator: Allocator, operand: Assembler.Operand) []const u8
 }
 
 pub fn writeToFile(self: CodeEmitter, io: Io, outputPath: []const u8) !void {
-    const instructions = try std.mem.join(self.allocator, "\n", self.instructions.items);
+    const instructions = try mem.join(self.allocator, "\n", self.instructions.items);
     defer self.allocator.free(instructions);
 
     const outputFile = try Io.Dir.cwd().createFile(io, outputPath, .{ .read = false });

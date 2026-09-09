@@ -1,6 +1,7 @@
 // zig fmt: off
 const std = @import("std");
-const Allocator = std.mem.Allocator;
+const mem = std.mem;
+const Allocator = mem.Allocator;
 
 const Parser = @import("Parser.zig");
 const Block = Parser.Block;
@@ -99,7 +100,7 @@ fn resolveFunDecl(self: *Semantic, context: *Context, decl: *FunDecl) void {
     }
 
     if (decl.body) |*body| {
-        if (!std.mem.eql(u8, "_global", scope.tag)) {
+        if (!mem.eql(u8, "_global", scope.tag)) {
             self.reportError(.{ .lineIndex = decl.lineIndex, .type = .NestedFunction });
             return;
         }

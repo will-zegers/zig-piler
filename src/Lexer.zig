@@ -99,7 +99,7 @@ pub fn tokenize(self: *Lexer, text: [:0]const u8) !TokenIterator {
                 switch (remainingText[1]) {
                     '/', '*' => { // comment
                         const comment = self.reComment.exec(remainingText) orelse badToken(remainingText, lineIndex);
-                        lineIndex += std.mem.count(u8, comment, "\n"); // Update the line index to include the commented lines
+                        lineIndex += mem.count(u8, comment, "\n"); // Update the line index to include the commented lines
                         tokenStart += comment.len;
                         continue;
                     },

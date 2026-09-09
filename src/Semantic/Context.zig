@@ -1,5 +1,6 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
+const ArrayList = std.ArrayList;
 
 const Switch = @import("../Parser.zig").Switch;
 
@@ -29,12 +30,12 @@ pub const Scope = struct {
 
 allocator: Allocator,
 labels: IdentifierMap,
-stack: std.ArrayList(Scope),
+stack: ArrayList(Scope),
 switchTags: std.StringHashMap(*Switch),
 counter: usize = 0,
 
 pub fn init(allocator: Allocator) Context {
-    var stack: std.ArrayList(Scope) = .empty;
+    var stack: ArrayList(Scope) = .empty;
     stack.append(allocator, .{
         .type = .Block,
         .identifiers = .init(allocator),

@@ -1,7 +1,7 @@
 const std = @import("std");
-const fmt = std.fmt;
 const mem = std.mem;
-const Allocator = std.mem.Allocator;
+const Allocator = mem.Allocator;
+const ArrayList = std.ArrayList;
 
 const Token = @import("../Lexer.zig").Token;
 const TokenIterator = Token.Iterator;
@@ -359,7 +359,7 @@ pub const FunctionCall = struct {
     }
 
     fn parseArgumentList(allocator: Allocator, tokens: *TokenIterator) ParsingError![]Expression {
-        var args: std.ArrayList(Expression) = .empty;
+        var args: ArrayList(Expression) = .empty;
 
         var nextToken = tokens.peek();
         if (nextToken.type != .CloseParenthesis) {

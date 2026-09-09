@@ -1,7 +1,7 @@
 // zig fmt: off
 const std = @import("std");
-const ArrayList = std.ArrayList;
 const Allocator = std.mem.Allocator;
+const ArrayList = std.ArrayList;
 
 const TAC = @import("TAC.zig");
 
@@ -46,7 +46,7 @@ const Program = struct {
     functions: []Function,
 
     pub fn init(allocator: Allocator, program: TAC.Tacky) Program {
-        var functions: std.ArrayList(Function) = .empty;
+        var functions: ArrayList(Function) = .empty;
         for (program.functions) |function| {
             functions.append(allocator, .init(allocator, function)) catch allocError();
         }

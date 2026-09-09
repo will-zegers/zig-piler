@@ -47,7 +47,7 @@ pub const Program = struct {
     functions: []FunDecl,
 
     pub fn init(allocator: Allocator, tokens: *TokenIterator) ParsingError!Program {
-        var functions: std.ArrayList(FunDecl) = .empty;
+        var functions: ArrayList(FunDecl) = .empty;
         while (!tokens.eofReached()) {
             functions.append(allocator, try .parse(allocator, tokens)) catch allocError();
         }
@@ -126,7 +126,7 @@ pub const FunDecl = struct {
     }
 
     fn parseParamsList(allocator: Allocator, tokens: *TokenIterator) ParsingError![]VarDecl {
-        var params: std.ArrayList(VarDecl) = .empty;
+        var params: ArrayList(VarDecl) = .empty;
 
         var nextToken = tokens.peek();
         if (nextToken.type != .Void) {
@@ -455,7 +455,7 @@ pub const Switch = struct {
 
     pub fn addCase(self: *Switch, allocator: Allocator, case: *Case) ParsingError!void {
         for (self.cases.items) |child| { // ensure this is not a duplicate case
-            if (std.mem.eql(u8, child.tag.?, case.tag.?)) return ParsingError.DuplicateCase;
+            if (mem.eql(u8, child.tag.?, case.tag.?)) return ParsingError.DuplicateCase;
         }
 
         // a case with no conditional signifies a default statement
