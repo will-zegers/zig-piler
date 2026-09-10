@@ -12,6 +12,8 @@ const Statement = Parser.Statement;
 const Expression = Parser.Expression;
 const Switch = Parser.Switch;
 
+const LoopLabeler = @import("Semantic/LoopLabeler.zig");
+
 const Semantic = @This();
 
 const Context = @import("Semantic/Context.zig");
@@ -47,26 +49,13 @@ pub fn run(self: *Semantic, ast: *AST) void {
     defer context.deinit();
 
     resolveFirstPass(self, &context, ast);
-    resolveSecondPass(self, &context, ast);
+    LoopLabeler.run(context, ast);
 
     if (self.errorFlag) std.process.exit(1);
 }
 
 fn resolveFirstPass(self: *Semantic, context: *Context, ast: *AST) void {
     for (ast.tree.functions) |*function| self.resolveFunDecl(context, function);
-}
-
-fn resolveSecondPass(self: *Semantic, context: *Context, ast: *AST) void {
-    for (ast.tree.functions) |function| {
-        if (function.body) |body| {
-            for (body.items) |*block| {
-                switch (block.*) {
-                    .Statement => |*statement| self.labelResolutionPass(context, statement),
-                    else => {},
-                }
-            }
-        }
-    }
 }
 
 fn resolveDeclaration(self: *Semantic, context: *Context, decl: *Declaration) void {
@@ -131,15 +120,6 @@ fn resolveBlockIdentifiers(self: *Semantic, context: *Context, block: *Block) vo
         switch (item.*) {
             .Statement => |*stmt| self.resolveStatementIdentifiers(context, stmt),
             .Declaration => |*decl| self.resolveDeclaration(context, decl),
-        }
-    }
-}
-
-fn resolveBlockLabels(self: *Semantic, context: *Context, block: *Block) void {
-    for (block.items) |*item| {
-        switch (item.*) {
-            .Statement => |*stmt| self.labelResolutionPass(context, stmt),
-            .Declaration => {},
         }
     }
 }
@@ -248,31 +228,6 @@ fn resolveStatementIdentifiers(self: *Semantic, context: *Context, statement: *S
         } else {
             self.reportError(.{ .lineIndex = case.lineIndex, .type = .CaseOutside });
         },
-    }
-}
-
-/// On second pass: resolve all labels to their unique names, using the map from the 1st pass
-fn labelResolutionPass(self: *Semantic, context: *Context, statement: *Statement) void {
-    switch (statement.*) {
-        .Compound => |*compound| self.resolveBlockLabels(context, compound),
-        .Goto => |*goto| {
-            if (context.labels.get(goto.target)) |entry| {
-                goto.target = entry.unique;
-            } else {
-                self.reportError(.{ .lineIndex = goto.lineIndex, .type = .UndeclaredIdentifier, .name = goto.target });
-            }
-        },
-        .If => |*ifStmt| {
-            self.labelResolutionPass(context, ifStmt.thenStmt);
-            if (ifStmt.elseStmt) |*elseStmt| self.labelResolutionPass(context, elseStmt.*);
-        },
-        .Switch => |*swtch| self.labelResolutionPass(context, swtch.body),
-        .Case => |*case| if (case.body) |body| self.labelResolutionPass(context, body),
-        .Label => |*label| self.labelResolutionPass(context, label.body),
-        .DoWhile, => |*loop| self.labelResolutionPass(context, loop.body),
-        .For, => |*loop| self.labelResolutionPass(context, loop.body),
-        .While => |*loop| self.labelResolutionPass(context, loop.body),
-        else => {},
     }
 }
 
