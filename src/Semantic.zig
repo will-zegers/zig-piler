@@ -13,6 +13,7 @@ const Expression = Parser.Expression;
 const Switch = Parser.Switch;
 
 const LoopLabeler = @import("Semantic/LoopLabeler.zig");
+const TypeChecker = @import("Semantic/TypeChecker.zig");
 
 const Semantic = @This();
 
@@ -50,6 +51,7 @@ pub fn run(self: *Semantic, ast: *AST) void {
 
     resolveFirstPass(self, &context, ast);
     LoopLabeler.run(context, ast);
+    TypeChecker.run(self.allocator, ast);
 
     if (self.errorFlag) std.process.exit(1);
 }
