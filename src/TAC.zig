@@ -1,5 +1,6 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
+const ArenaAllocator = std.heap.ArenaAllocator;
 const ArrayList = std.ArrayList;
 
 const Parser = @import("Parser.zig");
@@ -21,23 +22,22 @@ const Tags = ArrayList([]const u8);
 const Instructions = ArrayList(Instruction);
 
 pub const Tacky = struct {
-    allocator: Allocator,
+    arena: ArenaAllocator,
     functions: []Function,
 
     pub fn deinit(self: *Tacky) void {
-        for (self.functions) |*function| {
-            function.deinit();
-        }
-        self.allocator.free(self.functions);
+        self.arena.deinit();
     }
 };
 
-allocator: Allocator,
-
 pub fn init(allocator: Allocator, ast: Parser.AST) Tacky {
-    const program: Program = .init(allocator, ast);
+    // This will include a lot of miscellaneous allocations for tags and labels, so
+    // just handle clean-up with an arena allocator instead of meticulous bookkeeping
+    var arena: ArenaAllocator = .init(allocator);
+    const program: Program = .init(arena.allocator(), ast);
+
     return .{
-        .allocator = allocator,
+        .arena = arena,
         .functions = program.functions,
     };
 }
@@ -53,26 +53,19 @@ const Program = struct {
         }
         return .{ .allocator = allocator, .functions = functions.toOwnedSlice(allocator) catch allocError() };
     }
-
-    pub fn deinit(self: *Program) void {
-        self.function.deinit();
-    }
 };
 
 pub const Function = struct {
     allocator: Allocator,
     name: []const u8,
     body: ArrayList(Instruction),
-    tags: Tags,
-    labels: Labels,
+    counter: usize = 0,
 
     pub fn init(allocator: Allocator, function: Parser.FunDecl) Function {
         var func: Function = .{
             .allocator = allocator,
             .name = function.name,
             .body = .empty,
-            .tags = .empty,
-            .labels = .empty,
         };
 
         if (function.body) |body| {
@@ -86,20 +79,6 @@ pub const Function = struct {
         func.body.append(allocator, .{ .Return = .{ .val = .{ .Constant = "0" } } }) catch allocError();
 
         return func;
-    }
-
-    pub fn deinit(self: *Function) void {
-        defer self.body.deinit(self.allocator);
-
-        for (self.tags.items) |item| {
-            self.allocator.free(item);
-        }
-        self.tags.deinit(self.allocator);
-
-        for (self.labels.items) |item| {
-            self.allocator.free(item);
-        }
-        self.labels.deinit(self.allocator);
     }
 
     fn emitDeclaration(self: *Function, decl: Parser.Declaration) void {
@@ -151,43 +130,36 @@ pub const Function = struct {
             .Goto => |goto| try self.body.append(self.allocator, .{ .Jump = .{ .target = goto.target } }),
             .Break => |b| {
                 const breakLabel = try self.allocator.print("{s}.break", .{b.tag.?});
-                try self.labels.append(self.allocator, breakLabel);
 
                 try self.body.append(self.allocator, .{ .Jump = .{ .target = breakLabel } });
             },
             .Continue => |c| {
                 const continueLabel = try self.allocator.print("{s}.continue", .{c.tag.?});
-                try self.labels.append(self.allocator, continueLabel);
 
                 try self.body.append(self.allocator, .{ .Jump = .{ .target = continueLabel } });
             },
             .DoWhile => |d| {
                 const startLabel = try self.allocator.print("{s}.start", .{d.tag.?});
-                try self.labels.append(self.allocator, startLabel);
                 try self.body.append(self.allocator, .{ .Label = .{ .identifier = startLabel } });
 
                 try self.emitStatement(d.body.*);
 
                 const continueLabel = try self.allocator.print("{s}.continue", .{d.tag.?});
-                try self.labels.append(self.allocator, continueLabel);
                 try self.body.append(self.allocator, .{ .Label = .{ .identifier = continueLabel } });
 
                 const e = try self.emitExpression(d.cond);
                 try self.body.append(self.allocator, .{ .JumpIfNotZero = .{ .condition = e, .target = startLabel } });
 
                 const breakLabel = try self.allocator.print("{s}.break", .{d.tag.?});
-                try self.labels.append(self.allocator, breakLabel);
                 try self.body.append(self.allocator, .{ .Label = .{ .identifier = breakLabel } });
             },
             .While => |w| {
                 const continueLabel = try self.allocator.print("{s}.continue", .{w.tag.?});
-                try self.labels.append(self.allocator, continueLabel);
                 try self.body.append(self.allocator, .{ .Label = .{ .identifier = continueLabel } });
 
                 const e = try self.emitExpression(w.cond);
 
                 const breakLabel = try self.allocator.print("{s}.break", .{w.tag.?});
-                try self.labels.append(self.allocator, breakLabel);
                 try self.body.append(self.allocator, .{ .JumpIfZero = .{ .condition = e, .target = breakLabel } });
 
                 try self.emitStatement(w.body.*);
@@ -203,11 +175,9 @@ pub const Function = struct {
                 }
 
                 const startLabel = try self.allocator.print("{s}.start", .{f.tag.?});
-                try self.labels.append(self.allocator, startLabel);
                 try self.body.append(self.allocator, .{ .Label = .{ .identifier = startLabel } });
 
                 const breakLabel = try self.allocator.print("{s}.break", .{f.tag.?});
-                try self.labels.append(self.allocator, breakLabel);
 
                 if (f.cond) |cond| {
                     const e = try self.emitExpression(cond);
@@ -219,7 +189,6 @@ pub const Function = struct {
                 try self.emitStatement(f.body.*);
 
                 const continueLabel = try self.allocator.print("{s}.continue", .{f.tag.?});
-                try self.labels.append(self.allocator, continueLabel);
                 try self.body.append(self.allocator, .{ .Label = .{ .identifier = continueLabel } });
 
                 if (f.post) |post| _ = try self.emitExpression(post);
@@ -229,7 +198,6 @@ pub const Function = struct {
             },
             .Switch => |swtch| {
                 const switchBreak = try self.allocator.print("{s}.break", .{swtch.tag.?});
-                try self.labels.append(self.allocator, switchBreak);
 
                 const c = try self.emitExpression(swtch.cond);
                 const dst: Val = .{ .Var = self.nextTag() };
@@ -382,14 +350,14 @@ pub const Function = struct {
     }
 
     fn nextTag(self: *Function) []u8 {
-        const tag = self.allocator.print("{s}.{d}", .{ self.name, self.tags.items.len }) catch allocError();
-        self.tags.append(self.allocator, tag) catch allocError();
+        const tag = self.allocator.print("{s}.{d}", .{ self.name, self.counter }) catch allocError();
+        self.counter += 1;
         return tag;
     }
 
     fn nextLabel(self: *Function, descr: []const u8) []u8 {
-        const label = self.allocator.print("{s}.{s}.{d}", .{ self.name, descr, self.labels.items.len }) catch allocError();
-        self.labels.append(self.allocator, label) catch allocError();
+        const label = self.allocator.print("{s}.{s}.{d}", .{ self.name, descr, self.counter }) catch allocError();
+        self.counter += 1;
         return label;
     }
 };
