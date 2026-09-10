@@ -50,10 +50,11 @@ pub fn run(self: *Semantic, ast: *AST) void {
     defer context.deinit();
 
     resolveFirstPass(self, &context, ast);
+    if (self.errorFlag) std.process.exit(1);
+
     LoopLabeler.run(context, ast);
     TypeChecker.run(self.allocator, ast);
 
-    if (self.errorFlag) std.process.exit(1);
 }
 
 fn resolveFirstPass(self: *Semantic, context: *Context, ast: *AST) void {
@@ -82,7 +83,6 @@ fn resolveFunDecl(self: *Semantic, context: *Context, decl: *FunDecl) void {
         .hasLinkage = true
     }) catch allocError();
 
-
     context.pushScope(.Function, decl.name);
     defer context.popScope();
 
@@ -101,6 +101,7 @@ fn resolveFunDecl(self: *Semantic, context: *Context, decl: *FunDecl) void {
 
 fn resolveVarDecl(self: *Semantic, context: *Context, decl: *VarDecl) void {
     const name = decl.name; // cache the parsed name
+
     if (context.getScope().identifiers.get(name)) |entry| {
         if (entry.fromCurrentScope) {
             self.reportError(.{ .lineIndex = decl.lineIndex, .type = .Redeclaration, .name = decl.name });
@@ -108,9 +109,9 @@ fn resolveVarDecl(self: *Semantic, context: *Context, decl: *VarDecl) void {
         }
     }
 
-    decl.name = self.generateUnique(context, name); // add a unique tag to the name
+    decl.unique = self.generateUnique(context, name); // add a unique tag to the name
     // add the parsed name and now unique name as a key-value pair
-    context.getScopeMut().identifiers.put(name, .{ .unique = decl.name }) catch allocError();
+    context.getScopeMut().identifiers.put(name, .{ .unique = decl.unique.? }) catch allocError();
 
     if (decl.init) |*initExpr| {
         self.resolveExpression(context, initExpr);
@@ -219,16 +220,18 @@ fn resolveStatementIdentifiers(self: *Semantic, context: *Context, statement: *S
 
             self.resolveStatementIdentifiers(context, swtch.body);
         },
-        .Case => |*case| if (context.getSwitchTag()) |switchTag| {
-            const cond = if (case.cond) |cond| cond.Constant else "default";
-            case.tag = self.allocator.print("{s}.{s}", .{switchTag, cond}) catch allocError();
+        .Case => |*case| {
+            if (context.getSwitchTag()) |switchTag| {
+                const cond = if (case.cond) |cond| cond.Constant else "default";
+                case.tag = self.allocator.print("{s}.{s}", .{switchTag, cond}) catch allocError();
 
-            const parentSwitch = context.switchTags.get(switchTag) orelse unreachable;
-            parentSwitch.addCase(self.allocator, case) catch self.reportError(.{ .lineIndex = case.lineIndex, .type = .CaseDuplicate, });
+                const parentSwitch = context.switchTags.get(switchTag) orelse unreachable;
+                parentSwitch.addCase(self.allocator, case) catch self.reportError(.{ .lineIndex = case.lineIndex, .type = .CaseDuplicate, });
 
-            if (case.body) |body| self.resolveStatementIdentifiers(context, body);
-        } else {
-            self.reportError(.{ .lineIndex = case.lineIndex, .type = .CaseOutside });
+                if (case.body) |body| self.resolveStatementIdentifiers(context, body);
+            } else {
+                self.reportError(.{ .lineIndex = case.lineIndex, .type = .CaseOutside });
+            }
         },
     }
 }

@@ -131,7 +131,7 @@ pub const FunDecl = struct {
         var nextToken = tokens.peek();
         if (nextToken.type != .Void) {
             while (true) {
-                params.append(allocator, try .asParam(allocator, tokens)) catch allocError();
+                params.append(allocator, try .asParam(tokens)) catch allocError();
 
                 nextToken = tokens.peek();
 
@@ -149,6 +149,7 @@ pub const FunDecl = struct {
 pub const VarDecl = struct {
     lineIndex: usize,
     name: identifier,
+    unique: ?identifier = null,
     init: ?Expression = null,
 
     pub fn parse(allocator: Allocator, tokens: *TokenIterator) ParsingError!VarDecl {
@@ -163,19 +164,19 @@ pub const VarDecl = struct {
         return .{ .lineIndex = token.lineIndex, .name = token.symbol, .init = init };
     }
 
-    pub fn asParam(allocator: Allocator, tokens: *TokenIterator) ParsingError!VarDecl {
+    pub fn asParam(tokens: *TokenIterator) ParsingError!VarDecl {
         try expect(.Int, tokens.next());
 
         const token = tokens.next();
         try expect(.Identifier, token);
 
-        const name = allocator.dupe(u8, token.symbol) catch allocError();
+        const name = token.symbol;
 
         return .{ .lineIndex = token.lineIndex, .name = name };
     }
 
     pub fn deinit(self: *VarDecl, allocator: Allocator) void {
-        allocator.free(self.name);
+        if (self.unique) |unique| allocator.free(unique);
         if (self.init) |*init| Expression.deinit(init, allocator);
     }
 };
