@@ -247,7 +247,7 @@ pub fn printTAC(ir: TAC.Tacky) void {
         print("  {any} (\n", .{@TypeOf(function)});
         print("    name: {s}\n", .{function.name});
         print("    body:\n", .{});
-        for (function.body.items) |instr| {
+        for (function.body) |instr| {
             print("      {s} (", .{@tagName(instr)});
             switch (instr) {
                 .Unary => |unary| {
@@ -315,6 +315,7 @@ pub fn printTAC(ir: TAC.Tacky) void {
                     }
                     print("label: {s})\n", .{jump.target});
                 },
+                .FunCall => {},
             }
         }
         print("    )\n", .{});

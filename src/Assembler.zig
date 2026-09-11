@@ -67,7 +67,7 @@ pub const Function = struct {
         var instrList: InstructionList = .empty;
 
         // First pass to build Assembly AST
-        for (function.body.items) |instr| {
+        for (function.body) |instr| {
             const assembly = switch (instr) {
                 .Unary => |unary| Unary.toAssembly(allocator, unary),
                 .Return => |ret| Ret.toAssembly(allocator, ret),
@@ -77,6 +77,7 @@ pub const Function = struct {
                 .JumpIfZero => JmpCC.toAssembly(allocator, instr),
                 .JumpIfNotZero => JmpCC.toAssembly(allocator, instr),
                 .Label => |label| Label.toAssembly(allocator, label),
+                .FunCall => unreachable,
             };
             defer allocator.free(assembly);
 

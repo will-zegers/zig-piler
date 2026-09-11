@@ -1,7 +1,7 @@
 const Parser = @import("../Parser.zig");
 
-const identifier = []const u8;
-const int = []const u8;
+pub const identifier = []const u8;
+pub const int = []const u8;
 
 const InstructionTag = enum {
     Binary,
@@ -12,6 +12,7 @@ const InstructionTag = enum {
     JumpIfZero,
     JumpIfNotZero,
     Label,
+    FunCall,
 };
 pub const Instruction = union(InstructionTag) {
     Binary: Binary,
@@ -22,6 +23,7 @@ pub const Instruction = union(InstructionTag) {
     JumpIfZero: JumpIfZero,
     JumpIfNotZero: JumpIfNotZero,
     Label: Label,
+    FunCall: FunCall,
 };
 
 pub const Return = struct {
@@ -57,6 +59,12 @@ pub const JumpIfZero = struct { condition: Val, target: []const u8 };
 pub const JumpIfNotZero = struct { condition: Val, target: []const u8 };
 
 pub const Label = struct { identifier: []const u8 };
+
+pub const FunCall = struct {
+    name: []const u8,
+    args: []Val,
+    dst: Val,
+};
 
 const ValTag = enum { Constant, Var };
 pub const Val = union(ValTag) {

@@ -14,6 +14,7 @@ pub const Jump = instr.Jump;
 pub const Label = instr.Label;
 pub const Return = instr.Return;
 pub const Unary = instr.Unary;
+const identifier = instr.identifier;
 const Val = instr.Val;
 
 pub const TAC = @This();
@@ -46,9 +47,11 @@ const Program = struct {
 
     pub fn emit(allocator: Allocator, ast: Parser.AST) Program {
         var functions: ArrayList(Function) = .empty;
-        for (ast.tree.functions) |function| {
-            functions.append(allocator, .emit(allocator, function)) catch allocError();
+        for (ast.tree.functions) |funDecl| {
+            const function = Function.emit(allocator, funDecl) catch allocError();
+            functions.append(allocator, function) catch allocError();
         }
+
         return .{ .allocator = allocator, .functions = functions.toOwnedSlice(allocator) catch allocError() };
     }
 };
@@ -60,19 +63,28 @@ const Context = struct {
 
 pub const Function = struct {
     name: []const u8,
-    body: ArrayList(Instruction),
+    params: []identifier,
+    body: []Instruction,
 
-    pub fn emit(allocator: Allocator, function: Parser.FunDecl) Function {
-        var context: Context = .{ .name = function.name, .counter = 0 };
-
+    pub fn emit(allocator: Allocator, function: Parser.FunDecl) !Function {
         var instructions: Instructions = .empty;
+
         if (function.body) |body| {
-            emitBlock(allocator, &context, &instructions, body) catch allocError();
+            var context: Context = .{ .name = function.name, .counter = 0 };
+            try emitBlock(allocator, &context, &instructions, body);
+        }
+        try instructions.append(allocator, .{ .Return = .{ .val = .{ .Constant = "0" } } });
+
+        var params = try ArrayList(identifier).initCapacity(allocator, function.params.len);
+        for (function.params) |param| {
+            try params.append(allocator, param.name);
         }
 
-        instructions.append(allocator, .{ .Return = .{ .val = .{ .Constant = "0" } } }) catch allocError();
-
-        return .{ .name = function.name, .body = instructions };
+        return .{
+            .name = function.name,
+            .params = try params.toOwnedSlice(allocator),
+            .body = try instructions.toOwnedSlice(allocator),
+        };
     }
 };
 
@@ -239,7 +251,7 @@ fn emitExpression(allocator: Allocator, context: *Context, instructions: *Instru
         .Binary => |binary| emitBinary(allocator, context, instructions, binary) catch allocError(),
         .Assignment => |assign| emitAssignment(allocator, context, instructions, assign) catch allocError(),
         .Ternary => |ternary| emitTernary(allocator, context, instructions, ternary) catch allocError(),
-        .FunctionCall => unreachable,
+        .FunctionCall => |funCall| emitFunCall(allocator, context, instructions, funCall) catch allocError(),
     };
 }
 
@@ -353,6 +365,18 @@ fn emitTernary(allocator: Allocator, context: *Context, instructions: *Instructi
         .{ .Copy = .{ .src = e2, .dst = dst } },
         .{ .Label = .{ .identifier = endLabel } },
     });
+
+    return dst;
+}
+
+fn emitFunCall(allocator: Allocator, context: *Context, instructions: *Instructions, funCall: Parser.FunctionCall) !Val {
+    const dst: Val = .{ .Var = nextTag(allocator, context) };
+
+    var args: ArrayList(Val) = try .initCapacity(allocator, funCall.args.len);
+    for (funCall.args) |arg| {
+        try args.append(allocator, emitExpression(allocator, context, instructions, arg));
+    }
+    try instructions.append(allocator, .{ .FunCall = .{ .name = funCall.name, .args = try args.toOwnedSlice(allocator), .dst = dst } });
 
     return dst;
 }
