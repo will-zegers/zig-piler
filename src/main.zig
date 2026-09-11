@@ -95,7 +95,7 @@ pub fn main(init: std.process.Init) !void {
 
     if (stage.includes(.TACky)) {
         std.log.info("Generating Tacky...", .{});
-        tac = TAC.init(allocator, ast);
+        tac = TAC.emit(allocator, ast);
 
         if (debug) {
             std.debug.print("-------TAC-------\n", .{});

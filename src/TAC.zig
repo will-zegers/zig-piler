@@ -4,16 +4,16 @@ const ArenaAllocator = std.heap.ArenaAllocator;
 const ArrayList = std.ArrayList;
 
 const Parser = @import("Parser.zig");
-const instruction = @import("TAC/instruction.zig");
+const instr = @import("TAC/instruction.zig");
 
-pub const Binary = instruction.Binary;
-pub const Copy = instruction.Copy;
-pub const Instruction = instruction.Instruction;
-pub const Jump = instruction.Jump;
-pub const Label = instruction.Label;
-pub const Return = instruction.Return;
-pub const Unary = instruction.Unary;
-const Val = instruction.Val;
+pub const Binary = instr.Binary;
+pub const Copy = instr.Copy;
+pub const Instruction = instr.Instruction;
+pub const Jump = instr.Jump;
+pub const Label = instr.Label;
+pub const Return = instr.Return;
+pub const Unary = instr.Unary;
+const Val = instr.Val;
 
 pub const TAC = @This();
 
@@ -30,337 +30,343 @@ pub const Tacky = struct {
     }
 };
 
-pub fn init(allocator: Allocator, ast: Parser.AST) Tacky {
-    // This will include a lot of miscellaneous allocations for tags and labels, so
-    // just handle clean-up with an arena allocator instead of meticulous bookkeeping
+pub fn emit(allocator: Allocator, ast: Parser.AST) Tacky {
+    // This will be doing a lot of miscellaneous allocations for tags and labels,
+    // so just handle clean-up with an arena instead of meticulous bookkeeping
     var arena: ArenaAllocator = .init(allocator);
-    const program: Program = .init(arena.allocator(), ast);
+    const program: Program = .emit(arena.allocator(), ast);
 
-    return .{
-        .arena = arena,
-        .functions = program.functions,
-    };
+    return .{ .arena = arena, .functions = program.functions };
 }
 
 const Program = struct {
     allocator: Allocator,
     functions: []Function,
 
-    pub fn init(allocator: Allocator, ast: Parser.AST) Program {
+    pub fn emit(allocator: Allocator, ast: Parser.AST) Program {
         var functions: ArrayList(Function) = .empty;
         for (ast.tree.functions) |function| {
-            functions.append(allocator, .init(allocator, function)) catch allocError();
+            functions.append(allocator, .emit(allocator, function)) catch allocError();
         }
         return .{ .allocator = allocator, .functions = functions.toOwnedSlice(allocator) catch allocError() };
     }
 };
 
+const Context = struct {
+    name: []const u8,
+    counter: usize = 0,
+};
+
 pub const Function = struct {
-    allocator: Allocator,
     name: []const u8,
     body: ArrayList(Instruction),
-    counter: usize = 0,
 
-    pub fn init(allocator: Allocator, function: Parser.FunDecl) Function {
-        var func: Function = .{
-            .allocator = allocator,
-            .name = function.name,
-            .body = .empty,
-        };
+    pub fn emit(allocator: Allocator, function: Parser.FunDecl) Function {
+        var context: Context = .{ .name = function.name, .counter = 0 };
 
+        var instructions: Instructions = .empty;
         if (function.body) |body| {
-            for (body.items) |blockItem| {
-                switch (blockItem) {
-                    .Declaration => |decl| func.emitDeclaration(decl),
-                    .Statement => |stmt| func.emitStatement(stmt) catch allocError(),
-                }
-            }
+            emitBlock(allocator, &context, &instructions, body) catch allocError();
         }
-        func.body.append(allocator, .{ .Return = .{ .val = .{ .Constant = "0" } } }) catch allocError();
 
-        return func;
-    }
+        instructions.append(allocator, .{ .Return = .{ .val = .{ .Constant = "0" } } }) catch allocError();
 
-    fn emitDeclaration(self: *Function, decl: Parser.Declaration) void {
-        switch (decl) {
-            .VarDecl => |varDecl| {
-                if (varDecl.init) |initExpr| {
-                    _ = self.emitExpression(initExpr) catch allocError();
-                }
-            },
-            .FunDecl => unreachable,
-        }
-    }
-
-    fn emitStatement(self: *Function, stmt: Parser.Statement) !void {
-        const context = self.name;
-        _ = context;
-        switch (stmt) {
-            .Compound => |compound| for (compound.items) |item| {
-                switch (item) {
-                    .Declaration => self.emitDeclaration(item.Declaration),
-                    .Statement => try self.emitStatement(item.Statement),
-                }
-            },
-            .Return => |ret| {
-                const val = self.emitExpression(ret.expr) catch allocError();
-                self.body.append(self.allocator, .{ .Return = .{ .val = val } }) catch allocError();
-            },
-            .Expression => |expr| _ = self.emitExpression(expr) catch allocError(),
-            .Null => {},
-            .If => |ifStmt| {
-                const elseLabel = self.nextLabel("else");
-                const endLabel = self.nextLabel("end");
-
-                const c = try self.emitExpression(ifStmt.condition);
-                try self.body.append(self.allocator, .{ .JumpIfZero = .{ .condition = c, .target = elseLabel } });
-
-                _ = try self.emitStatement(ifStmt.thenStmt.*);
-                try self.body.append(self.allocator, .{ .Jump = .{ .target = endLabel } });
-
-                try self.body.append(self.allocator, .{ .Label = .{ .identifier = elseLabel } });
-                if (ifStmt.elseStmt) |elseStmt| _ = try self.emitStatement(elseStmt.*);
-
-                try self.body.append(self.allocator, .{ .Label = .{ .identifier = endLabel } });
-            },
-            .Label => |lbl| {
-                try self.body.append(self.allocator, .{ .Label = .{ .identifier = lbl.tag.? } });
-                _ = try self.emitStatement(lbl.body.*);
-            },
-            .Goto => |goto| try self.body.append(self.allocator, .{ .Jump = .{ .target = goto.target } }),
-            .Break => |b| {
-                const breakLabel = try self.allocator.print("{s}.break", .{b.tag.?});
-
-                try self.body.append(self.allocator, .{ .Jump = .{ .target = breakLabel } });
-            },
-            .Continue => |c| {
-                const continueLabel = try self.allocator.print("{s}.continue", .{c.tag.?});
-
-                try self.body.append(self.allocator, .{ .Jump = .{ .target = continueLabel } });
-            },
-            .DoWhile => |d| {
-                const startLabel = try self.allocator.print("{s}.start", .{d.tag.?});
-                try self.body.append(self.allocator, .{ .Label = .{ .identifier = startLabel } });
-
-                try self.emitStatement(d.body.*);
-
-                const continueLabel = try self.allocator.print("{s}.continue", .{d.tag.?});
-                try self.body.append(self.allocator, .{ .Label = .{ .identifier = continueLabel } });
-
-                const e = try self.emitExpression(d.cond);
-                try self.body.append(self.allocator, .{ .JumpIfNotZero = .{ .condition = e, .target = startLabel } });
-
-                const breakLabel = try self.allocator.print("{s}.break", .{d.tag.?});
-                try self.body.append(self.allocator, .{ .Label = .{ .identifier = breakLabel } });
-            },
-            .While => |w| {
-                const continueLabel = try self.allocator.print("{s}.continue", .{w.tag.?});
-                try self.body.append(self.allocator, .{ .Label = .{ .identifier = continueLabel } });
-
-                const e = try self.emitExpression(w.cond);
-
-                const breakLabel = try self.allocator.print("{s}.break", .{w.tag.?});
-                try self.body.append(self.allocator, .{ .JumpIfZero = .{ .condition = e, .target = breakLabel } });
-
-                try self.emitStatement(w.body.*);
-                try self.body.append(self.allocator, .{ .Jump = .{ .target = continueLabel } });
-                try self.body.append(self.allocator, .{ .Label = .{ .identifier = breakLabel } });
-            },
-            .For => |f| {
-                switch (f.init) {
-                    .Declaration => self.emitDeclaration(f.init.Declaration),
-                    .Expression => |expr| if (expr) |exprInit| {
-                        _ = try self.emitExpression(exprInit);
-                    },
-                }
-
-                const startLabel = try self.allocator.print("{s}.start", .{f.tag.?});
-                try self.body.append(self.allocator, .{ .Label = .{ .identifier = startLabel } });
-
-                const breakLabel = try self.allocator.print("{s}.break", .{f.tag.?});
-
-                if (f.cond) |cond| {
-                    const e = try self.emitExpression(cond);
-                    try self.body.append(self.allocator, .{ .JumpIfZero = .{ .condition = e, .target = breakLabel } });
-                } else {
-                    try self.body.append(self.allocator, .{ .JumpIfZero = .{ .condition = .{ .Constant = "1" }, .target = breakLabel } });
-                }
-
-                try self.emitStatement(f.body.*);
-
-                const continueLabel = try self.allocator.print("{s}.continue", .{f.tag.?});
-                try self.body.append(self.allocator, .{ .Label = .{ .identifier = continueLabel } });
-
-                if (f.post) |post| _ = try self.emitExpression(post);
-
-                try self.body.append(self.allocator, .{ .Jump = .{ .target = startLabel } });
-                try self.body.append(self.allocator, .{ .Label = .{ .identifier = breakLabel } });
-            },
-            .Switch => |swtch| {
-                const switchBreak = try self.allocator.print("{s}.break", .{swtch.tag.?});
-
-                const c = try self.emitExpression(swtch.cond);
-                const dst: Val = .{ .Var = self.nextTag() };
-
-                for (swtch.cases.items) |case| {
-                    if (case.cond) |cond| { // ignore 'default' for now
-                        const e = try self.emitExpression(cond);
-                        try self.body.append(self.allocator, .{ .Binary = .{ .operator = .Eq, .src1 = c, .src2 = e, .dst = dst } });
-                        try self.body.append(self.allocator, .{ .JumpIfNotZero = .{ .condition = dst, .target = case.tag.? } });
-                    }
-                }
-                // jump to the default statement if one exists, else to the end of the switch statement
-                if (swtch.defaultTag) |defaultTag| {
-                    try self.body.append(self.allocator, .{ .Jump = .{ .target = defaultTag } });
-                } else {
-                    try self.body.append(self.allocator, .{ .Jump = .{ .target = switchBreak } });
-                }
-
-                try self.emitStatement(swtch.body.*);
-
-                try self.body.append(self.allocator, .{ .Label = .{ .identifier = switchBreak } });
-            },
-            .Case => |case| {
-                try self.body.append(self.allocator, .{ .Label = .{ .identifier = case.tag.? } });
-                if (case.body) |body| try self.emitStatement(body.*);
-            },
-        }
-    }
-
-    fn emitExpression(self: *Function, expr: Parser.Expression) !Val {
-        switch (expr) {
-            .Constant => return .{ .Constant = expr.Constant },
-            .Var => return .{ .Var = expr.Var.name },
-            .Unary => |unary| {
-                const unaryExpr: Parser.Expression = unary.operand.*;
-                const src = try self.emitExpression(unaryExpr);
-                const dst: Val = .{ .Var = self.nextTag() };
-                switch (unary.operator) {
-                    .Inc, .Dec => {
-                        self.body.appendSlice(self.allocator, switch (unary.type) {
-                            .Pre => &.{
-                                .{ .Unary = .{ .operator = unary.operator, .src = src, .dst = src } },
-                                .{ .Copy = .{ .src = src, .dst = dst } },
-                            },
-                            .Post => &.{
-                                .{ .Copy = .{ .src = src, .dst = dst } },
-                                .{ .Unary = .{ .operator = unary.operator, .src = src, .dst = src } },
-                            },
-                        }) catch allocError();
-                    },
-                    else => {
-                        try self.body.append(self.allocator, .{ .Unary = .{ .operator = unary.operator, .src = src, .dst = dst } });
-                    },
-                }
-                return dst;
-            },
-            .Binary => |binary| {
-                switch (binary.operator) {
-                    .AndL => {
-                        const falseLabel = self.nextLabel("andFalse");
-                        const endLabel = self.nextLabel("andEnd");
-
-                        const v1 = try self.emitExpression(binary.left.*);
-                        try self.body.append(self.allocator, .{ .JumpIfZero = .{ .condition = v1, .target = falseLabel } });
-
-                        const v2 = try self.emitExpression(binary.right.*);
-                        try self.body.append(self.allocator, .{ .JumpIfZero = .{ .condition = v2, .target = falseLabel } });
-
-                        const dst: Val = .{ .Var = self.nextTag() };
-                        try self.body.appendSlice(self.allocator, &.{
-                            .{ .Copy = .{ .src = .{ .Constant = "1" }, .dst = dst } },
-                            .{ .Jump = .{ .target = endLabel } },
-                            .{ .Label = .{ .identifier = falseLabel } },
-                            .{ .Copy = .{ .src = .{ .Constant = "0" }, .dst = dst } },
-                            .{ .Label = .{ .identifier = endLabel } },
-                        });
-                        return dst;
-                    },
-                    .OrL => {
-                        const trueLabel = self.nextLabel("orTrue");
-                        const endLabel = self.nextLabel("orEnd");
-
-                        const v1 = try self.emitExpression(binary.left.*);
-                        try self.body.append(self.allocator, .{ .JumpIfNotZero = .{ .condition = v1, .target = trueLabel } });
-
-                        const v2 = try self.emitExpression(binary.right.*);
-                        try self.body.append(self.allocator, .{ .JumpIfNotZero = .{ .condition = v2, .target = trueLabel } });
-
-                        const dst: Val = .{ .Var = self.nextTag() };
-                        try self.body.appendSlice(self.allocator, &.{
-                            .{ .Copy = .{ .src = .{ .Constant = "0" }, .dst = dst } },
-                            .{ .Jump = .{ .target = endLabel } },
-                            .{ .Label = .{ .identifier = trueLabel } },
-                            .{ .Copy = .{ .src = .{ .Constant = "1" }, .dst = dst } },
-                            .{ .Label = .{ .identifier = endLabel } },
-                        });
-                        return dst;
-                    },
-                    else => {
-                        const src1 = try self.emitExpression(
-                            binary.left.*,
-                        );
-                        const src2 = try self.emitExpression(
-                            binary.right.*,
-                        );
-                        const dst: Val = .{ .Var = self.nextTag() };
-                        try self.body.append(self.allocator, .{ .Binary = .{ .operator = binary.operator, .src1 = src1, .src2 = src2, .dst = dst } });
-                        return dst;
-                    },
-                }
-            },
-            .Assignment => |assign| {
-                const result = try self.emitExpression(assign.rhs.*);
-                const dst = try self.emitExpression(assign.lhs.*);
-
-                // If this is a compound assignment, we need to emit a binary instruction.
-                // Otherwise, for simple assignments we just emit a copy.
-                try self.body.append(self.allocator, if (assign.operator) |op|
-                    .{ .Binary = .{ .operator = op, .src1 = dst, .src2 = result, .dst = dst } }
-                else
-                    .{ .Copy = .{ .src = result, .dst = dst } });
-
-                return dst;
-            },
-            .Ternary => |ternary| {
-                const elseLabel = self.nextLabel("else");
-                const endLabel = self.nextLabel("end");
-                const dst: Val = .{ .Var = self.nextTag() };
-
-                const c = try self.emitExpression(ternary.condition.*);
-                try self.body.append(self.allocator, .{ .JumpIfZero = .{ .condition = c, .target = elseLabel } });
-
-                const e1 = try self.emitExpression(ternary.thenStmt.*);
-                try self.body.appendSlice(self.allocator, &.{
-                    .{ .Copy = .{ .src = e1, .dst = dst } },
-                    .{ .Jump = .{ .target = endLabel } },
-                    .{ .Label = .{ .identifier = elseLabel } },
-                });
-
-                const e2 = try self.emitExpression(ternary.elseStmt.*);
-                try self.body.appendSlice(self.allocator, &.{
-                    .{ .Copy = .{ .src = e2, .dst = dst } },
-                    .{ .Label = .{ .identifier = endLabel } },
-                });
-
-                return dst;
-            },
-            .FunctionCall => unreachable,
-        }
-    }
-
-    fn nextTag(self: *Function) []u8 {
-        const tag = self.allocator.print("{s}.{d}", .{ self.name, self.counter }) catch allocError();
-        self.counter += 1;
-        return tag;
-    }
-
-    fn nextLabel(self: *Function, descr: []const u8) []u8 {
-        const label = self.allocator.print("{s}.{s}.{d}", .{ self.name, descr, self.counter }) catch allocError();
-        self.counter += 1;
-        return label;
+        return .{ .name = function.name, .body = instructions };
     }
 };
+
+fn emitBlock(allocator: Allocator, context: *Context, instructions: *Instructions, block: Parser.Block) !void {
+    for (block.items) |item| {
+        switch (item) {
+            .Declaration => |decl| try emitDeclaration(allocator, context, instructions, decl),
+            .Statement => |stmt| try emitStatement(allocator, context, instructions, stmt),
+        }
+    }
+}
+
+fn emitDeclaration(allocator: Allocator, context: *Context, body: *Instructions, decl: Parser.Declaration) !void {
+    switch (decl) {
+        .VarDecl => |varDecl| {
+            if (varDecl.init) |initExpr| {
+                _ = try emitExpression(allocator, context, body, initExpr);
+            }
+        },
+        .FunDecl => unreachable,
+    }
+}
+
+fn emitStatement(allocator: Allocator, context: *Context, instructions: *Instructions, stmt: Parser.Statement) !void {
+    switch (stmt) {
+        .Compound => |compound| {
+            for (compound.items) |item| {
+                switch (item) {
+                    .Declaration => |d| try emitDeclaration(allocator, context, instructions, d),
+                    .Statement => |s| try emitStatement(allocator, context, instructions, s),
+                }
+            }
+        },
+        .Return => |ret| {
+            const val = try emitExpression(allocator, context, instructions, ret.expr);
+            try instructions.append(allocator, .{ .Return = .{ .val = val } });
+        },
+        .Expression => |expr| _ = try emitExpression(allocator, context, instructions, expr),
+        .Null => {},
+        .If => |ifStmt| {
+            const elseLabel = nextLabel(allocator, context, "else");
+            const endLabel = nextLabel(allocator, context, "end");
+
+            const c = try emitExpression(allocator, context, instructions, ifStmt.condition);
+            try instructions.append(allocator, .{ .JumpIfZero = .{ .condition = c, .target = elseLabel } });
+
+            _ = try emitStatement(allocator, context, instructions, ifStmt.thenStmt.*);
+            try instructions.append(allocator, .{ .Jump = .{ .target = endLabel } });
+
+            try instructions.append(allocator, .{ .Label = .{ .identifier = elseLabel } });
+            if (ifStmt.elseStmt) |elseStmt| _ = try emitStatement(allocator, context, instructions, elseStmt.*);
+
+            try instructions.append(allocator, .{ .Label = .{ .identifier = endLabel } });
+        },
+        .Label => |lbl| {
+            try instructions.append(allocator, .{ .Label = .{ .identifier = lbl.tag.? } });
+            _ = try emitStatement(allocator, context, instructions, lbl.body.*);
+        },
+        .Goto => |goto| try instructions.append(allocator, .{ .Jump = .{ .target = goto.target } }),
+        .Break => |b| {
+            const breakLabel = try allocator.print("{s}.break", .{b.tag.?});
+
+            try instructions.append(allocator, .{ .Jump = .{ .target = breakLabel } });
+        },
+        .Continue => |c| {
+            const continueLabel = try allocator.print("{s}.continue", .{c.tag.?});
+
+            try instructions.append(allocator, .{ .Jump = .{ .target = continueLabel } });
+        },
+        .DoWhile => |d| {
+            const startLabel = try allocator.print("{s}.start", .{d.tag.?});
+            try instructions.append(allocator, .{ .Label = .{ .identifier = startLabel } });
+
+            try emitStatement(allocator, context, instructions, d.body.*);
+
+            const continueLabel = try allocator.print("{s}.continue", .{d.tag.?});
+            try instructions.append(allocator, .{ .Label = .{ .identifier = continueLabel } });
+
+            const e = try emitExpression(allocator, context, instructions, d.cond);
+            try instructions.append(allocator, .{ .JumpIfNotZero = .{ .condition = e, .target = startLabel } });
+
+            const breakLabel = try allocator.print("{s}.break", .{d.tag.?});
+            try instructions.append(allocator, .{ .Label = .{ .identifier = breakLabel } });
+        },
+        .While => |w| {
+            const continueLabel = try allocator.print("{s}.continue", .{w.tag.?});
+            try instructions.append(allocator, .{ .Label = .{ .identifier = continueLabel } });
+
+            const e = try emitExpression(allocator, context, instructions, w.cond);
+
+            const breakLabel = try allocator.print("{s}.break", .{w.tag.?});
+            try instructions.append(allocator, .{ .JumpIfZero = .{ .condition = e, .target = breakLabel } });
+
+            try emitStatement(allocator, context, instructions, w.body.*);
+            try instructions.append(allocator, .{ .Jump = .{ .target = continueLabel } });
+            try instructions.append(allocator, .{ .Label = .{ .identifier = breakLabel } });
+        },
+        .For => |f| {
+            switch (f.init) {
+                .Declaration => try emitDeclaration(allocator, context, instructions, f.init.Declaration),
+                .Expression => |expr| if (expr) |exprInit| {
+                    _ = try emitExpression(allocator, context, instructions, exprInit);
+                },
+            }
+
+            const startLabel = try allocator.print("{s}.start", .{f.tag.?});
+            try instructions.append(allocator, .{ .Label = .{ .identifier = startLabel } });
+
+            const breakLabel = try allocator.print("{s}.break", .{f.tag.?});
+
+            if (f.cond) |cond| {
+                const e = try emitExpression(allocator, context, instructions, cond);
+                try instructions.append(allocator, .{ .JumpIfZero = .{ .condition = e, .target = breakLabel } });
+            } else {
+                try instructions.append(allocator, .{ .JumpIfZero = .{ .condition = .{ .Constant = "1" }, .target = breakLabel } });
+            }
+
+            try emitStatement(allocator, context, instructions, f.body.*);
+
+            const continueLabel = try allocator.print("{s}.continue", .{f.tag.?});
+            try instructions.append(allocator, .{ .Label = .{ .identifier = continueLabel } });
+
+            if (f.post) |post| _ = try emitExpression(allocator, context, instructions, post);
+
+            try instructions.append(allocator, .{ .Jump = .{ .target = startLabel } });
+            try instructions.append(allocator, .{ .Label = .{ .identifier = breakLabel } });
+        },
+        .Switch => |swtch| {
+            const switchBreak = try allocator.print("{s}.break", .{swtch.tag.?});
+
+            const c = try emitExpression(allocator, context, instructions, swtch.cond);
+            const dst: Val = .{ .Var = nextTag(allocator, context) };
+
+            for (swtch.cases.items) |case| {
+                if (case.cond) |cond| { // ignore 'default' for now
+                    const e = try emitExpression(allocator, context, instructions, cond);
+                    try instructions.append(allocator, .{ .Binary = .{ .operator = .Eq, .src1 = c, .src2 = e, .dst = dst } });
+                    try instructions.append(allocator, .{ .JumpIfNotZero = .{ .condition = dst, .target = case.tag.? } });
+                }
+            }
+            // jump to the default statement if one exists, else to the end of the switch statement
+            if (swtch.defaultTag) |defaultTag| {
+                try instructions.append(allocator, .{ .Jump = .{ .target = defaultTag } });
+            } else {
+                try instructions.append(allocator, .{ .Jump = .{ .target = switchBreak } });
+            }
+
+            try emitStatement(allocator, context, instructions, swtch.body.*);
+
+            try instructions.append(allocator, .{ .Label = .{ .identifier = switchBreak } });
+        },
+        .Case => |case| {
+            try instructions.append(allocator, .{ .Label = .{ .identifier = case.tag.? } });
+            if (case.body) |body| try emitStatement(allocator, context, instructions, body.*);
+        },
+    }
+}
+
+fn emitExpression(allocator: Allocator, context: *Context, instructions: *Instructions, expr: Parser.Expression) !Val {
+    switch (expr) {
+        .Constant => return .{ .Constant = expr.Constant },
+        .Var => return .{ .Var = expr.Var.name },
+        .Unary => |unary| return emitUnary(allocator, context, instructions, unary),
+        .Binary => |binary| return emitBinary(allocator, context, instructions, binary),
+        .Assignment => |assign| return emitAssignment(allocator, context, instructions, assign),
+        .Ternary => |ternary| return emitTernary(allocator, context, instructions, ternary),
+        .FunctionCall => unreachable,
+    }
+}
+
+fn emitUnary(allocator: Allocator, context: *Context, instructions: *Instructions, unary: Parser.Unary) void {
+    const unaryExpr: Parser.Expression = unary.operand.*;
+    const src = try emitExpression(allocator, context, instructions, unaryExpr);
+    const dst: Val = .{ .Var = nextTag(allocator, context) };
+    switch (unary.operator) {
+        .Inc, .Dec => {
+            try instructions.appendSlice(allocator, switch (unary.type) {
+                .Pre => &.{
+                    .{ .Unary = .{ .operator = unary.operator, .src = src, .dst = src } },
+                    .{ .Copy = .{ .src = src, .dst = dst } },
+                },
+                .Post => &.{
+                    .{ .Copy = .{ .src = src, .dst = dst } },
+                    .{ .Unary = .{ .operator = unary.operator, .src = src, .dst = src } },
+                },
+            });
+        },
+        else => {
+            try body.append(allocator, .{ .Unary = .{ .operator = unary.operator, .src = src, .dst = dst } });
+        },
+    }
+    return dst;
+}
+
+fn emitBinary(allocator: Allocator, context: *Context, instructions: *Instructions, binary: Parser.Binary) void {
+    switch (binary.operator) {
+        .AndL => {
+            const falseLabel = nextLabel(allocator, context, "andFalse");
+            const endLabel = nextLabel(allocator, context, "andEnd");
+
+            const v1 = try emitExpression(allocator, context, instructions, binary.left.*);
+            try instructions.append(allocator, .{ .JumpIfZero = .{ .condition = v1, .target = falseLabel } });
+
+            const v2 = try emitExpression(allocator, context, instructions, binary.right.*);
+            try instructions.append(allocator, .{ .JumpIfZero = .{ .condition = v2, .target = falseLabel } });
+
+            const dst: Val = .{ .Var = nextTag(allocator, context) };
+            try instructions.appendSlice(allocator, &.{
+                .{ .Copy = .{ .src = .{ .Constant = "1" }, .dst = dst } },
+                .{ .Jump = .{ .target = endLabel } },
+                .{ .Label = .{ .identifier = falseLabel } },
+                .{ .Copy = .{ .src = .{ .Constant = "0" }, .dst = dst } },
+                .{ .Label = .{ .identifier = endLabel } },
+            });
+            return dst;
+        },
+        .OrL => {
+            const trueLabel = nextLabel(allocator, context, "orTrue");
+            const endLabel = nextLabel(allocator, context, "orEnd");
+
+            const v1 = try emitExpression(allocator, context, instructions, binary.left.*);
+            try instructions.append(allocator, .{ .JumpIfNotZero = .{ .condition = v1, .target = trueLabel } });
+
+            const v2 = try emitExpression(allocator, context, instructions, binary.right.*);
+            try instructions.append(allocator, .{ .JumpIfNotZero = .{ .condition = v2, .target = trueLabel } });
+
+            const dst: Val = .{ .Var = nextTag(allocator, context) };
+            try instructions.appendSlice(allocator, &.{
+                .{ .Copy = .{ .src = .{ .Constant = "0" }, .dst = dst } },
+                .{ .Jump = .{ .target = endLabel } },
+                .{ .Label = .{ .identifier = trueLabel } },
+                .{ .Copy = .{ .src = .{ .Constant = "1" }, .dst = dst } },
+                .{ .Label = .{ .identifier = endLabel } },
+            });
+            return dst;
+        },
+        else => {
+            const src1 = try emitExpression(allocator, context, instructions, binary.left.*);
+            const src2 = try emitExpression(allocator, context, instructions, binary.right.*);
+            const dst: Val = .{ .Var = nextTag(allocator, context) };
+            try instructions.append(allocator, .{ .Binary = .{ .operator = binary.operator, .src1 = src1, .src2 = src2, .dst = dst } });
+            return dst;
+        },
+    }
+}
+
+fn emitAssignment(allocator: Allocator, context: *Context, instructions: *Instructions, assign: Parser.Assignment) void {
+    const result = try emitExpression(allocator, context, instructions, assign.rhs.*);
+    const dst = try emitExpression(allocator, context, instructions, assign.lhs.*);
+
+    // If this is a compound assignment, we need to emit a binary instruction.
+    // Otherwise, for simple assignments we just emit a copy.
+    try instructions.append(allocator, if (assign.operator) |op|
+        .{ .Binary = .{ .operator = op, .src1 = dst, .src2 = result, .dst = dst } }
+    else
+        .{ .Copy = .{ .src = result, .dst = dst } });
+
+    return dst;
+}
+
+fn emitTernary(allocator: Allocator, context: *Context, instructions: *Instructions, tern: Parser.Ternary) void {
+    const elseLabel = nextLabel(allocator, context, "else");
+    const endLabel = nextLabel(allocator, context, "end");
+    const dst: Val = .{ .Var = nextTag(allocator, context) };
+
+    const c = try emitExpression(allocator, context, body, ternary.condition.*);
+    try body.append(allocator, .{ .JumpIfZero = .{ .condition = c, .target = elseLabel } });
+
+    const e1 = try emitExpression(allocator, context, body, ternary.thenStmt.*);
+    try body.appendSlice(allocator, &.{
+        .{ .Copy = .{ .src = e1, .dst = dst } },
+        .{ .Jump = .{ .target = endLabel } },
+        .{ .Label = .{ .identifier = elseLabel } },
+    });
+
+    const e2 = try emitExpression(allocator, context, body, ternary.elseStmt.*);
+    try body.appendSlice(allocator, &.{
+        .{ .Copy = .{ .src = e2, .dst = dst } },
+        .{ .Label = .{ .identifier = endLabel } },
+    });
+
+    return dst;
+}
+
+fn nextTag(allocator: Allocator, context: *Context) []u8 {
+    const tag = allocator.print("{s}.{d}", .{ context.name, context.counter }) catch allocError();
+    context.counter += 1;
+    return tag;
+}
+
+fn nextLabel(allocator: Allocator, context: *Context, descr: []const u8) []u8 {
+    const label = allocator.print("{s}.{s}.{d}", .{ context.name, descr, context.counter }) catch allocError();
+    context.counter += 1;
+    return label;
+}
 
 pub fn allocError() noreturn {
     std.log.err("Memory allocation error", .{});
