@@ -19,40 +19,14 @@ const Val = instr.Val;
 
 pub const TAC = @This();
 
-const Labels = ArrayList([]const u8);
-const Tags = ArrayList([]const u8);
 const Instructions = ArrayList(Instruction);
 
-pub const Tacky = struct {
+pub const Program = struct {
     arena: ArenaAllocator,
     functions: []Function,
 
-    pub fn deinit(self: *Tacky) void {
+    pub fn deinit(self: *Program) void {
         self.arena.deinit();
-    }
-};
-
-pub fn emit(allocator: Allocator, ast: Parser.AST) Tacky {
-    // This will be doing a lot of miscellaneous allocations for tags and labels,
-    // so just handle clean-up with an arena instead of meticulous bookkeeping
-    var arena: ArenaAllocator = .init(allocator);
-    const program: Program = .emit(arena.allocator(), ast);
-
-    return .{ .arena = arena, .functions = program.functions };
-}
-
-const Program = struct {
-    allocator: Allocator,
-    functions: []Function,
-
-    pub fn emit(allocator: Allocator, ast: Parser.AST) Program {
-        var functions: ArrayList(Function) = .empty;
-        for (ast.tree.functions) |funDecl| {
-            const function = Function.emit(allocator, funDecl) catch allocError();
-            functions.append(allocator, function) catch allocError();
-        }
-
-        return .{ .allocator = allocator, .functions = functions.toOwnedSlice(allocator) catch allocError() };
     }
 };
 
@@ -63,30 +37,48 @@ const Context = struct {
 
 pub const Function = struct {
     name: []const u8,
-    params: []identifier,
+    params: []Parser.VarDecl,
     body: []Instruction,
-
-    pub fn emit(allocator: Allocator, function: Parser.FunDecl) !Function {
-        var instructions: Instructions = .empty;
-
-        if (function.body) |body| {
-            var context: Context = .{ .name = function.name, .counter = 0 };
-            try emitBlock(allocator, &context, &instructions, body);
-        }
-        try instructions.append(allocator, .{ .Return = .{ .val = .{ .Constant = "0" } } });
-
-        var params = try ArrayList(identifier).initCapacity(allocator, function.params.len);
-        for (function.params) |param| {
-            try params.append(allocator, param.name);
-        }
-
-        return .{
-            .name = function.name,
-            .params = try params.toOwnedSlice(allocator),
-            .body = try instructions.toOwnedSlice(allocator),
-        };
-    }
 };
+
+pub fn emit(allocator: Allocator, ast: Parser.AST) Program {
+    // This will be doing a lot of miscellaneous allocations for tags and labels,
+    // so just handle clean-up with an arena instead of meticulous bookkeeping
+    var arena: ArenaAllocator = .init(allocator);
+    const arenaAllocator = arena.allocator();
+
+    var funcList: ArrayList(Function) = .empty;
+
+    for (ast.tree.functions) |funDecl| {
+        const func = emitFunDecl(arenaAllocator, funDecl);
+        funcList.append(arenaAllocator, func) catch allocError();
+    }
+
+    const functions = funcList.toOwnedSlice(arenaAllocator) catch allocError();
+    return .{ .arena = arena, .functions = functions };
+}
+
+fn emitDeclaration(allocator: Allocator, context: *Context, body: *Instructions, decl: Parser.Declaration) !void {
+    switch (decl) {
+        .VarDecl => |varDecl| if (varDecl.init) |initExpr| {
+            _ = emitExpression(allocator, context, body, initExpr);
+        },
+        .FunDecl => |funDecl| _ = emitFunDecl(allocator, funDecl),
+    }
+}
+
+fn emitFunDecl(allocator: Allocator, funDecl: Parser.FunDecl) Function {
+    var instructions: Instructions = .empty;
+
+    if (funDecl.body) |body| {
+        var context: Context = .{ .name = funDecl.name, .counter = 0 };
+        emitBlock(allocator, &context, &instructions, body) catch allocError();
+    }
+    instructions.append(allocator, .{ .Return = .{ .val = .{ .Constant = "0" } } }) catch allocError();
+
+    const body = instructions.toOwnedSlice(allocator) catch allocError();
+    return .{ .name = funDecl.name, .params = funDecl.params, .body = body };
+}
 
 fn emitBlock(allocator: Allocator, context: *Context, instructions: *Instructions, block: Parser.Block) !void {
     for (block.items) |item| {
@@ -94,17 +86,6 @@ fn emitBlock(allocator: Allocator, context: *Context, instructions: *Instruction
             .Declaration => |decl| try emitDeclaration(allocator, context, instructions, decl),
             .Statement => |stmt| try emitStatement(allocator, context, instructions, stmt),
         }
-    }
-}
-
-fn emitDeclaration(allocator: Allocator, context: *Context, body: *Instructions, decl: Parser.Declaration) !void {
-    switch (decl) {
-        .VarDecl => |varDecl| {
-            if (varDecl.init) |initExpr| {
-                _ = emitExpression(allocator, context, body, initExpr);
-            }
-        },
-        .FunDecl => unreachable,
     }
 }
 

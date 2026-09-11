@@ -44,7 +44,7 @@ pub fn main(init: std.process.Init) !void {
 
     var tokens: Lexer.Token.Iterator = undefined;
     var ast: Parser.AST = undefined;
-    var tac: TAC.Tacky = undefined;
+    var tac: TAC.Program = undefined;
     var assembly: Assembler.AST = undefined;
     defer {
         if (stage.includes(.Lex)) tokens.deinit();

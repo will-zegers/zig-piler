@@ -36,7 +36,7 @@ pub const AST = struct {
     }
 };
 
-pub fn codeGen(allocator: Allocator, ast: TAC.Tacky) AST {
+pub fn codeGen(allocator: Allocator, ast: TAC.Program) AST {
     const program: Program = .init(allocator, ast);
     return .{ .allocator = allocator, .functions = program.functions };
 }
@@ -45,7 +45,7 @@ const Program = struct {
     allocator: Allocator,
     functions: []Function,
 
-    pub fn init(allocator: Allocator, program: TAC.Tacky) Program {
+    pub fn init(allocator: Allocator, program: TAC.Program) Program {
         var functions: ArrayList(Function) = .empty;
         for (program.functions) |function| {
             functions.append(allocator, .init(allocator, function)) catch allocError();
