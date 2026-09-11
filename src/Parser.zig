@@ -17,6 +17,8 @@ pub const Unary = expression.Unary;
 pub const Factor = expression.Factor;
 pub const Constant = expression.Constant;
 pub const Assignment = expression.Assignment;
+pub const Ternary = expression.Ternary;
+pub const FunctionCall = expression.FunctionCall;
 
 const Token = @import("Lexer.zig").Token;
 const TokenIterator = Token.Iterator;
