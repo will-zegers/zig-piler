@@ -1,6 +1,8 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const ArrayList = std.ArrayList;
+const log = std.log;
+const process = std.process;
 
 const Switch = @import("../Parser.zig").Switch;
 
@@ -65,6 +67,41 @@ pub fn deinit(self: *Context) void {
 pub fn getScope(self: Context) *Scope {
     const scope = self.scopeStack.last() orelse emptyScope();
     return scope;
+}
+
+pub fn addNewLabel(self: *Context, name: []const u8, unique: []const u8) void {
+    // TODO: throw an error instead of log and exit
+    if (self.function == null) {
+        log.err("Label '{s}' cannot be outside function scope", .{name});
+        process.exit(1);
+    }
+
+    const key = self.allocator.print("{s}.{s}", .{ self.function.?, name }) catch @panic("OOM");
+    if (self.labels.contains(key)) {
+        self.allocator.free(key);
+        log.err("Label '{s}' cannot be outside function scope", .{name});
+        process.exit(1);
+    }
+
+    self.labels.put(key, .{ .unique = unique }) catch allocError();
+}
+
+pub fn getUniqueLabel(self: Context, name: []const u8) []const u8 {
+    // TODO: throw an error instead of log and exit
+    if (self.function == null) {
+        log.err("'goto' not allowed outside of functions", .{});
+        process.exit(1);
+    }
+
+    const key = self.allocator.print("{s}.{s}", .{ self.function.?, name }) catch allocError();
+    defer self.allocator.free(key);
+
+    if (self.labels.get(key)) |entry| {
+        return entry.unique;
+    } else {
+        log.err("Use of undeclared identifier '{s}'", .{name});
+        process.exit(1);
+    }
 }
 
 pub fn getBreakTag(self: Context) ?[]const u8 {

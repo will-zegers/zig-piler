@@ -157,20 +157,11 @@ fn resolveStatementIdentifiers(self: *Semantic, context: *Context, statement: *S
         },
         .Label => |*lbl| {
             const name = statement.Label.name;
-            if (context.function == null) {
-                self.reportError(.{ .lineIndex = lbl.lineIndex, .type = .Redeclaration, .name = name });
-            }
+            const unique = self.generateUnique(context, name);
 
-            const key = self.allocator.print("{s}.{s}", .{context.function.?, name}) catch @panic("OOM");
-            if (context.labels.contains(key)) {
-                self.allocator.free(key);
-                self.reportError(.{ .lineIndex = lbl.lineIndex, .type = .Redeclaration, .name = name });
-                return;
-            }
+            context.addNewLabel(name, unique);
 
-            lbl.tag = self.generateUnique(context, name);
-            context.labels.put(key, .{ .unique = lbl.tag.? }) catch allocError();
-
+            lbl.tag = unique;
             self.resolveStatementIdentifiers(context, lbl.body);
         },
         .Break => |*brk| if (context.getBreakTag()) |tag| {

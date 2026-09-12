@@ -34,20 +34,7 @@ fn labelStatementLoops(allocator: Allocator, context: *Context, stmt: *Statement
     switch (stmt.*) {
         .Compound => |*compound| labelBlockLoops(allocator, context, compound),
         .Goto => |*goto| {
-            if (context.function == null) {
-                log.err("'goto' not allowed outside of functions", .{});
-                process.exit(1);
-            }
-
-            const key = allocator.print("{s}.{s}", .{ context.function.?, goto.target }) catch @panic("OOM");
-            defer allocator.free(key);
-
-            if (context.labels.get(key)) |entry| {
-                goto.target = entry.unique;
-            } else {
-                log.err("Use of undeclared identifier '{s}'", .{goto.target});
-                process.exit(1);
-            }
+            goto.target = context.getUniqueLabel(goto.target);
         },
         .If => |*ifStmt| {
             labelStatementLoops(allocator, context, ifStmt.thenStmt);
