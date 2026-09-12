@@ -14,6 +14,7 @@ const Entry = struct {
 
 const IdentifierMap = std.StringHashMap(Entry);
 
+pub const GLOBAL_TAG = "_global";
 const ScopeType = enum {
     Global,
     Function,
@@ -30,46 +31,48 @@ pub const Scope = struct {
 
 allocator: Allocator,
 labels: IdentifierMap,
-stack: ArrayList(Scope),
+scopeStack: ArrayList(Scope),
 switchTags: std.StringHashMap(*Switch),
+function: ?[]const u8 = null,
 counter: usize = 0,
 
 pub fn init(allocator: Allocator) Context {
-    var stack: ArrayList(Scope) = .empty;
-    stack.append(allocator, .{
+    var scopeStack: ArrayList(Scope) = .empty;
+    scopeStack.append(allocator, .{
         .type = .Block,
         .identifiers = .init(allocator),
-        .tag = "_global",
+        .tag = GLOBAL_TAG,
     }) catch allocError();
 
-    return .{ .allocator = allocator, .labels = .init(allocator), .stack = stack, .switchTags = .init(allocator) };
+    return .{ .allocator = allocator, .labels = .init(allocator), .scopeStack = scopeStack, .switchTags = .init(allocator) };
 }
 
 pub fn deinit(self: *Context) void {
-    for (self.stack.items) |*scope| {
+    for (self.scopeStack.items) |*scope| {
         scope.identifiers.deinit();
     }
+
+    var it = self.labels.keyIterator();
+    while (it.next()) |key| {
+        self.allocator.free(key.*);
+    }
     self.labels.deinit();
-    self.stack.deinit(self.allocator);
+
+    self.scopeStack.deinit(self.allocator);
     self.switchTags.deinit();
 }
 
-pub fn getScope(self: Context) Scope {
-    const scope = self.stack.last() orelse emptyScope();
-    return scope.*;
-}
-
-pub fn getScopeMut(self: Context) *Scope {
-    const scope = self.stack.last() orelse emptyScope();
+pub fn getScope(self: Context) *Scope {
+    const scope = self.scopeStack.last() orelse emptyScope();
     return scope;
 }
 
 pub fn getBreakTag(self: Context) ?[]const u8 {
-    var i = self.stack.items.len;
+    var i = self.scopeStack.items.len;
     while (i > 0) {
         i -= 1;
-        switch (self.stack.items[i].type) {
-            .Switch, .Loop => return self.stack.items[i].tag,
+        switch (self.scopeStack.items[i].type) {
+            .Switch, .Loop => return self.scopeStack.items[i].tag,
             else => {},
         }
     }
@@ -77,11 +80,11 @@ pub fn getBreakTag(self: Context) ?[]const u8 {
 }
 
 pub fn getContinueTag(self: Context) ?[]const u8 {
-    var i = self.stack.items.len;
+    var i = self.scopeStack.items.len;
     while (i > 0) {
         i -= 1;
-        switch (self.stack.items[i].type) {
-            .Loop => return self.stack.items[i].tag,
+        switch (self.scopeStack.items[i].type) {
+            .Loop => return self.scopeStack.items[i].tag,
             else => {},
         }
     }
@@ -89,11 +92,11 @@ pub fn getContinueTag(self: Context) ?[]const u8 {
 }
 
 pub fn getSwitchTag(self: Context) ?[]const u8 {
-    var i = self.stack.items.len;
+    var i = self.scopeStack.items.len;
     while (i > 0) {
         i -= 1;
-        switch (self.stack.items[i].type) {
-            .Switch => return self.stack.items[i].tag,
+        switch (self.scopeStack.items[i].type) {
+            .Switch => return self.scopeStack.items[i].tag,
             else => {},
         }
     }
@@ -107,7 +110,7 @@ pub fn pushScope(self: *Context, scopeType: ScopeType, tag: []const u8) void {
         entry.fromCurrentScope = false;
     }
 
-    self.stack.append(self.allocator, .{
+    self.scopeStack.append(self.allocator, .{
         .type = scopeType,
         .identifiers = identifiers,
         .tag = tag,
@@ -115,7 +118,7 @@ pub fn pushScope(self: *Context, scopeType: ScopeType, tag: []const u8) void {
 }
 
 pub fn popScope(self: *Context) void {
-    var scope = self.stack.pop() orelse emptyScope();
+    var scope = self.scopeStack.pop() orelse emptyScope();
     scope.identifiers.deinit();
 }
 

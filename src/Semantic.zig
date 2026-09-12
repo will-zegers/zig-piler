@@ -30,13 +30,14 @@ const SemanticError = struct {
     lineIndex: usize,
     type: enum {
         Break,
-        CaseOutside,
         CaseDuplicate,
+        CaseOutside,
         Continue,
-        Redeclaration,
-        UndeclaredIdentifier,
         NestedFunction,
         NotAssignable,
+        OrphanLabel,
+        Redeclaration,
+        UndeclaredIdentifier,
     },
     name: ?[]const u8 = null,
 };
@@ -52,7 +53,7 @@ pub fn run(self: *Semantic, ast: *AST) void {
     resolveFirstPass(self, &context, ast);
     if (self.errorFlag) std.process.exit(1);
 
-    LoopLabeler.run(context, ast);
+    LoopLabeler.run(self.allocator, &context, ast);
     TypeChecker.run(self.allocator, ast);
 
 }
@@ -69,7 +70,7 @@ fn resolveDeclaration(self: *Semantic, context: *Context, decl: *Declaration) vo
 }
 
 fn resolveFunDecl(self: *Semantic, context: *Context, decl: *FunDecl) void {
-    const scope = context.getScopeMut();
+    const scope = context.getScope();
     if (scope.identifiers.get(decl.name)) |entry| {
         if (entry.fromCurrentScope and !entry.hasLinkage) {
             self.reportError(.{ .lineIndex = decl.lineIndex, .type = .Redeclaration, .name = decl.name });
@@ -83,6 +84,9 @@ fn resolveFunDecl(self: *Semantic, context: *Context, decl: *FunDecl) void {
         .hasLinkage = true
     }) catch allocError();
 
+    context.function = decl.name;
+    defer context.function = null;
+
     context.pushScope(.Function, decl.name);
     defer context.popScope();
 
@@ -91,7 +95,7 @@ fn resolveFunDecl(self: *Semantic, context: *Context, decl: *FunDecl) void {
     }
 
     if (decl.body) |*body| {
-        if (!mem.eql(u8, "_global", scope.tag)) {
+        if (!mem.eql(u8, Context.GLOBAL_TAG, scope.tag)) {
             self.reportError(.{ .lineIndex = decl.lineIndex, .type = .NestedFunction });
             return;
         }
@@ -111,7 +115,7 @@ fn resolveVarDecl(self: *Semantic, context: *Context, decl: *VarDecl) void {
 
     decl.unique = self.generateUnique(context, name); // add a unique tag to the name
     // add the parsed name and now unique name as a key-value pair
-    context.getScopeMut().identifiers.put(name, .{ .unique = decl.unique.? }) catch allocError();
+    context.getScope().identifiers.put(name, .{ .unique = decl.unique.? }) catch allocError();
 
     if (decl.init) |*initExpr| {
         self.resolveExpression(context, initExpr);
@@ -153,14 +157,19 @@ fn resolveStatementIdentifiers(self: *Semantic, context: *Context, statement: *S
         },
         .Label => |*lbl| {
             const name = statement.Label.name;
-            if (context.labels.get(name)) |entry| {
-                if (entry.fromCurrentScope) {
-                    self.reportError(.{ .lineIndex = lbl.lineIndex, .type = .Redeclaration, .name = name });
-                    return;
-                }
+            if (context.function == null) {
+                self.reportError(.{ .lineIndex = lbl.lineIndex, .type = .Redeclaration, .name = name });
             }
+
+            const key = self.allocator.print("{s}.{s}", .{context.function.?, name}) catch @panic("OOM");
+            if (context.labels.contains(key)) {
+                self.allocator.free(key);
+                self.reportError(.{ .lineIndex = lbl.lineIndex, .type = .Redeclaration, .name = name });
+                return;
+            }
+
             lbl.tag = self.generateUnique(context, name);
-            context.labels.put(name, .{ .unique = lbl.tag.? }) catch allocError();
+            context.labels.put(key, .{ .unique = lbl.tag.? }) catch allocError();
 
             self.resolveStatementIdentifiers(context, lbl.body);
         },
@@ -301,6 +310,7 @@ fn reportError(self: *Semantic, err: SemanticError) void {
         .Continue => std.log.err("'continue' statement outside of loop statement", .{}),
         .NotAssignable => std.log.err("Expression is not an assignable lvalue", .{}),
         .NestedFunction => std.log.err("Function definitions may only exist at the top level", .{}),
+        .OrphanLabel => std.log.err("Label '{s}' outside of function scope", .{err.name.?}),
         .Redeclaration => std.log.err("Redeclaration of '{s}'", .{err.name.?}),
         .UndeclaredIdentifier => std.log.err("Use of undeclared identifier '{s}'", .{err.name.?}),
     }
