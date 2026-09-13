@@ -153,7 +153,7 @@ pub const Binary = struct {
                     .{ .SetCC = .{ .condition = cCode, .operand = dst } },
                 });
             },
-            .AndL, .OrL => unreachable, // logical AND and OR should not have a binary instruction
+            .AndL, .OrL => unreachable, // logical AND and OR have no binary instruction, already handled in TACky
             else => allocator.dupe(Instruction, &.{
                 .{ .Mov = .{ .src = src1, .dst = dst } },
                 .{ .Binary = .{ .operator = binary.operator, .src = src2, .dst = dst } },
@@ -162,7 +162,7 @@ pub const Binary = struct {
     }
 };
 
-pub const Cqo = struct {};
+pub const Cqo = struct {}; // RDX:RAX:= sign-extend of RAX.
 
 pub const Idiv = struct { operand: Operand };
 

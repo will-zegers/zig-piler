@@ -13,10 +13,10 @@ const CodeEmitter = @This();
 allocator: Allocator,
 instructions: ArrayList([]const u8),
 
-pub fn init(allocator: Allocator, ast: Assembler.AST) !CodeEmitter {
+pub fn init(allocator: Allocator, ast: Assembler.Assembly) !CodeEmitter {
     var instructions: ArrayList([]const u8) = .empty;
     for (ast.functions) |function| {
-        const slice = try emit(allocator, function);
+        const slice = try emitFunction(allocator, function);
         defer allocator.free(slice);
 
         try instructions.appendSlice(allocator, slice);
@@ -25,7 +25,7 @@ pub fn init(allocator: Allocator, ast: Assembler.AST) !CodeEmitter {
     return .{ .allocator = allocator, .instructions = instructions };
 }
 
-pub fn emit(allocator: Allocator, function: Assembler.Function) ![][]const u8 {
+pub fn emitFunction(allocator: Allocator, function: Assembler.Function) ![][]const u8 {
     const assembly = function.instructions;
 
     // Assembly instructions will be 1:1 with the []const u8 entries in the emitted code, plus

@@ -24,37 +24,17 @@ const Assembler = @This();
 
 const WORD_SIZE: isize = 8;
 
-pub const AST = struct {
-    allocator: Allocator,
-    functions: []Function,
-
-    pub fn deinit(self: *AST) void {
-        for (self.functions) |*function| {
-            function.deinit();
-        }
-        self.allocator.free(self.functions);
-    }
-};
-
-pub fn codeGen(allocator: Allocator, ast: TAC.Program) AST {
-    const program: Program = .init(allocator, ast);
-    return .{ .allocator = allocator, .functions = program.functions };
-}
+pub const Assembly = Program;
 
 const Program = struct {
     allocator: Allocator,
     functions: []Function,
 
-    pub fn init(allocator: Allocator, program: TAC.Program) Program {
-        var functions: ArrayList(Function) = .empty;
-        for (program.functions) |function| {
-            functions.append(allocator, .init(allocator, function)) catch allocError();
+    pub fn deinit(self: *Assembly) void {
+        for (self.functions) |*function| {
+            function.deinit();
         }
-
-        return .{
-            .allocator = allocator,
-            .functions = functions.toOwnedSlice(allocator) catch allocError(),
-        };
+        self.allocator.free(self.functions);
     }
 };
 
@@ -63,88 +43,105 @@ pub const Function = struct {
     name: []const u8,
     instructions: []Instruction,
 
-    pub fn init(allocator: Allocator, function: TAC.Function) Function {
-        var instrList: InstructionList = .empty;
-
-        // First pass to build Assembly AST
-        for (function.body) |instr| {
-            const assembly = switch (instr) {
-                .Unary => |unary| Unary.toAssembly(allocator, unary),
-                .Return => |ret| Ret.toAssembly(allocator, ret),
-                .Binary => |binary| Binary.toAssembly(allocator, binary),
-                .Copy => |copy| Mov.toAssembly(allocator, copy),
-                .Jump => |jmp| Jmp.toAssembly(allocator, jmp),
-                .JumpIfZero => JmpCC.toAssembly(allocator, instr),
-                .JumpIfNotZero => JmpCC.toAssembly(allocator, instr),
-                .Label => |label| Label.toAssembly(allocator, label),
-                .FunCall => unreachable,
-            };
-            defer allocator.free(assembly);
-
-            instrList.appendSlice(allocator, assembly) catch allocError();
-        }
-
-        // Second pass, replace Pseudo registers with stack locations and prepend the prelude
-        setupStack(allocator, &instrList);
-
-        // Find illegal instructions (see specifications in the Patcher module)
-        var instructions = instrList.toOwnedSlice(allocator) catch allocError();
-        instructions = Patcher.patchInstructions(allocator, instructions);
-
-        return .{ .allocator = allocator, .name = function.name, .instructions = instructions, };
-    }
-
-    fn setupStack(allocator: Allocator, instructions: *InstructionList) void {
-        var pseudoMap: std.StringHashMap(isize) = .init(allocator);
-        defer pseudoMap.deinit();
-        var stackPointer: isize = -WORD_SIZE;
-
-        for (instructions.items) |*instr| {
-            switch (instr.*) {
-                .Mov => |*mov| {
-                    replaceIfPseudo(&pseudoMap, &stackPointer, &mov.src);
-                    replaceIfPseudo(&pseudoMap, &stackPointer, &mov.dst);
-                },
-                .Unary => |*unary| {
-                    replaceIfPseudo(&pseudoMap, &stackPointer, &unary.operand);
-                },
-                .Binary => |*binary| {
-                    replaceIfPseudo(&pseudoMap, &stackPointer, &binary.src);
-                    replaceIfPseudo(&pseudoMap, &stackPointer, &binary.dst);
-                },
-                .Idiv => |*idiv| {
-                    replaceIfPseudo(&pseudoMap, &stackPointer, &idiv.operand);
-                },
-                .Cmp => |*cmp| {
-                    replaceIfPseudo(&pseudoMap, &stackPointer, &cmp.arg1);
-                    replaceIfPseudo(&pseudoMap, &stackPointer, &cmp.arg2);
-                },
-                .SetCC => |*setcc| {
-                    replaceIfPseudo(&pseudoMap, &stackPointer, &setcc.operand);
-                },
-                else => {},
-            }
-        }
-
-        instructions.insert(allocator, 0, .{ .AllocStack = .{ .stackPointer = stackPointer } }) catch allocError();
-    }
-
-    fn replaceIfPseudo(map: *std.StringHashMap(isize), stackPointer: *isize, operand: *Operand) void {
-        if (operand.* == .Pseudo) {
-            const key = operand.Pseudo;
-            if (map.get(key) == null) {
-                map.put(key, stackPointer.*) catch allocError();
-                stackPointer.* -= WORD_SIZE;
-            }
-            const value = map.get(key).?;
-            operand.* = .{ .Stack = value };
-        }
-    }
-
     pub fn deinit(self: *Function) void {
         defer self.allocator.free(self.instructions);
     }
 };
+
+pub fn assemble(allocator: Allocator, tree: TAC.Program) Assembly {
+    var functions: ArrayList(Function) = .empty;
+    for (tree.functions) |function| {
+        functions.append(allocator, assembleFunction(allocator, function)) catch allocError();
+    }
+
+    return .{
+        .allocator = allocator,
+        .functions = functions.toOwnedSlice(allocator) catch allocError(),
+    };
+}
+
+pub fn assembleFunction(allocator: Allocator, function: TAC.Function) Function {
+    var instrList: InstructionList = .empty;
+
+    // First pass to build Assembly AST
+    for (function.body) |instr| {
+        const assembly = switch (instr) {
+            .Unary => |unary| Unary.toAssembly(allocator, unary),
+            .Return => |ret| Ret.toAssembly(allocator, ret),
+            .Binary => |binary| Binary.toAssembly(allocator, binary),
+            .Copy => |copy| Mov.toAssembly(allocator, copy),
+            .Jump => |jmp| Jmp.toAssembly(allocator, jmp),
+            .JumpIfZero => JmpCC.toAssembly(allocator, instr),
+            .JumpIfNotZero => JmpCC.toAssembly(allocator, instr),
+            .Label => |label| Label.toAssembly(allocator, label),
+            .FunCall => unreachable,
+        };
+        defer allocator.free(assembly);
+
+        instrList.appendSlice(allocator, assembly) catch allocError();
+    }
+
+    // Second pass, replace Pseudo registers with stack locations and prepend the prelude
+    setupStack(allocator, &instrList);
+
+    // Find illegal instructions (see specifications in the Patcher module)
+    var instructions = instrList.toOwnedSlice(allocator) catch allocError();
+    instructions = Patcher.patchInstructions(allocator, instructions);
+
+    return .{ .allocator = allocator, .name = function.name, .instructions = instructions, };
+}
+
+fn setupStack(allocator: Allocator, instructions: *InstructionList) void {
+    var pseudoMap: std.StringHashMap(isize) = .init(allocator);
+    defer pseudoMap.deinit();
+    var stackPointer: isize = -WORD_SIZE;
+
+    for (instructions.items) |*instr| {
+        switch (instr.*) {
+            .Mov => |*mov| {
+                replaceIfPseudo(&pseudoMap, &stackPointer, &mov.src);
+                replaceIfPseudo(&pseudoMap, &stackPointer, &mov.dst);
+            },
+            .Unary => |*unary| {
+                replaceIfPseudo(&pseudoMap, &stackPointer, &unary.operand);
+            },
+            .Binary => |*binary| {
+                replaceIfPseudo(&pseudoMap, &stackPointer, &binary.src);
+                replaceIfPseudo(&pseudoMap, &stackPointer, &binary.dst);
+            },
+            .Idiv => |*idiv| {
+                replaceIfPseudo(&pseudoMap, &stackPointer, &idiv.operand);
+            },
+            .Cmp => |*cmp| {
+                replaceIfPseudo(&pseudoMap, &stackPointer, &cmp.arg1);
+                replaceIfPseudo(&pseudoMap, &stackPointer, &cmp.arg2);
+            },
+            .SetCC => |*setcc| {
+                replaceIfPseudo(&pseudoMap, &stackPointer, &setcc.operand);
+            },
+            else => {},
+        }
+    }
+
+    instructions.insert(allocator, 0, .{ .AllocStack = .{ .stackPointer = stackPointer } }) catch allocError();
+}
+
+/// Replace 'Psuedo' registers generated in the first pass with memory locations
+/// on the stack
+fn replaceIfPseudo(map: *std.StringHashMap(isize), stackPointer: *isize, operand: *Operand) void {
+    if (operand.* == .Pseudo) {
+        const key = operand.Pseudo;
+        // If the pseudo register has not been mapped to a location on the stack,
+        // map it to the location at the current top of the stack (stackPointer)
+        // and bump the stackPointer
+        if (map.get(key) == null) {
+            map.put(key, stackPointer.*) catch allocError();
+            stackPointer.* -= WORD_SIZE;
+        }
+        const value = map.get(key).?;
+        operand.* = .{ .Stack = value };
+    }
+}
 
 pub fn allocError() noreturn {
     std.log.err("Memory allocation error", .{});

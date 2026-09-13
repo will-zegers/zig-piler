@@ -45,7 +45,7 @@ pub fn main(init: std.process.Init) !void {
     var tokens: Lexer.Token.Iterator = undefined;
     var ast: Parser.AST = undefined;
     var tac: TAC.Program = undefined;
-    var assembly: Assembler.AST = undefined;
+    var assembly: Assembler.Assembly = undefined;
     defer {
         if (stage.includes(.Lex)) tokens.deinit();
         if (stage.includes(.Parse)) ast.deinit(allocator);
@@ -105,7 +105,7 @@ pub fn main(init: std.process.Init) !void {
 
     if (stage.includes(.CodeGen)) {
         std.log.info("Running assembler...", .{});
-        assembly = Assembler.codeGen(allocator, tac);
+        assembly = Assembler.assemble(allocator, tac);
 
         if (debug) {
             std.debug.print("------generated-------\n", .{});

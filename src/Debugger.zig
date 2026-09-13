@@ -329,7 +329,7 @@ pub fn printTAC(id: TAC.Program) void {
 //     print(")\n", .{});
 // }
 
-pub fn printAssemblerAST(ast: Assembler.AST) void {
+pub fn printAssemblerAST(ast: Assembler.Assembly) void {
     const program = ast;
     print("{any} (\n", .{@TypeOf(program)});
     for (program.functions) |function| {
