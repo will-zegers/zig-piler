@@ -10,8 +10,8 @@ const Statement = Parser.Statement;
 
 const Context = @import("Context.zig");
 
-pub fn run(allocator: Allocator, context: *Context, ast: *AST) void {
-    for (ast.tree.functions) |*function| {
+pub fn run(allocator: Allocator, context: *Context, tree: *AST) void {
+    for (tree.functions) |*function| {
         if (function.body) |*body| {
             context.function = function.name;
             defer context.function = null;
@@ -34,7 +34,7 @@ fn labelStatementLoops(allocator: Allocator, context: *Context, stmt: *Statement
     switch (stmt.*) {
         .Compound => |*compound| labelBlockLoops(allocator, context, compound),
         .Goto => |*goto| {
-            goto.target = context.getUniqueLabel(goto.target);
+            goto.target = context.getGotoLabel(goto) orelse return;
         },
         .If => |*ifStmt| {
             labelStatementLoops(allocator, context, ifStmt.thenStmt);

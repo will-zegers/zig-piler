@@ -14,9 +14,9 @@ pub fn printLexerTokens(tokens: *TokenIterator) void {
     }
 }
 
-pub fn printParserAST(ast: Parser.AST) void {
-    const functions = ast.tree.functions;
-    print("{any}(\n", .{@TypeOf(ast.tree)});
+pub fn printParserAST(tree: Parser.AST) void {
+    const functions = tree.functions;
+    print("{any}(\n", .{@TypeOf(tree)});
     for (functions) |function| {
         printDeclaration(.{ .FunDecl = function }, 4);
     }
@@ -240,89 +240,94 @@ fn printExpression(expr: Parser.Expression, indent: usize) void {
     }
 }
 
-pub fn printTAC(ir: TAC.Tacky) void {
-    const program = ir;
-    print("{any} (\n", .{@TypeOf(program)});
-    for (program.functions) |function| {
-        print("  {any} (\n", .{@TypeOf(function)});
-        print("    name: {s}\n", .{function.name});
-        print("    body:\n", .{});
-        for (function.body) |instr| {
-            print("      {s} (", .{@tagName(instr)});
-            switch (instr) {
-                .Unary => |unary| {
-                    print("operator={any}, ", .{unary.operator});
-                    switch (unary.src) {
-                        .Constant => |src| print("src: {any}({s}), ", .{ @TypeOf(src), src }),
-                        .Var => |src| print("src: {s}, ", .{src}),
-                    }
-                    switch (unary.dst) {
-                        .Constant => |dst| print("src: {any}({s})", .{ @TypeOf(dst), dst }),
-                        .Var => |dst| print("dst: {s}", .{dst}),
-                    }
-                    print(")\n", .{});
-                },
-                .Return => |ret| {
-                    switch (ret.val) {
-                        .Constant => |factor| print("val: {any}({s}))\n", .{ @TypeOf(factor), factor }),
-                        .Var => |name| print("val: {s})\n", .{name}),
-                    }
-                },
-                .Binary => |binary| {
-                    print("operator={any}, ", .{binary.operator});
-                    switch (binary.src1) {
-                        .Constant => |src1| print("src1: {s} ", .{src1}),
-                        .Var => |src1| print("src1: {s} ", .{src1}),
-                    }
-                    switch (binary.src2) {
-                        .Constant => |src2| print("src2: {s} ", .{src2}),
-                        .Var => |src2| print("src2: {s} ", .{src2}),
-                    }
-                    switch (binary.dst) {
-                        .Constant => |dst| print("dst: {s}", .{dst}),
-                        .Var => |dst| print("dst: {s}", .{dst}),
-                    }
-                    print(")\n", .{});
-                },
-                .Copy => |copy| {
-                    switch (copy.src) {
-                        .Constant => |src| print("src: {s} ", .{src}),
-                        .Var => |src| print("src: {s} ", .{src}),
-                    }
-                    switch (copy.dst) {
-                        .Constant => |dst| print("dst: {s}", .{dst}),
-                        .Var => |dst| print("dst: {s}", .{dst}),
-                    }
-                    print(")\n", .{});
-                },
-                .Label => |label| {
-                    print("name: {s})\n", .{label.identifier});
-                },
-                .Jump => |jump| {
-                    print("label: {s})\n", .{jump.target});
-                },
-                .JumpIfZero => |jump| {
-                    switch (jump.condition) {
-                        .Constant => |cond| print("cond: {any}({s}) ", .{ @TypeOf(cond), cond }),
-                        .Var => |cond| print("cond: {s} ", .{cond}),
-                    }
-                    print("label={s})\n", .{jump.target});
-                },
-                .JumpIfNotZero => |jump| {
-                    switch (jump.condition) {
-                        .Constant => |cond| print("cond: {any}({s}) ", .{ @TypeOf(cond), cond }),
-                        .Var => |cond| print("cond: {s} ", .{cond}),
-                    }
-                    print("label: {s})\n", .{jump.target});
-                },
-                .FunCall => {},
-            }
-        }
-        print("    )\n", .{});
-        print("  )\n", .{});
-    }
-    print(")\n", .{});
+pub fn printTAC(id: TAC.Program) void {
+    _ = id;
+    return;
 }
+
+// pub fn printTAC(ir: TAC.Tacky) void {
+//     const program = ir;
+//     print("{any} (\n", .{@TypeOf(program)});
+//     for (program.functions) |function| {
+//         print("  {any} (\n", .{@TypeOf(function)});
+//         // print("    name: {s}\n", .{function.name});
+//         print("    body:\n", .{});
+//         for (function.body) |instr| {
+//             print("      {s} (", .{@tagName(instr)});
+//             switch (instr) {
+//                 .Unary => |unary| {
+//                     print("operator={any}, ", .{unary.operator});
+//                     switch (unary.src) {
+//                         .Constant => |src| print("src: {any}({s}), ", .{ @TypeOf(src), src }),
+//                         .Var => |src| print("src: {s}, ", .{src}),
+//                     }
+//                     switch (unary.dst) {
+//                         .Constant => |dst| print("src: {any}({s})", .{ @TypeOf(dst), dst }),
+//                         .Var => |dst| print("dst: {s}", .{dst}),
+//                     }
+//                     print(")\n", .{});
+//                 },
+//                 .Return => |ret| {
+//                     switch (ret.val) {
+//                         .Constant => |factor| print("val: {any}({s}))\n", .{ @TypeOf(factor), factor }),
+//                         .Var => |name| print("val: {s})\n", .{name}),
+//                     }
+//                 },
+//                 .Binary => |binary| {
+//                     print("operator={any}, ", .{binary.operator});
+//                     switch (binary.src1) {
+//                         .Constant => |src1| print("src1: {s} ", .{src1}),
+//                         .Var => |src1| print("src1: {s} ", .{src1}),
+//                     }
+//                     switch (binary.src2) {
+//                         .Constant => |src2| print("src2: {s} ", .{src2}),
+//                         .Var => |src2| print("src2: {s} ", .{src2}),
+//                     }
+//                     switch (binary.dst) {
+//                         .Constant => |dst| print("dst: {s}", .{dst}),
+//                         .Var => |dst| print("dst: {s}", .{dst}),
+//                     }
+//                     print(")\n", .{});
+//                 },
+//                 .Copy => |copy| {
+//                     switch (copy.src) {
+//                         .Constant => |src| print("src: {s} ", .{src}),
+//                         .Var => |src| print("src: {s} ", .{src}),
+//                     }
+//                     switch (copy.dst) {
+//                         .Constant => |dst| print("dst: {s}", .{dst}),
+//                         .Var => |dst| print("dst: {s}", .{dst}),
+//                     }
+//                     print(")\n", .{});
+//                 },
+//                 .Label => |label| {
+//                     print("name: {s})\n", .{label.identifier});
+//                 },
+//                 .Jump => |jump| {
+//                     print("label: {s})\n", .{jump.target});
+//                 },
+//                 .JumpIfZero => |jump| {
+//                     switch (jump.condition) {
+//                         .Constant => |cond| print("cond: {any}({s}) ", .{ @TypeOf(cond), cond }),
+//                         .Var => |cond| print("cond: {s} ", .{cond}),
+//                     }
+//                     print("label={s})\n", .{jump.target});
+//                 },
+//                 .JumpIfNotZero => |jump| {
+//                     switch (jump.condition) {
+//                         .Constant => |cond| print("cond: {any}({s}) ", .{ @TypeOf(cond), cond }),
+//                         .Var => |cond| print("cond: {s} ", .{cond}),
+//                     }
+//                     print("label: {s})\n", .{jump.target});
+//                 },
+//                 .FunCall => {},
+//             }
+//         }
+//         print("    )\n", .{});
+//         print("  )\n", .{});
+//     }
+//     print(")\n", .{});
+// }
 
 pub fn printAssemblerAST(ast: Assembler.AST) void {
     const program = ast;

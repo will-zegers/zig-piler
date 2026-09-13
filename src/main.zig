@@ -83,9 +83,9 @@ pub fn main(init: std.process.Init) !void {
 
     if (stage.includes(.Validate)) {
         std.log.info("Running semantic analysis...", .{});
-        var semantic = Semantic.init(allocator, lines);
+        // var semantic = Semantic.init(allocator, lines);
 
-        semantic.run(&ast);
+        Semantic.run(allocator, &ast, lines);
 
         if (debug) {
             std.debug.print("-------parsed-------\n", .{});

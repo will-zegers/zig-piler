@@ -13,6 +13,13 @@ const FunDecl = Parser.FunDecl;
 const Statement = Parser.Statement;
 const VarDecl = Parser.VarDecl;
 
+const Error = @import("Error.zig");
+
+// Rather than pass around an entire Context, to keep things simple the error
+// reporting will be handled by a global object. TODO: maybe revisit for a better
+// solution
+var ErrorReporter: *Error.Reporter = undefined;
+
 const TypeChecker = @This();
 
 const SymbolType = enum {
@@ -39,11 +46,13 @@ const Entry = struct {
 
 const SymbolTable = StringHashMap(Entry);
 
-pub fn run(allocator: Allocator, ast: *AST) void {
+pub fn run(allocator: Allocator, errorReporter: *Error.Reporter, tree: *AST) void {
+    ErrorReporter = errorReporter;
+
     var symbols: SymbolTable = .init(allocator);
     defer symbols.deinit();
 
-    for (ast.tree.functions) |func| {
+    for (tree.functions) |func| {
         typeCheckFunDecl(&symbols, func);
     }
 }
@@ -61,16 +70,14 @@ fn typeCheckFunDecl(symbols: *SymbolTable, decl: FunDecl) void {
 
     if (symbols.get(decl.name)) |entry| {
         if (entry.type != .FunType or entry.type.FunType.nParams != funType.nParams) {
-            // TODO: throw error instead
-            log.err("Incompatible function declarations", .{});
-            process.exit(1);
+            ErrorReporter.report(.IncompatibleFunctions, decl.lineIndex, decl.name);
+            return;
         }
 
         isDefined = entry.defined.?;
         if (isDefined and decl.body != null) {
-            // TODO: throw error instead
-            log.err("Function '{s}' defined more than once", .{decl.name});
-            process.exit(1);
+            ErrorReporter.report(.Redeclaration, decl.lineIndex, decl.name);
+            return;
         }
     }
     symbols.put(decl.name, .{ .type = .{ .FunType = funType }, .defined = isDefined or decl.body != null }) catch @panic("OOM");
@@ -151,8 +158,8 @@ fn typeCheckExpression(symbols: *SymbolTable, expr: Expression) void {
         .Var => |v| {
             const symbol = symbols.get(v.name).?; // semantics already ensures the function has been defined
             if (symbol.type != .Int) {
-                log.err("Function '{s}' cannot be used as a variable", .{v.name});
-                process.exit(1);
+                ErrorReporter.report(.VarUsedAsFunction, v.lineIndex, v.name);
+                return;
             }
         },
         .Unary => |un| typeCheckExpression(symbols, un.operand.*),
@@ -164,17 +171,17 @@ fn typeCheckExpression(symbols: *SymbolTable, expr: Expression) void {
         .FunctionCall => |fcall| {
             const symbol = symbols.get(fcall.name).?; // semantics already ensures the function has been defined
             if (symbol.type != .FunType) {
-                log.err("Called object type {any} is not a function or function pointer", .{fcall.name});
-                process.exit(1);
+                ErrorReporter.report(.CallOnNonFunction, fcall.lineIndex, null);
+                return;
             }
 
             const funType = symbol.type.FunType;
             if (funType.nParams > fcall.args.len) {
-                log.err("Too few arguments in function call; expected {d}, got {d}", .{ funType.nParams, fcall.args.len });
+                ErrorReporter.report(.TooFewArguments, fcall.lineIndex, null);
                 process.exit(1);
             }
             if (funType.nParams < fcall.args.len) {
-                log.err("Too many arguments in function call; expected {d}, got {d}", .{ funType.nParams, fcall.args.len });
+                ErrorReporter.report(.TooManyArguments, fcall.lineIndex, null);
                 process.exit(1);
             }
             for (fcall.args) |arg| {

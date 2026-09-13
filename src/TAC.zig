@@ -41,7 +41,7 @@ pub const Function = struct {
     body: []Instruction,
 };
 
-pub fn emit(allocator: Allocator, ast: Parser.AST) Program {
+pub fn emit(allocator: Allocator, tree: Parser.AST) Program {
     // This will be doing a lot of miscellaneous allocations for tags and labels,
     // so just handle clean-up with an arena instead of meticulous bookkeeping
     var arena: ArenaAllocator = .init(allocator);
@@ -49,7 +49,7 @@ pub fn emit(allocator: Allocator, ast: Parser.AST) Program {
 
     var funcList: ArrayList(Function) = .empty;
 
-    for (ast.tree.functions) |funDecl| {
+    for (tree.functions) |funDecl| {
         const func = emitFunDecl(arenaAllocator, funDecl);
         funcList.append(arenaAllocator, func) catch allocError();
     }

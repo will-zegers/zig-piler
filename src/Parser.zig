@@ -25,35 +25,29 @@ const TokenIterator = Token.Iterator;
 
 const Parser = @This();
 
-pub const AST = struct {
-    allocator: Allocator,
-    tree: Program,
-
-    pub fn deinit(self: *AST, allocator: Allocator) void {
-        self.tree.deinit(allocator);
-    }
-};
+pub const AST = Program;
 
 pub fn parse(allocator: Allocator, tokens: *TokenIterator) ParsingError!AST {
-    const program = try Program.init(allocator, tokens);
+    const program = try Program.parse(allocator, tokens);
     if (!tokens.eofReached()) {
         const token = tokens.next();
         std.log.err("Unexpected token(s) at end of file: {s}", .{token.symbol});
         std.process.exit(1);
     }
 
-    return .{ .allocator = allocator, .tree = program };
+    return program;
 }
 
 pub const Program = struct {
+    allocator: Allocator,
     functions: []FunDecl,
 
-    pub fn init(allocator: Allocator, tokens: *TokenIterator) ParsingError!Program {
+    pub fn parse(allocator: Allocator, tokens: *TokenIterator) ParsingError!Program {
         var functions: ArrayList(FunDecl) = .empty;
         while (!tokens.eofReached()) {
             functions.append(allocator, try .parse(allocator, tokens)) catch allocError();
         }
-        return .{ .functions = functions.toOwnedSlice(allocator) catch allocError() };
+        return .{ .allocator = allocator, .functions = functions.toOwnedSlice(allocator) catch allocError() };
     }
 
     pub fn deinit(self: *Program, allocator: Allocator) void {
