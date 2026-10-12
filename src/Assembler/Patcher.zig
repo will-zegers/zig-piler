@@ -70,7 +70,7 @@ pub fn patchInstructions(allocator: Allocator, unpatched: []Instruction) []Instr
                 // register, which is masked to 5-bits (32-bit register) or 6-bits (64-bit)
                 .Ill_Shift_Rcx => &.{
                     .{ .Mov = .{ .src = instr.Binary.src, .dst = .{ .Reg = .rcx } } },
-                    .{ .Binary = .{ .operator = instr.Binary.operator, .src = .{ .Reg = .rcx }, .dst = instr.Binary.dst } },
+                    .{ .Binary = .{ .operator = instr.Binary.operator, .src = .{ .Reg = .cl }, .dst = instr.Binary.dst } },
                 },
             }) catch allocError();
         } else {

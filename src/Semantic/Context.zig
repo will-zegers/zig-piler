@@ -78,7 +78,7 @@ pub fn deinit(self: *Context) void {
 }
 
 pub fn getScope(self: Context) *Scope {
-    const scope = self.scopeStack.last() orelse emptyScope();
+    const scope = self.scopeStack.lastPtr() orelse emptyScope();
     return scope;
 }
 
