@@ -8,6 +8,10 @@ const builtin = @import("builtin");
 
 const Assembler = @import("Assembler.zig");
 
+const REG_PREFIX: []const u8 = "r";
+const GP_REG_SUFFIX: []const u8 = "";
+const INSTR_SUFFIX: []const u8 = "q";
+
 const CodeEmitter = @This();
 
 allocator: Allocator,
@@ -35,11 +39,11 @@ pub fn emitFunction(allocator: Allocator, function: Assembler.Function) ![][]con
     const functionDefTemplate =
         \\  .globl {0s}
         \\{0s}:
-        \\  pushq   %rbp
-        \\  movq    %rsp, %rbp
+        \\  push    %rbp
+        \\  mov{1s}    %{2s}sp, %{2s}bp
     ;
 
-    const functionDefinition = try allocator.print(functionDefTemplate, .{function.name});
+    const functionDefinition = try allocator.print(functionDefTemplate, .{function.name, INSTR_SUFFIX, REG_PREFIX});
     const localPrefix = switch (builtin.os.tag) {
         .linux => ".L",
         else => unreachable, // only running this on linux atm
@@ -51,58 +55,58 @@ pub fn emitFunction(allocator: Allocator, function: Assembler.Function) ![][]con
         const code = code: switch (instruction) {
             .AllocStack => |allocStack| {
                 const template =
-                    \\  subq    ${d}, %rsp
+                    \\  sub{s}    ${d}, %{s}sp
                 ;
-                break :code allocator.print(template, .{allocStack.stackPointer});
+                break :code allocator.print(template, .{INSTR_SUFFIX, allocStack.stackPointer, REG_PREFIX});
             },
             .Mov => |mov| {
                 const template =
-                    \\  movq    {s}, {s}
+                    \\  mov{s}    {s}, {s}
                 ;
                 const src = getOperandString(allocator, mov.src);
                 defer allocator.free(src);
                 const dst = getOperandString(allocator, mov.dst);
                 defer allocator.free(dst);
 
-                break :code allocator.print(template, .{src, dst});
+                break :code allocator.print(template, .{INSTR_SUFFIX, src, dst});
             },
             .Ret =>  {
                 const instr =
-                    \\  movq    %rbp, %rsp
-                    \\  popq    %rbp
+                    \\  mov{0s}    %{1s}bp, %{1s}sp
+                    \\  pop     %rbp
                     \\  ret
                 ;
-                break :code allocator.dupe(u8, instr);
+                break :code allocator.print(instr, .{INSTR_SUFFIX, REG_PREFIX});
             },
             .Unary => |unary| {
                 const template =
-                    \\  {s}    {s}
+                    \\  {s}{s}    {s}
                 ;
                 const operator = switch (unary.operator) {
-                    .Complement => "notq",
-                    .Negate => "negq",
-                    .Inc => "incq",
-                    .Dec => "decq",
+                    .Complement => "not",
+                    .Negate => "neg",
+                    .Inc => "inc",
+                    .Dec => "dec",
                     .Not => unreachable, // implemented as x == 0
                 };
                 const operand = getOperandString(allocator, unary.operand);
                 defer allocator.free(operand);
 
-                break :code allocator.print(template, .{operator, operand});
+                break :code allocator.print(template, .{operator, INSTR_SUFFIX, operand});
             },
             .Binary => |binary| {
                 const template =
-                    \\  {s}    {s}, {s}
+                    \\  {s}{s}    {s}, {s}
                 ;
                 const operator = switch (binary.operator) {
-                    .Add => "addq",
-                    .Sub => "subq",
-                    .Mul => "imulq",
-                    .AndB => "andq",
-                    .OrB => "orq",
-                    .Xor => "xorq",
-                    .SAL => "salq",
-                    .SAR => "sarq",
+                    .Add => "add",
+                    .Sub => "sub",
+                    .Mul => "imul",
+                    .AndB => "and",
+                    .OrB => "or",
+                    .Xor => "xor",
+                    .SAL => "sal",
+                    .SAR => "sar",
                     else => unreachable,
                 };
                 const src = getOperandString(allocator, binary.src);
@@ -110,7 +114,7 @@ pub fn emitFunction(allocator: Allocator, function: Assembler.Function) ![][]con
                 const dst = getOperandString(allocator, binary.dst);
                 defer allocator.free(dst);
 
-                break :code allocator.print(template, .{operator, src, dst});
+                break :code allocator.print(template, .{operator, INSTR_SUFFIX, src, dst});
             },
             .Cqo =>  {
                 const instr =
@@ -120,23 +124,23 @@ pub fn emitFunction(allocator: Allocator, function: Assembler.Function) ![][]con
             },
             .Idiv => |idiv| {
                 const template =
-                    \\  idivq    {s}
+                    \\  idiv{s}    {s}
                 ;
                 const operand = getOperandString(allocator, idiv.operand);
                 defer allocator.free(operand);
 
-                break :code allocator.print(template, .{operand});
+                break :code allocator.print(template, .{INSTR_SUFFIX, operand});
             },
             .Cmp => |cmp| {
                 const template =
-                    \\  cmpq    {s}, {s}
+                    \\  cmp{s}    {s}, {s}
                 ;
                 const arg1 = getOperandString(allocator, cmp.arg1);
                 defer allocator.free(arg1);
                 const arg2 = getOperandString(allocator, cmp.arg2);
                 defer allocator.free(arg2);
 
-                break :code allocator.print(template, .{arg1, arg2});
+                break :code allocator.print(template, .{INSTR_SUFFIX, arg1, arg2});
             },
             .Jmp => |jmp| {
                 const template =
@@ -169,12 +173,8 @@ pub fn emitFunction(allocator: Allocator, function: Assembler.Function) ![][]con
                     .LE => "le",
                     .NE => "ne",
                 };
-                const byteOperand = if (set.operand == .Reg)
-                    Assembler.Reg.toByteRegister(set.operand)
-                else
-                    set.operand;
 
-                const operand = getOperandString(allocator, byteOperand);
+                const operand = getOperandString(allocator, set.operand);
                 defer allocator.free(operand);
 
                 break :code allocator.print(template, .{condCode, operand});
@@ -201,10 +201,18 @@ pub fn emitFunction(allocator: Allocator, function: Assembler.Function) ![][]con
 
 fn getOperandString(allocator: Allocator, operand: Assembler.Operand) []const u8 {
     return switch(operand) {
-        .Imm => |op|   allocator.print("{c}{s}", .{'$', op}),
-        .Reg => |op|   allocator.print("{c}{s}", .{'%', @tagName(op)}),
-        .Stack => |op| allocator.print("{d}{s}", .{op, "(%rbp)"}),
+        .Imm => |op| allocator.print("{c}{s}", .{'$', op}),
+        .Reg => |op| getRegisterName(allocator, op),
+        .Stack => |op| allocator.print("{d}(%{s}bp)", .{op, REG_PREFIX}),
         .Pseudo => unreachable,
+    } catch allocError();
+}
+
+fn getRegisterName(allocator: Allocator, reg: Assembler.Reg) []const u8 {
+    return switch(reg) {
+        .ax, .cx, .dx => allocator.print("%{s}{s}", .{REG_PREFIX, @tagName(reg)}),
+        .r10, .r11 => allocator.print("%{s}{s}", .{@tagName(reg), GP_REG_SUFFIX}),
+        else => allocator.print("%{s}", .{@tagName(reg)}),
     } catch allocError();
 }
 

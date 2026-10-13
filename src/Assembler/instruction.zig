@@ -60,7 +60,7 @@ pub const Ret = struct {
         };
 
         return allocator.dupe(Instruction, &.{
-            .{ .Mov = .{ .src = val, .dst = .{ .Reg = .rax } } },
+            .{ .Mov = .{ .src = val, .dst = .{ .Reg = .ax } } },
             .{ .Ret = .{} },
         }) catch allocError();
     }
@@ -126,12 +126,12 @@ pub const Binary = struct {
             .Mod,
             => blk: {
                 const sourceReg: Operand = switch (binary.operator) {
-                    .Div => .{ .Reg = .rax },
-                    .Mod => .{ .Reg = .rdx },
+                    .Div => .{ .Reg = .ax },
+                    .Mod => .{ .Reg = .dx },
                     else => unreachable,
                 };
                 break :blk allocator.dupe(Instruction, &.{
-                    .{ .Mov = .{ .src = src1, .dst = .{ .Reg = .rax } } },
+                    .{ .Mov = .{ .src = src1, .dst = .{ .Reg = .ax } } },
                     .{ .Cqo = .{} },
                     .{ .Idiv = .{ .operand = src2 } },
                     .{ .Mov = .{ .src = sourceReg, .dst = dst } },
@@ -234,30 +234,12 @@ pub const Operand = union(OperandType) {
 };
 
 pub const Reg = enum {
-    rax,
-    al,
-    rcx,
+    ax,
+    cx,
+    dx,
     cl,
-    rdx,
-    dl,
     r10,
-    r10b,
     r11,
-    r11b,
-
-    pub fn toByteRegister(operand: Operand) Operand {
-        return switch (operand) {
-            .Reg => |reg| switch (reg) {
-                .rax => .{ .Reg = .al },
-                .rcx => .{ .Reg = .cl },
-                .rdx => .{ .Reg = .dl },
-                .r10 => .{ .Reg = .r10b },
-                .r11 => .{ .Reg = .r11b },
-                else => operand,
-            },
-            else => operand,
-        };
-    }
 };
 
 const Identifier = []const u8;

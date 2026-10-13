@@ -23,7 +23,7 @@ const Stage = enum(usize) {
     ToExecutable,
 
     fn includes(self: Stage, other: Stage) bool {
-        return @intFromEnum(self) >= @intFromEnum(other);
+        return @backingInt(self) >= @backingInt(other);
     }
 };
 
