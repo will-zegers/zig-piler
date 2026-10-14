@@ -53,12 +53,14 @@ pub fn emitFunction(allocator: Allocator, function: Assembler.Function) ![][]con
 
     for (assembly) |instruction| {
         const code = code: switch (instruction) {
-            .AllocStack => |allocStack| {
+            .AllocateStack => |allocStack| {
                 const template =
                     \\  sub{s}    ${d}, %{s}sp
                 ;
                 break :code allocator.print(template, .{INSTR_SUFFIX, allocStack.stackPointer, REG_PREFIX});
             },
+            .DeallocateStack => unreachable,
+            .Push => unreachable,
             .Mov => |mov| {
                 const template =
                     \\  mov{s}    {s}, {s}
@@ -70,6 +72,7 @@ pub fn emitFunction(allocator: Allocator, function: Assembler.Function) ![][]con
 
                 break :code allocator.print(template, .{INSTR_SUFFIX, src, dst});
             },
+            .Call => unreachable,
             .Ret =>  {
                 const instr =
                     \\  mov{0s}    %{1s}bp, %{1s}sp
@@ -210,8 +213,8 @@ fn getOperandString(allocator: Allocator, operand: Assembler.Operand) []const u8
 
 fn getRegisterName(allocator: Allocator, reg: Assembler.Reg) []const u8 {
     return switch(reg) {
-        .ax, .cx, .dx => allocator.print("%{s}{s}", .{REG_PREFIX, @tagName(reg)}),
-        .r10, .r11 => allocator.print("%{s}{s}", .{@tagName(reg), GP_REG_SUFFIX}),
+        .ax, .cx, .dx, .di, .si => allocator.print("%{s}{s}", .{REG_PREFIX, @tagName(reg)}),
+        .r8, .r9, .r10, .r11 => allocator.print("%{s}{s}", .{@tagName(reg), GP_REG_SUFFIX}),
         else => allocator.print("%{s}", .{@tagName(reg)}),
     } catch allocError();
 }

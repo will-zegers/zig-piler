@@ -340,6 +340,7 @@ pub fn printAssemblerAST(ast: Assembler.Assembly) void {
         for (function.instructions) |instr| {
             print("      {s} (", .{@tagName(instr)});
             switch (instr) {
+                .Push, .Call, .DeallocateStack => unreachable,
                 .Ret, .Cqo => {},
                 .Mov => |mov| {
                     switch (mov.src) {
@@ -364,7 +365,7 @@ pub fn printAssemblerAST(ast: Assembler.Assembly) void {
                         .Stack => |stack| print("dst: Stack({d})", .{stack}),
                     }
                 },
-                .AllocStack => |allocStack| {
+                .AllocateStack => |allocStack| {
                     print("int: {d}", .{allocStack.stackPointer});
                 },
                 .Binary => |binary| {

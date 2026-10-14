@@ -8,9 +8,12 @@ pub const InstructionList = ArrayList(Instruction);
 
 const InstructionTag = enum {
     Mov,
+    Push,
+    Call,
     Ret,
     Unary,
-    AllocStack,
+    AllocateStack,
+    DeallocateStack,
     Binary,
     Cqo,
     Idiv,
@@ -22,9 +25,12 @@ const InstructionTag = enum {
 };
 pub const Instruction = union(InstructionTag) {
     Mov: Mov,
+    Push: Push,
+    Call: Call,
     Ret: Ret,
     Unary: Unary,
-    AllocStack: AllocStack,
+    AllocateStack: AllocateStack,
+    DeallocateStack: DeallocateStack,
     Binary: Binary,
     Cqo: Cqo,
     Idiv: Idiv,
@@ -50,6 +56,14 @@ pub const Mov = struct {
         };
         return allocator.dupe(Instruction, &.{.{ .Mov = .{ .src = src, .dst = dst } }}) catch allocError();
     }
+};
+
+pub const Push = struct {
+    operand: Operand,
+};
+
+pub const Call = struct {
+    identifier: Identifier,
 };
 
 pub const Ret = struct {
@@ -95,12 +109,16 @@ pub const Unary = struct {
     }
 };
 
-pub const AllocStack = struct {
+pub const AllocateStack = struct {
     stackPointer: isize,
 
     pub fn prepend(allocator: Allocator, stackPointer: isize) []Instruction {
-        return allocator.dupe(Instruction, .{.{ .AllocStack = .{ .stackPointer = stackPointer } }}) catch std.process.exit(0);
+        return allocator.dupe(Instruction, .{.{ .AllocateStack = .{ .stackPointer = stackPointer } }}) catch std.process.exit(0);
     }
+};
+
+pub const DeallocateStack = struct {
+    int: usize,
 };
 
 pub const Binary = struct {
@@ -236,8 +254,12 @@ pub const Operand = union(OperandType) {
 pub const Reg = enum {
     ax,
     cx,
-    dx,
     cl,
+    dx,
+    di,
+    si,
+    r8,
+    r9,
     r10,
     r11,
 };

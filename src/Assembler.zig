@@ -17,7 +17,7 @@ const Mov = instruction.Mov;
 const Jmp = instruction.Jmp;
 const JmpCC = instruction.JmpCC;
 const Label = instruction.Label;
-const AllocStack = instruction.AllocStack;
+const AllocateStack = instruction.AllocateStack;
 const InstructionList = instruction.InstructionList;
 
 const Assembler = @This();
@@ -123,7 +123,7 @@ fn setupStack(allocator: Allocator, instructions: *InstructionList) void {
         }
     }
 
-    instructions.insert(allocator, 0, .{ .AllocStack = .{ .stackPointer = stackPointer } }) catch allocError();
+    instructions.insert(allocator, 0, .{ .AllocateStack = .{ .stackPointer = stackPointer } }) catch allocError();
 }
 
 /// Replace 'Psuedo' registers generated in the first pass with memory locations
