@@ -358,8 +358,17 @@ pub fn printAssemblerAST(ast: Assembler.Assembly) void {
         for (function.instructions) |instr| {
             print("      {s} (", .{@tagName(instr)});
             switch (instr) {
-                .Push, .Call, .DeallocateStack => unreachable,
-                .Ret, .Cqo => {},
+                .Push => |push| {
+                    switch (push.operand) {
+                        .Imm => |imm| print("src: Imm({s}) ", .{imm}),
+                        .Pseudo => |reg| print("src: Pseudo({s}) ", .{reg}),
+                        .Reg => |reg| print("src: Reg({s}) ", .{@tagName(reg)}),
+                        .Stack => |stack| print("src: Stack({d}) ", .{stack}),
+                    }
+                },
+                .Call => |call| print("name: {s}", .{call.identifier}),
+                .DeallocateStack => |deall| print("int: {d}", .{deall.int}),
+                .Ret, .Cdq => {},
                 .Mov => |mov| {
                     switch (mov.src) {
                         .Imm => |imm| print("src: Imm({s}) ", .{imm}),

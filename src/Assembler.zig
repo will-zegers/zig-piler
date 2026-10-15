@@ -22,7 +22,7 @@ const InstructionList = instruction.InstructionList;
 
 const Assembler = @This();
 
-const WORD_SIZE: isize = 8;
+const WORD_SIZE: isize = 4;
 
 pub const Assembly = Program;
 

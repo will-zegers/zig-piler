@@ -15,7 +15,7 @@ const InstructionTag = enum {
     AllocateStack,
     DeallocateStack,
     Binary,
-    Cqo,
+    Cdq,
     Idiv,
     Cmp,
     Jmp,
@@ -32,7 +32,7 @@ pub const Instruction = union(InstructionTag) {
     AllocateStack: AllocateStack,
     DeallocateStack: DeallocateStack,
     Binary: Binary,
-    Cqo: Cqo,
+    Cdq: Cdq,
     Idiv: Idiv,
     Cmp: Cmp,
     Jmp: Jmp,
@@ -150,7 +150,7 @@ pub const Binary = struct {
                 };
                 break :blk allocator.dupe(Instruction, &.{
                     .{ .Mov = .{ .src = src1, .dst = .{ .Reg = .ax } } },
-                    .{ .Cqo = .{} },
+                    .{ .Cdq = .{} },
                     .{ .Idiv = .{ .operand = src2 } },
                     .{ .Mov = .{ .src = sourceReg, .dst = dst } },
                 });
@@ -180,7 +180,7 @@ pub const Binary = struct {
     }
 };
 
-pub const Cqo = struct {}; // RDX:RAX:= sign-extend of RAX.
+pub const Cdq = struct {}; // EDX:EAX:= sign-extend of EAX.
 
 pub const Idiv = struct { operand: Operand };
 
