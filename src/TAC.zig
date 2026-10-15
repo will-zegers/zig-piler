@@ -50,6 +50,8 @@ pub fn emit(allocator: Allocator, tree: Parser.AST) Program {
     var funcList: ArrayList(Function) = .empty;
 
     for (tree.functions) |funDecl| {
+        if (funDecl.body == null) continue; // discard function declaration without bodies
+
         const func = emitFunDecl(arenaAllocator, funDecl);
         funcList.append(arenaAllocator, func) catch allocError();
     }
@@ -74,6 +76,7 @@ fn emitFunDecl(allocator: Allocator, funDecl: Parser.FunDecl) Function {
         var context: Context = .{ .name = funDecl.name, .counter = 0 };
         emitBlock(allocator, &context, &instructions, body) catch allocError();
     }
+
     instructions.append(allocator, .{ .Return = .{ .val = .{ .Constant = "0" } } }) catch allocError();
 
     const body = instructions.toOwnedSlice(allocator) catch allocError();

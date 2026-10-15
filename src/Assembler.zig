@@ -19,6 +19,7 @@ const JmpCC = instruction.JmpCC;
 const Label = instruction.Label;
 const AllocateStack = instruction.AllocateStack;
 const InstructionList = instruction.InstructionList;
+const ARG_REGISTERS = instruction.ARG_REGISTERS;
 
 const Assembler = @This();
 
@@ -42,6 +43,7 @@ pub const Function = struct {
     allocator: Allocator,
     name: []const u8,
     instructions: []Instruction,
+    stackSpace: isize,
 
     pub fn deinit(self: *Function) void {
         defer self.allocator.free(self.instructions);
@@ -74,7 +76,7 @@ pub fn assembleFunction(allocator: Allocator, function: TAC.Function) Function {
             .JumpIfZero => JmpCC.toAssembly(allocator, instr),
             .JumpIfNotZero => JmpCC.toAssembly(allocator, instr),
             .Label => |label| Label.toAssembly(allocator, label),
-            .FunCall => unreachable,
+            .FunCall => |funCall| instruction.funCallToAssembly(allocator, funCall) catch allocError(),
         };
         defer allocator.free(assembly);
 
@@ -82,16 +84,21 @@ pub fn assembleFunction(allocator: Allocator, function: TAC.Function) Function {
     }
 
     // Second pass, replace Pseudo registers with stack locations and prepend the prelude
-    setupStack(allocator, &instrList);
+    const stackSpace = setupStack(allocator, &instrList);
 
     // Find illegal instructions (see specifications in the Patcher module)
     var instructions = instrList.toOwnedSlice(allocator) catch allocError();
     instructions = Patcher.patchInstructions(allocator, instructions);
 
-    return .{ .allocator = allocator, .name = function.name, .instructions = instructions, };
+    return .{
+        .allocator = allocator,
+        .name = function.name,
+        .instructions = instructions,
+        .stackSpace = stackSpace,
+    };
 }
 
-fn setupStack(allocator: Allocator, instructions: *InstructionList) void {
+fn setupStack(allocator: Allocator, instructions: *InstructionList) isize {
     var pseudoMap: std.StringHashMap(isize) = .init(allocator);
     defer pseudoMap.deinit();
     var stackPointer: isize = -WORD_SIZE;
@@ -119,11 +126,18 @@ fn setupStack(allocator: Allocator, instructions: *InstructionList) void {
             .SetCC => |*setcc| {
                 replaceIfPseudo(&pseudoMap, &stackPointer, &setcc.operand);
             },
+            .Push => |*push| {
+                replaceIfPseudo(&pseudoMap, &stackPointer, &push.operand);
+            },
             else => {},
         }
     }
 
+    // Prepend the instructions with stack space allocation based on the number of
+    // pseudo registers replaced with memory
     instructions.insert(allocator, 0, .{ .AllocateStack = .{ .stackPointer = stackPointer } }) catch allocError();
+
+    return stackPointer;
 }
 
 /// Replace 'Psuedo' registers generated in the first pass with memory locations

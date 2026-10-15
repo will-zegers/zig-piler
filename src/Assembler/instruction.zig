@@ -6,6 +6,8 @@ const TAC = @import("../TAC.zig");
 
 pub const InstructionList = ArrayList(Instruction);
 
+pub const ARG_REGISTERS = [_]Reg{ .di, .si, .dx, .cx, .r8, .r9 };
+
 const InstructionTag = enum {
     Mov,
     Push,
@@ -40,6 +42,72 @@ pub const Instruction = union(InstructionTag) {
     SetCC: SetCC,
     Label: Label,
 };
+
+pub fn funCallToAssembly(allocator: Allocator, funCall: TAC.FunCall) ![]Instruction {
+    var assembly: ArrayList(Instruction) = .empty;
+
+    // Define and check how much we need to allocate initially to the stack to make sure it's
+    // aligned to 16-bytes on function call, per Sys V ABI
+    var allocatedStack: isize = undefined;
+    if (funCall.args.len <= ARG_REGISTERS.len) {
+        // No stack arguments, so no alignment needed
+        allocatedStack = 0;
+    } else {
+        // Check if we have an even or odd number of stack allocations. If odd, we'll need
+        // to allocate an additional 8-bytes to make sure the stack is 16-byte aligned
+        if ((funCall.args.len - ARG_REGISTERS.len) % 2 == 0) {
+            allocatedStack = 0;
+        } else {
+            allocatedStack = 8;
+            try assembly.append(allocator, .{ .AllocateStack = .{ .stackPointer = allocatedStack } });
+        }
+    }
+
+    // This process in reverse of the Sys V ABI, pushing stack arguments (if any) first in their reverse
+    // order, and then register arguments (if any) in reverse of the specification (similar to GCC)
+    var i = funCall.args.len;
+    while (i > ARG_REGISTERS.len) { // Push stack arguments (arguments 6 and on) first in reverse order
+        i -= 1;
+        switch (funCall.args[i]) {
+            .Constant => |arg| {
+                try assembly.append(allocator, .{ .Push = .{ .operand = .{ .Imm = arg } } });
+            },
+            .Var => |arg| {
+                try assembly.appendSlice(allocator, &.{
+                    .{ .Mov = .{ .src = .{ .Pseudo = arg }, .dst = .{ .Reg = .ax } } },
+                    .{ .Push = .{ .operand = .{ .Reg = .ax } } },
+                });
+            },
+        }
+        allocatedStack += 8;
+    }
+    while (i > 0) { // Move arguments in corresponding stack registers
+        i -= 1;
+        switch (funCall.args[i]) {
+            .Constant => |arg| {
+                try assembly.append(allocator, .{ .Mov = .{ .src = .{ .Imm = arg }, .dst = .{ .Reg = ARG_REGISTERS[i] } } });
+            },
+            .Var => |arg| {
+                try assembly.append(allocator, .{ .Mov = .{ .src = .{ .Pseudo = arg }, .dst = .{ .Reg = ARG_REGISTERS[i] } } });
+            },
+        }
+    }
+
+    try assembly.append(allocator, .{ .Call = .{ .identifier = funCall.name } });
+
+    if (allocatedStack > 0) {
+        try assembly.append(allocator, .{ .DeallocateStack = .{ .int = allocatedStack } });
+    }
+
+    switch (funCall.dst) {
+        .Var => |dst| {
+            try assembly.append(allocator, .{ .Mov = .{ .src = .{ .Reg = .ax }, .dst = .{ .Pseudo = dst } } });
+        },
+        .Constant => unreachable,
+    }
+
+    return try assembly.toOwnedSlice(allocator);
+}
 
 pub const Mov = struct {
     src: Operand,
@@ -118,7 +186,7 @@ pub const AllocateStack = struct {
 };
 
 pub const DeallocateStack = struct {
-    int: usize,
+    int: isize,
 };
 
 pub const Binary = struct {
