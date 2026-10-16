@@ -204,7 +204,7 @@ pub fn emitFunction(allocator: Allocator, function: Assembler.Function) ![][]con
 
 fn getOperandString(allocator: Allocator, operand: Assembler.Operand) []const u8 {
     return switch(operand) {
-        .Imm => |op| allocator.print("{c}{s}", .{'$', op}),
+        .Imm => |op| allocator.print("{c}{d}", .{'$', op}),
         .Reg => |op| getRegisterName(allocator, op),
         .Stack => |op| allocator.print("{d}(%rbp)", .{op}),
         .Pseudo => unreachable,

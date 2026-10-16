@@ -72,6 +72,6 @@ pub const Val = union(ValTag) {
     Var: Var,
 };
 
-pub const Constant = int;
+pub const Constant = usize;
 
 const Var = identifier;

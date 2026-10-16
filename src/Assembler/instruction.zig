@@ -162,8 +162,8 @@ pub const Unary = struct {
         const dst: Operand = .{ .Pseudo = unary.dst.Var };
         return allocator.dupe(Instruction, switch (unary.operator) {
             .Not => &.{
-                .{ .Cmp = .{ .arg1 = .{ .Imm = "0" }, .arg2 = src } },
-                .{ .Mov = .{ .src = .{ .Imm = "0" }, .dst = dst } },
+                .{ .Cmp = .{ .arg1 = .{ .Imm = 0 }, .arg2 = src } },
+                .{ .Mov = .{ .src = .{ .Imm = 0 }, .dst = dst } },
                 .{ .SetCC = .{ .condition = .E, .operand = dst } },
             },
             .Negate, .Complement => &.{
@@ -235,7 +235,7 @@ pub const Binary = struct {
                 };
                 break :blk allocator.dupe(Instruction, &.{
                     .{ .Cmp = .{ .arg1 = src2, .arg2 = src1 } },
-                    .{ .Mov = .{ .src = .{ .Imm = "0" }, .dst = dst } },
+                    .{ .Mov = .{ .src = .{ .Imm = 0 }, .dst = dst } },
                     .{ .SetCC = .{ .condition = cCode, .operand = dst } },
                 });
             },
@@ -277,7 +277,7 @@ pub const JmpCC = struct {
                     .Var => |pseudo| .{ .Pseudo = pseudo },
                 };
                 break :blk allocator.dupe(Instruction, &.{
-                    .{ .Cmp = .{ .arg1 = .{ .Imm = "0" }, .arg2 = arg2 } },
+                    .{ .Cmp = .{ .arg1 = .{ .Imm = 0 }, .arg2 = arg2 } },
                     .{ .JmpCC = .{ .condition = .E, .target = jz.target } },
                 }) catch allocError();
             },
@@ -287,7 +287,7 @@ pub const JmpCC = struct {
                     .Var => |pseudo| .{ .Pseudo = pseudo },
                 };
                 break :blk allocator.dupe(Instruction, &.{
-                    .{ .Cmp = .{ .arg1 = .{ .Imm = "0" }, .arg2 = arg2 } },
+                    .{ .Cmp = .{ .arg1 = .{ .Imm = 0 }, .arg2 = arg2 } },
                     .{ .JmpCC = .{ .condition = .NE, .target = jnz.target } },
                 }) catch allocError();
             },
@@ -313,7 +313,7 @@ const OperandType = enum {
     Stack,
 };
 pub const Operand = union(OperandType) {
-    Imm: []const u8,
+    Imm: usize,
     Reg: Reg,
     Pseudo: []const u8,
     Stack: isize,

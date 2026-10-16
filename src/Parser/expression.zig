@@ -11,7 +11,6 @@ const ParsingError = common.ParsingError;
 const allocError = common.allocError;
 const expect = common.expect;
 const identifier = common.identifier;
-const int = common.int;
 
 pub const ExpressionTag = enum {
     Constant,
@@ -97,7 +96,7 @@ pub const Expression = union(ExpressionTag) {
 fn parseFactor(allocator: Allocator, tokens: *TokenIterator) ParsingError!Expression {
     const token = tokens.next();
     const expr: Expression = switch (token.type) {
-        .Constant => .{ .Constant = token.symbol },
+        .Constant => .{ .Constant = std.fmt.parseInt(usize, token.symbol, 10) catch return ParsingError.Token },
         .UnaryOp => blk: { // '~'|'!'|'-'|'++'|'--' <factor>
             const right = try parseFactor(allocator, tokens);
             break :blk .{ .Unary = try Unary.initPre(allocator, token, right) };
@@ -128,7 +127,7 @@ fn parseFactor(allocator: Allocator, tokens: *TokenIterator) ParsingError!Expres
     return expr;
 }
 
-pub const Constant = int;
+pub const Constant = usize;
 
 pub const Var = struct {
     name: identifier,

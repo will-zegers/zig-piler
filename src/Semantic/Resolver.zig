@@ -175,8 +175,11 @@ fn resolveStatementIdentifiers(allocator: Allocator, context: *Context, statemen
         },
         .Case => |*case| {
             if (context.getSwitchTag()) |switchTag| {
-                const cond = if (case.cond) |cond| cond.Constant else "default";
-                case.tag = allocator.print("{s}.{s}", .{ switchTag, cond }) catch allocError();
+                if (case.cond) |cond| {
+                    case.tag = allocator.print("{s}.{d}", .{ switchTag, cond.Constant }) catch allocError();
+                } else {
+                    case.tag = allocator.print("{s}.default", .{switchTag}) catch allocError();
+                }
 
                 const parentSwitch = context.switchTags.get(switchTag) orelse unreachable;
                 parentSwitch.addCase(allocator, case) catch {

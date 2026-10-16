@@ -77,7 +77,7 @@ fn emitFunDecl(allocator: Allocator, funDecl: Parser.FunDecl) Function {
         emitBlock(allocator, &context, &instructions, body) catch allocError();
     }
 
-    instructions.append(allocator, .{ .Return = .{ .val = .{ .Constant = "0" } } }) catch allocError();
+    instructions.append(allocator, .{ .Return = .{ .val = .{ .Constant = 0 } } }) catch allocError();
 
     const body = instructions.toOwnedSlice(allocator) catch allocError();
     return .{ .name = funDecl.name, .params = funDecl.params, .body = body };
@@ -183,7 +183,7 @@ fn emitStatement(allocator: Allocator, context: *Context, instructions: *Instruc
                 const e = emitExpression(allocator, context, instructions, cond);
                 try instructions.append(allocator, .{ .JumpIfZero = .{ .condition = e, .target = breakLabel } });
             } else {
-                try instructions.append(allocator, .{ .JumpIfZero = .{ .condition = .{ .Constant = "1" }, .target = breakLabel } });
+                try instructions.append(allocator, .{ .JumpIfZero = .{ .condition = .{ .Constant = 1 }, .target = breakLabel } });
             }
 
             try emitStatement(allocator, context, instructions, f.body.*);
@@ -277,10 +277,10 @@ fn emitBinary(allocator: Allocator, context: *Context, instructions: *Instructio
 
             const dst: Val = .{ .Var = nextTag(allocator, context) };
             try instructions.appendSlice(allocator, &.{
-                .{ .Copy = .{ .src = .{ .Constant = "1" }, .dst = dst } },
+                .{ .Copy = .{ .src = .{ .Constant = 1 }, .dst = dst } },
                 .{ .Jump = .{ .target = endLabel } },
                 .{ .Label = .{ .identifier = falseLabel } },
-                .{ .Copy = .{ .src = .{ .Constant = "0" }, .dst = dst } },
+                .{ .Copy = .{ .src = .{ .Constant = 0 }, .dst = dst } },
                 .{ .Label = .{ .identifier = endLabel } },
             });
             return dst;
@@ -297,10 +297,10 @@ fn emitBinary(allocator: Allocator, context: *Context, instructions: *Instructio
 
             const dst: Val = .{ .Var = nextTag(allocator, context) };
             try instructions.appendSlice(allocator, &.{
-                .{ .Copy = .{ .src = .{ .Constant = "0" }, .dst = dst } },
+                .{ .Copy = .{ .src = .{ .Constant = 0 }, .dst = dst } },
                 .{ .Jump = .{ .target = endLabel } },
                 .{ .Label = .{ .identifier = trueLabel } },
-                .{ .Copy = .{ .src = .{ .Constant = "1" }, .dst = dst } },
+                .{ .Copy = .{ .src = .{ .Constant = 1 }, .dst = dst } },
                 .{ .Label = .{ .identifier = endLabel } },
             });
             return dst;

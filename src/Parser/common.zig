@@ -3,7 +3,6 @@ const std = @import("std");
 const Token = @import("../Lexer.zig").Token;
 
 pub const identifier = []const u8;
-pub const int = []const u8;
 
 // TODO: merge parsing and semantic errors
 pub const ParsingError = error{

@@ -8,7 +8,6 @@ const ParsingError = common.ParsingError;
 const allocError = common.allocError;
 const expect = common.expect;
 const identifier = common.identifier;
-const int = common.int;
 
 const expression = @import("Parser/expression.zig");
 pub const Expression = expression.Expression;

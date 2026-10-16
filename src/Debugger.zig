@@ -193,7 +193,7 @@ fn printExpression(expr: Parser.Expression, indent: usize) void {
 
     print("{s}{s}(", .{ indentStr, @tagName(expr) });
     switch (expr) {
-        .Constant => print("{s})\n", .{expr.Constant}),
+        .Constant => print("{d})\n", .{expr.Constant}),
         .Var => print("{s})\n", .{expr.Var.name}),
         .Unary => |unary| {
             print("\n", .{});
@@ -260,44 +260,44 @@ pub fn printTAC(ir: TAC.Program) void {
                 .Unary => |unary| {
                     print("operator={any}, ", .{unary.operator});
                     switch (unary.src) {
-                        .Constant => |src| print("src: {any}({s}), ", .{ @TypeOf(src), src }),
+                        .Constant => |src| print("src: {any}({d}), ", .{ @TypeOf(src), src }),
                         .Var => |src| print("src: {s}, ", .{src}),
                     }
                     switch (unary.dst) {
-                        .Constant => |dst| print("src: {any}({s})", .{ @TypeOf(dst), dst }),
+                        .Constant => |dst| print("src: {any}({d})", .{ @TypeOf(dst), dst }),
                         .Var => |dst| print("dst: {s}", .{dst}),
                     }
                     print(")\n", .{});
                 },
                 .Return => |ret| {
                     switch (ret.val) {
-                        .Constant => |factor| print("val: {any}({s}))\n", .{ @TypeOf(factor), factor }),
+                        .Constant => |factor| print("val: {any}({d}))\n", .{ @TypeOf(factor), factor }),
                         .Var => |name| print("val: {s})\n", .{name}),
                     }
                 },
                 .Binary => |binary| {
                     print("operator={any}, ", .{binary.operator});
                     switch (binary.src1) {
-                        .Constant => |src1| print("src1: {s} ", .{src1}),
+                        .Constant => |src1| print("src1: {d} ", .{src1}),
                         .Var => |src1| print("src1: {s} ", .{src1}),
                     }
                     switch (binary.src2) {
-                        .Constant => |src2| print("src2: {s} ", .{src2}),
+                        .Constant => |src2| print("src2: {d} ", .{src2}),
                         .Var => |src2| print("src2: {s} ", .{src2}),
                     }
                     switch (binary.dst) {
-                        .Constant => |dst| print("dst: {s}", .{dst}),
+                        .Constant => |dst| print("dst: {d}", .{dst}),
                         .Var => |dst| print("dst: {s}", .{dst}),
                     }
                     print(")\n", .{});
                 },
                 .Copy => |copy| {
                     switch (copy.src) {
-                        .Constant => |src| print("src: {s} ", .{src}),
+                        .Constant => |src| print("src: {d} ", .{src}),
                         .Var => |src| print("src: {s} ", .{src}),
                     }
                     switch (copy.dst) {
-                        .Constant => |dst| print("dst: {s}", .{dst}),
+                        .Constant => |dst| print("dst: {d}", .{dst}),
                         .Var => |dst| print("dst: {s}", .{dst}),
                     }
                     print(")\n", .{});
@@ -310,14 +310,14 @@ pub fn printTAC(ir: TAC.Program) void {
                 },
                 .JumpIfZero => |jump| {
                     switch (jump.condition) {
-                        .Constant => |cond| print("cond: {any}({s}) ", .{ @TypeOf(cond), cond }),
+                        .Constant => |cond| print("cond: {any}({d}) ", .{ @TypeOf(cond), cond }),
                         .Var => |cond| print("cond: {s} ", .{cond}),
                     }
                     print("label={s})\n", .{jump.target});
                 },
                 .JumpIfNotZero => |jump| {
                     switch (jump.condition) {
-                        .Constant => |cond| print("cond: {any}({s}) ", .{ @TypeOf(cond), cond }),
+                        .Constant => |cond| print("cond: {any}({d}) ", .{ @TypeOf(cond), cond }),
                         .Var => |cond| print("cond: {s} ", .{cond}),
                     }
                     print("label: {s})\n", .{jump.target});
@@ -326,12 +326,12 @@ pub fn printTAC(ir: TAC.Program) void {
                     print("{s}(", .{funCall.name});
                     if (funCall.args.len > 0) {
                         switch (funCall.args[0]) {
-                            .Constant => |c| print("{s}", .{c}),
+                            .Constant => |c| print("{d}", .{c}),
                             .Var => |v| print("{s}", .{v}),
                         }
                         for (1..funCall.args.len) |i| {
                             switch (funCall.args[i]) {
-                                .Constant => |c| print(", {s}", .{c}),
+                                .Constant => |c| print(", {d}", .{c}),
                                 .Var => |v| print(", {s}", .{v}),
                             }
                         }
@@ -360,7 +360,7 @@ pub fn printAssemblerAST(ast: Assembler.Assembly) void {
             switch (instr) {
                 .Push => |push| {
                     switch (push.operand) {
-                        .Imm => |imm| print("src: Imm({s}) ", .{imm}),
+                        .Imm => |imm| print("src: Imm({d}) ", .{imm}),
                         .Pseudo => |reg| print("src: Pseudo({s}) ", .{reg}),
                         .Reg => |reg| print("src: Reg({s}) ", .{@tagName(reg)}),
                         .Stack => |stack| print("src: Stack({d}) ", .{stack}),
@@ -371,13 +371,13 @@ pub fn printAssemblerAST(ast: Assembler.Assembly) void {
                 .Ret, .Cdq => {},
                 .Mov => |mov| {
                     switch (mov.src) {
-                        .Imm => |imm| print("src: Imm({s}) ", .{imm}),
+                        .Imm => |imm| print("src: Imm({d}) ", .{imm}),
                         .Pseudo => |reg| print("src: Pseudo({s}) ", .{reg}),
                         .Reg => |reg| print("src: Reg({s}) ", .{@tagName(reg)}),
                         .Stack => |stack| print("src: Stack({d}) ", .{stack}),
                     }
                     switch (mov.dst) {
-                        .Imm => |imm| print("dst: Imm({s})", .{imm}),
+                        .Imm => |imm| print("dst: Imm({d})", .{imm}),
                         .Pseudo => |reg| print("dst: Pseudo({s})", .{reg}),
                         .Reg => |reg| print("dst: Reg({s})", .{@tagName(reg)}),
                         .Stack => |stack| print("dst: Stack({d})", .{stack}),
@@ -386,7 +386,7 @@ pub fn printAssemblerAST(ast: Assembler.Assembly) void {
                 .Unary => |unary| {
                     print("operator={s} ", .{@tagName(unary.operator)});
                     switch (unary.operand) {
-                        .Imm => |imm| print("dst: Imm({s})", .{imm}),
+                        .Imm => |imm| print("dst: Imm({d})", .{imm}),
                         .Pseudo => |reg| print("dst: Pseudo({s})", .{reg}),
                         .Reg => |reg| print("dst: Reg({s})", .{@tagName(reg)}),
                         .Stack => |stack| print("dst: Stack({d})", .{stack}),
@@ -398,13 +398,13 @@ pub fn printAssemblerAST(ast: Assembler.Assembly) void {
                 .Binary => |binary| {
                     print("operator: {s} ", .{@tagName(binary.operator)});
                     switch (binary.src) {
-                        .Imm => |imm| print("src: Imm({s}) ", .{imm}),
+                        .Imm => |imm| print("src: Imm({d}) ", .{imm}),
                         .Pseudo => |reg| print("src: Pseudo({s}) ", .{reg}),
                         .Reg => |reg| print("src: Reg({s}) ", .{@tagName(reg)}),
                         .Stack => |stack| print("src: Stack({d}) ", .{stack}),
                     }
                     switch (binary.dst) {
-                        .Imm => |imm| print("dst: Imm({s})", .{imm}),
+                        .Imm => |imm| print("dst: Imm({d})", .{imm}),
                         .Pseudo => |reg| print("dst: Pseudo({s})", .{reg}),
                         .Reg => |reg| print("dst: Reg({s})", .{@tagName(reg)}),
                         .Stack => |stack| print("dst: Stack({d})", .{stack}),
@@ -412,7 +412,7 @@ pub fn printAssemblerAST(ast: Assembler.Assembly) void {
                 },
                 .Idiv => |idiv| {
                     switch (idiv.operand) {
-                        .Imm => |imm| print("src: Imm({s})", .{imm}),
+                        .Imm => |imm| print("src: Imm({d})", .{imm}),
                         .Pseudo => |reg| print("src: Pseudo({s})", .{reg}),
                         .Reg => |reg| print("src: Reg({s})", .{@tagName(reg)}),
                         .Stack => |stack| print("src: Stack({d})", .{stack}),
