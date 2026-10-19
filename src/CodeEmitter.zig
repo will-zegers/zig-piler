@@ -44,7 +44,7 @@ pub fn emitFunction(allocator: Allocator, function: Assembler.Function) ![][]con
     ;
 
     const functionDefinition = try allocator.print(functionDefTemplate, .{function.name});
-    const localPrefix = switch (builtin.os.tag) {
+    const labelPrefix = switch (builtin.os.tag) {
         .linux => ".L",
         else => unreachable, // only running this on linux atm
     };
@@ -150,7 +150,7 @@ pub fn emitFunction(allocator: Allocator, function: Assembler.Function) ![][]con
                     \\  jmp    {s}{s}
                 ;
 
-                break :code allocator.print(template, .{localPrefix, jmp.target});
+                break :code allocator.print(template, .{labelPrefix, jmp.target});
             },
             .JmpCC => |jmp| {
                 const template =
@@ -162,7 +162,7 @@ pub fn emitFunction(allocator: Allocator, function: Assembler.Function) ![][]con
                     else => unreachable,
                 };
 
-                break :code allocator.print(template, .{condCode, localPrefix, jmp.target});
+                break :code allocator.print(template, .{condCode, labelPrefix, jmp.target});
             },
             .SetCC => |*set| {
                 const template =
@@ -187,7 +187,7 @@ pub fn emitFunction(allocator: Allocator, function: Assembler.Function) ![][]con
                 const template =
                     \\{s}{s}:
                 ;
-                break :code allocator.print(template, .{localPrefix, label.id});
+                break :code allocator.print(template, .{labelPrefix, label.id});
             },
         } catch allocError();
         instructions.appendAssumeCapacity(code);
