@@ -34,13 +34,13 @@ pub fn main(init: std.process.Init) !void {
     const debug = args.debug;
     const stage = args.stage;
     const inputFile = args.inputFile;
+    const outputBin = args.outputBin;
 
     const files = try processFiles(allocator, init.io, inputFile);
     defer files.deinit(allocator);
     const text = files.text;
     const lines = files.lines;
     const outputSrc = files.outputSrc;
-    const outputBin = files.outputBin;
 
     var tokens: Lexer.Token.Iterator = undefined;
     var ast: Parser.AST = undefined;
@@ -140,6 +140,7 @@ const Args = struct {
     debug: bool = false,
     stage: Stage = .ToExecutable,
     inputFile: []const u8 = "",
+    outputBin: []const u8 = "a.out",
 };
 
 fn processArgs(init: std.process.Init) Args {
@@ -154,7 +155,13 @@ fn processArgs(init: std.process.Init) Args {
             usage()
         else if (mem.eql(u8, "-d", arg) or mem.eql(u8, "--debug", arg))
             args.debug = true
-        else if (mem.eql(u8, "--lex", arg))
+        else if (mem.eql(u8, "-o", arg)) {
+            if (argsIt.next()) |outputBin| {
+                args.outputBin = outputBin;
+            } else {
+                usage();
+            }
+        } else if (mem.eql(u8, "--lex", arg))
             args.stage = .Lex
         else if (mem.eql(u8, "--parse", arg))
             args.stage = .Parse
@@ -184,6 +191,7 @@ fn usage() noreturn {
         \\usage: zig-piler [options] file
         \\        -h, --help    Print this help message
         \\        -d, --debug   Output debug information
+        \\        -o <file>     Place the output into <file>
         \\  Only one of the following flags should be used to specify where the compiler
         \\  should stop. Otherwise, it will use the last flag given in the command
         \\        --lex         Tokenize the input
