@@ -5,6 +5,7 @@ const Allocator = mem.Allocator;
 const ArrayList = std.ArrayList;
 const Io = std.Io;
 const builtin = @import("builtin");
+const ArenaAllocator = std.heap.ArenaAllocator;
 
 const Assembler = @import("Assembler.zig");
 
@@ -14,33 +15,38 @@ const INSTR_SUFFIX: []const u8 = "l";
 
 const CodeEmitter = @This();
 
-allocator: Allocator,
+const UnitSize = enum {
+    Long,
+    Quad,
+};
+
+arena: ArenaAllocator,
 instructions: ArrayList([]const u8),
 
 pub fn init(allocator: Allocator, ast: Assembler.Assembly) !CodeEmitter {
+    var arena: ArenaAllocator = .init(allocator);
+    const arenaAllocator = arena.allocator();
+
     var instructions: ArrayList([]const u8) = .empty;
     for (ast.functions) |function| {
-        const slice = try emitFunction(allocator, function);
-        defer allocator.free(slice);
+        const slice = try emitFunction(arenaAllocator, function);
 
-        try instructions.appendSlice(allocator, slice);
+        try instructions.appendSlice(arenaAllocator, slice);
     }
 
     switch (builtin.os.tag) {
-        .linux => instructions.appendAssumeCapacity(try allocator.dupe(u8, ".section .note.GNU-stack,\"\",@progbits")),
+        .linux => try instructions.append(arenaAllocator, ".section .note.GNU-stack,\"\",@progbits"),
         else => unreachable, // only running this on linux atm
     }
-    instructions.appendAssumeCapacity(try allocator.dupe(u8, "\n")); // need newline at end of file
+    try instructions.append(arenaAllocator, "\n"); // need newline at end of file
 
-    return .{ .allocator = allocator, .instructions = instructions };
+    return .{ .arena = arena, .instructions = instructions };
 }
 
 pub fn emitFunction(allocator: Allocator, function: Assembler.Function) ![][]const u8 {
     const assembly = function.instructions;
 
-    // Assembly instructions will be 1:1 with the []const u8 entries in the emitted code, plus
-    // a few bookkeeping and prelude/epilogue instructions
-    var instructions = try ArrayList([]const u8).initCapacity(allocator, assembly.len + 16);
+    var instructions: ArrayList([] const u8) = .empty;
 
     const functionDefTemplate =
         \\  .globl {0s}
@@ -55,7 +61,7 @@ pub fn emitFunction(allocator: Allocator, function: Assembler.Function) ![][]con
         else => unreachable, // only running this on linux atm
     };
 
-    instructions.appendAssumeCapacity(functionDefinition);
+    try instructions.append(allocator, functionDefinition);
 
     for (assembly) |instruction| {
         const code = code: switch (instruction) {
@@ -73,20 +79,17 @@ pub fn emitFunction(allocator: Allocator, function: Assembler.Function) ![][]con
             },
             .Push => |push| {
                 const template =
-                    \\  pushq   {s}
+                    \\  pushq  {s}
                 ;
-                const operand = getOperandString(allocator, push.operand);
-                defer allocator.free(operand);
+                const operand = getOperandString(allocator, push.operand, .Quad);
                 break :code allocator.print(template, .{operand});
             },
             .Mov => |mov| {
                 const template =
                     \\  mov{s}    {s}, {s}
                 ;
-                const src = getOperandString(allocator, mov.src);
-                defer allocator.free(src);
-                const dst = getOperandString(allocator, mov.dst);
-                defer allocator.free(dst);
+                const src = getOperandString(allocator, mov.src, .Long);
+                const dst = getOperandString(allocator, mov.dst, .Long);
 
                 break :code allocator.print(template, .{INSTR_SUFFIX, src, dst});
             },
@@ -115,8 +118,7 @@ pub fn emitFunction(allocator: Allocator, function: Assembler.Function) ![][]con
                     .Dec => "dec",
                     .Not => unreachable, // implemented as x == 0
                 };
-                const operand = getOperandString(allocator, unary.operand);
-                defer allocator.free(operand);
+                const operand = getOperandString(allocator, unary.operand, .Long);
 
                 break :code allocator.print(template, .{operator, INSTR_SUFFIX, operand});
             },
@@ -135,10 +137,8 @@ pub fn emitFunction(allocator: Allocator, function: Assembler.Function) ![][]con
                     .SAR => "sar",
                     else => unreachable,
                 };
-                const src = getOperandString(allocator, binary.src);
-                defer allocator.free(src);
-                const dst = getOperandString(allocator, binary.dst);
-                defer allocator.free(dst);
+                const src = getOperandString(allocator, binary.src, .Long);
+                const dst = getOperandString(allocator, binary.dst, .Long);
 
                 break :code allocator.print(template, .{operator, INSTR_SUFFIX, src, dst});
             },
@@ -152,8 +152,7 @@ pub fn emitFunction(allocator: Allocator, function: Assembler.Function) ![][]con
                 const template =
                     \\  idiv{s}   {s}
                 ;
-                const operand = getOperandString(allocator, idiv.operand);
-                defer allocator.free(operand);
+                const operand = getOperandString(allocator, idiv.operand, .Long);
 
                 break :code allocator.print(template, .{INSTR_SUFFIX, operand});
             },
@@ -161,10 +160,8 @@ pub fn emitFunction(allocator: Allocator, function: Assembler.Function) ![][]con
                 const template =
                     \\  cmp{s}    {s}, {s}
                 ;
-                const arg1 = getOperandString(allocator, cmp.arg1);
-                defer allocator.free(arg1);
-                const arg2 = getOperandString(allocator, cmp.arg2);
-                defer allocator.free(arg2);
+                const arg1 = getOperandString(allocator, cmp.arg1, .Long);
+                const arg2 = getOperandString(allocator, cmp.arg2, .Long);
 
                 break :code allocator.print(template, .{INSTR_SUFFIX, arg1, arg2});
             },
@@ -200,8 +197,7 @@ pub fn emitFunction(allocator: Allocator, function: Assembler.Function) ![][]con
                     .NE => "ne",
                 };
 
-                const operand = getOperandString(allocator, set.operand);
-                defer allocator.free(operand);
+                const operand = getOperandString(allocator, set.operand, .Long);
 
                 break :code allocator.print(template, .{condCode, operand});
 
@@ -213,32 +209,42 @@ pub fn emitFunction(allocator: Allocator, function: Assembler.Function) ![][]con
                 break :code allocator.print(template, .{labelPrefix, label.id});
             },
         } catch allocError();
-        instructions.appendAssumeCapacity(code);
+        try instructions.append(allocator, code);
     }
 
-    return instructions.toOwnedSlice(allocator) catch allocError();
+    return try instructions.toOwnedSlice(allocator);
 }
 
-fn getOperandString(allocator: Allocator, operand: Assembler.Operand) []const u8 {
+fn getOperandString(allocator: Allocator, operand: Assembler.Operand, size: UnitSize) []const u8 {
     return switch(operand) {
         .Imm => |op| allocator.print("{c}{d}", .{'$', op}),
-        .Reg => |op| getRegisterName(allocator, op),
+        .Reg => |op| getRegisterName(allocator, op, size),
         .Stack => |op| allocator.print("{d}(%rbp)", .{op}),
         .Pseudo => unreachable,
     } catch allocError();
 }
 
-fn getRegisterName(allocator: Allocator, reg: Assembler.Reg) []const u8 {
-    return switch(reg) {
-        .ax, .cx, .dx, .di, .si => allocator.print("%{s}{s}", .{REG_PREFIX, @tagName(reg)}),
-        .r8, .r9, .r10, .r11 => allocator.print("%{s}{s}", .{@tagName(reg), GP_REG_SUFFIX}),
-        else => allocator.print("%{s}", .{@tagName(reg)}),
-    } catch allocError();
+fn getRegisterName(allocator: Allocator, reg: Assembler.Reg, size: UnitSize) []const u8 {
+    switch(reg) {
+        .ax, .cx, .dx, .di, .si => {
+            return switch (size) {
+                .Long => allocator.print("%e{s}", .{@tagName(reg)}) catch allocError(),
+                .Quad => allocator.print("%r{s}", .{@tagName(reg)}) catch allocError(),
+            };
+        },
+        .r8, .r9, .r10, .r11 => {
+            return switch (size) {
+                .Long => allocator.print("%{s}d", .{@tagName(reg)}) catch allocError(),
+                .Quad => allocator.print("%{s}", .{@tagName(reg)}) catch allocError(),
+            };
+        },
+        .cl => return allocator.print("%{s}", .{@tagName(reg)}) catch allocError(),
+    }
 }
 
-pub fn writeToFile(self: CodeEmitter, io: Io, outputPath: []const u8) !void {
-    const instructions = try mem.join(self.allocator, "\n", self.instructions.items);
-    defer self.allocator.free(instructions);
+pub fn writeToFile(self: CodeEmitter, allocator: Allocator, io: Io, outputPath: []const u8) !void {
+    const instructions = try mem.join(allocator, "\n", self.instructions.items);
+    defer allocator.free(instructions);
 
     const outputFile = try Io.Dir.cwd().createFile(io, outputPath, .{ .read = false });
     defer outputFile.close(io);
@@ -247,10 +253,11 @@ pub fn writeToFile(self: CodeEmitter, io: Io, outputPath: []const u8) !void {
 }
 
 pub fn deinit(self: *CodeEmitter) void {
-    for (self.instructions.items) |instruction| {
-        self.allocator.free(instruction);
-    }
-    self.instructions.deinit(self.allocator);
+    self.arena.deinit();
+    // for (self.instructions.items) |instruction| {
+    //     self.allocator.free(instruction);
+    // }
+    // self.instructions.deinit(self.allocator);
 }
 
 pub fn allocError() noreturn {

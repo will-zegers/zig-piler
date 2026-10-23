@@ -117,7 +117,7 @@ pub fn main(init: std.process.Init) !void {
         std.log.info("Writing source to '{s}'", .{outputSrc});
         var ce = try CodeEmitter.init(allocator, assembly);
         defer ce.deinit();
-        try ce.writeToFile(init.io, outputSrc);
+        try ce.writeToFile(allocator, init.io, outputSrc);
     } else return;
 
     if (stage.includes(.ToExecutable) or stage.includes(.ToLibrary)) {
