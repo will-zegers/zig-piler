@@ -26,6 +26,12 @@ pub fn init(allocator: Allocator, ast: Assembler.Assembly) !CodeEmitter {
         try instructions.appendSlice(allocator, slice);
     }
 
+    switch (builtin.os.tag) {
+        .linux => instructions.appendAssumeCapacity(try allocator.dupe(u8, ".section .note.GNU-stack,\"\",@progbits")),
+        else => unreachable, // only running this on linux atm
+    }
+    instructions.appendAssumeCapacity(try allocator.dupe(u8, "\n")); // need newline at end of file
+
     return .{ .allocator = allocator, .instructions = instructions };
 }
 
@@ -57,10 +63,22 @@ pub fn emitFunction(allocator: Allocator, function: Assembler.Function) ![][]con
                 const template =
                     \\  subq    ${d}, %rsp
                 ;
-                break :code allocator.print(template, .{allocStack.stackPointer});
+                break :code allocator.print(template, .{allocStack.stackSpace});
             },
-            .DeallocateStack => unreachable,
-            .Push => unreachable,
+            .DeallocateStack => |deallocStack| {
+                const template =
+                    \\  addq    ${d}, %rsp
+                ;
+                break :code allocator.print(template, .{deallocStack.int});
+            },
+            .Push => |push| {
+                const template =
+                    \\  pushq   {s}
+                ;
+                const operand = getOperandString(allocator, push.operand);
+                defer allocator.free(operand);
+                break :code allocator.print(template, .{operand});
+            },
             .Mov => |mov| {
                 const template =
                     \\  mov{s}    {s}, {s}
@@ -72,7 +90,12 @@ pub fn emitFunction(allocator: Allocator, function: Assembler.Function) ![][]con
 
                 break :code allocator.print(template, .{INSTR_SUFFIX, src, dst});
             },
-            .Call => unreachable,
+            .Call => |call| {
+                const template =
+                    \\  call    {s}
+                ;
+                break :code allocator.print(template, .{call.identifier});
+            },
             .Ret =>  {
                 const instr =
                     \\  movq    %rbp, %rsp
@@ -192,12 +215,6 @@ pub fn emitFunction(allocator: Allocator, function: Assembler.Function) ![][]con
         } catch allocError();
         instructions.appendAssumeCapacity(code);
     }
-
-    switch (builtin.os.tag) {
-        .linux => instructions.appendAssumeCapacity(try allocator.dupe(u8, ".section .note.GNU-stack,\"\",@progbits")),
-        else => unreachable, // only running this on linux atm
-    }
-    instructions.appendAssumeCapacity(try allocator.dupe(u8, "\n")); // need newline at end of file
 
     return instructions.toOwnedSlice(allocator) catch allocError();
 }

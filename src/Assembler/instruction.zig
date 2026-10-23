@@ -7,6 +7,8 @@ const TAC = @import("../TAC.zig");
 pub const InstructionList = ArrayList(Instruction);
 
 pub const ARG_REGISTERS = [_]Reg{ .di, .si, .dx, .cx, .r8, .r9 };
+pub const INT_SIZE_BYTES: isize = 4;
+pub const WORD_SIZE_BYTES: isize = 8;
 
 const InstructionTag = enum {
     Mov,
@@ -58,8 +60,8 @@ pub fn funCallToAssembly(allocator: Allocator, funCall: TAC.FunCall) ![]Instruct
         if ((funCall.args.len - ARG_REGISTERS.len) % 2 == 0) {
             allocatedStack = 0;
         } else {
-            allocatedStack = 8;
-            try assembly.append(allocator, .{ .AllocateStack = .{ .stackPointer = allocatedStack } });
+            allocatedStack = WORD_SIZE_BYTES;
+            try assembly.append(allocator, .{ .AllocateStack = .{ .stackSpace = allocatedStack } });
         }
     }
 
@@ -79,7 +81,7 @@ pub fn funCallToAssembly(allocator: Allocator, funCall: TAC.FunCall) ![]Instruct
                 });
             },
         }
-        allocatedStack += 8;
+        allocatedStack += WORD_SIZE_BYTES;
     }
     while (i > 0) { // Move arguments in corresponding stack registers
         i -= 1;
@@ -178,10 +180,10 @@ pub const Unary = struct {
 };
 
 pub const AllocateStack = struct {
-    stackPointer: isize,
+    stackSpace: isize,
 
-    pub fn prepend(allocator: Allocator, stackPointer: isize) []Instruction {
-        return allocator.dupe(Instruction, .{.{ .AllocateStack = .{ .stackPointer = stackPointer } }}) catch std.process.exit(0);
+    pub fn prepend(allocator: Allocator, stackSpace: isize) []Instruction {
+        return allocator.dupe(Instruction, .{.{ .AllocateStack = .{ .stackSpace = stackSpace } }}) catch std.process.exit(0);
     }
 };
 

@@ -393,7 +393,7 @@ pub fn printAssemblerAST(ast: Assembler.Assembly) void {
                     }
                 },
                 .AllocateStack => |allocStack| {
-                    print("int: {d}", .{allocStack.stackPointer});
+                    print("int: {d}", .{allocStack.stackSpace});
                 },
                 .Binary => |binary| {
                     print("operator: {s} ", .{@tagName(binary.operator)});
