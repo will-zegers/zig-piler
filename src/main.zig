@@ -30,101 +30,119 @@ const Stage = enum(usize) {
 pub fn main(init: std.process.Init) !void {
     const allocator = init.gpa;
 
-    const args = processArgs(init);
+    const args = try processArgs(allocator, init);
     const debug = args.debug;
     const stage = args.stage;
-    const inputFile = args.inputFile;
     const outputBin = args.outputBin;
+    const inputFiles = args.inputFiles;
+    defer allocator.free(inputFiles);
 
-    const files = try processFiles(allocator, init.io, inputFile);
-    defer files.deinit(allocator);
-    const text = files.text;
-    const lines = files.lines;
-    const outputSrc = files.outputSrc;
-
-    var tokens: Lexer.Token.Iterator = undefined;
-    var ast: Parser.AST = undefined;
-    var tac: TAC.Program = undefined;
-    var assembly: Assembler.Assembly = undefined;
+    var sourceList: ArrayList([]const u8) = .empty;
     defer {
-        if (stage.includes(.Lex)) tokens.deinit();
-        if (stage.includes(.Parse)) ast.deinit(allocator);
-        if (stage.includes(.TACky)) tac.deinit();
-        if (stage.includes(.CodeGen)) assembly.deinit();
+        for (sourceList.items) |item| {
+            allocator.free(item);
+        }
+        sourceList.deinit(allocator);
     }
 
-    if (stage.includes(.Lex)) {
-        std.log.info("Running lexer...", .{});
-        var lexer = try Lexer.init(allocator);
-        defer lexer.deinit();
+    for (inputFiles) |inputFile| {
+        const files = try processFiles(allocator, init.io, inputFile);
+        defer files.deinit(allocator);
 
-        tokens = try lexer.tokenize(text);
+        const text = files.text;
+        const lines = files.lines;
+        const outputSrc = files.outputSrc;
 
-        if (debug) {
-            std.debug.print("-------tokens-------\n", .{});
-            Debugger.printLexerTokens(&tokens);
-            tokens.reset();
+        if (isELF(text)) continue; // only process text files (i.e. non-executables)
+
+        var tokens: Lexer.Token.Iterator = undefined;
+        var ast: Parser.AST = undefined;
+        var tac: TAC.Program = undefined;
+        var assembly: Assembler.Assembly = undefined;
+        defer {
+            if (stage.includes(.Lex)) tokens.deinit();
+            if (stage.includes(.Parse)) ast.deinit(allocator);
+            if (stage.includes(.TACky)) tac.deinit();
+            if (stage.includes(.CodeGen)) assembly.deinit();
         }
-    } else return;
 
-    if (stage.includes(.Parse)) {
-        std.log.info("Running parser...", .{});
-        ast = Parser.parse(allocator, &tokens) catch {
-            const index = tokens.lineIndex;
-            std.log.err(" {d} | {s}\n", .{ index + 1, lines[index] });
-            std.process.exit(1);
-        };
+        if (stage.includes(.Lex)) {
+            std.log.info("Running lexer...", .{});
+            var lexer = try Lexer.init(allocator);
+            defer lexer.deinit();
 
-        if (debug) {
-            std.debug.print("-------parsed-------\n", .{});
-            Debugger.printParserAST(ast);
-        }
-    } else return;
+            tokens = try lexer.tokenize(text);
 
-    if (stage.includes(.Validate)) {
-        std.log.info("Running semantic analysis...", .{});
-        // var semantic = Semantic.init(allocator, lines);
+            if (debug) {
+                std.debug.print("-------tokens-------\n", .{});
+                Debugger.printLexerTokens(&tokens);
+                tokens.reset();
+            }
+        } else return;
 
-        Semantic.run(allocator, &ast, lines);
+        if (stage.includes(.Parse)) {
+            std.log.info("Running parser...", .{});
+            ast = Parser.parse(allocator, &tokens) catch {
+                const index = tokens.lineIndex;
+                std.log.err(" {d} | {s}\n", .{ index + 1, lines[index] });
+                std.process.exit(1);
+            };
 
-        if (debug) {
-            std.debug.print("-------parsed-------\n", .{});
-            Debugger.printParserAST(ast);
-        }
-    } else return;
+            if (debug) {
+                std.debug.print("-------parsed-------\n", .{});
+                Debugger.printParserAST(ast);
+            }
+        } else return;
 
-    if (stage.includes(.TACky)) {
-        std.log.info("Generating Tacky...", .{});
-        tac = TAC.emit(allocator, ast);
+        if (stage.includes(.Validate)) {
+            std.log.info("Running semantic analysis...", .{});
+            // var semantic = Semantic.init(allocator, lines);
 
-        if (debug) {
-            std.debug.print("-------TAC-------\n", .{});
-            Debugger.printTAC(tac);
-        }
-    } else return;
+            Semantic.run(allocator, &ast, lines);
 
-    if (stage.includes(.CodeGen)) {
-        std.log.info("Running assembler...", .{});
-        assembly = Assembler.assemble(allocator, tac);
+            if (debug) {
+                std.debug.print("-------parsed-------\n", .{});
+                Debugger.printParserAST(ast);
+            }
+        } else return;
 
-        if (debug) {
-            std.debug.print("------generated-------\n", .{});
-            Debugger.printAssemblerAST(assembly);
-        }
-    } else return;
+        if (stage.includes(.TACky)) {
+            std.log.info("Generating Tacky...", .{});
+            tac = TAC.emit(allocator, ast);
 
-    if (stage.includes(.ToSource)) {
-        std.log.info("Writing source to '{s}'", .{outputSrc});
-        var ce = try CodeEmitter.init(allocator, assembly);
-        defer ce.deinit();
-        try ce.writeToFile(allocator, init.io, outputSrc);
-    } else return;
+            if (debug) {
+                std.debug.print("-------TAC-------\n", .{});
+                Debugger.printTAC(tac);
+            }
+        } else return;
+
+        if (stage.includes(.CodeGen)) {
+            std.log.info("Running assembler...", .{});
+            assembly = Assembler.assemble(allocator, tac);
+
+            if (debug) {
+                std.debug.print("------generated-------\n", .{});
+                Debugger.printAssemblerAST(assembly);
+            }
+        } else return;
+
+        if (stage.includes(.ToSource)) {
+            std.log.info("Writing source to '{s}'", .{outputSrc});
+            var ce = try CodeEmitter.init(allocator, assembly);
+            defer ce.deinit();
+            try ce.writeToFile(allocator, init.io, outputSrc);
+        } else return;
+
+        try sourceList.append(allocator, try allocator.dupe(u8, outputSrc));
+    }
+    const sourceFiles = try mem.join(allocator, " ", sourceList.items);
+    defer allocator.free(sourceFiles);
 
     if (stage.includes(.ToExecutable) or stage.includes(.ToLibrary)) {
         var cmd = if (stage == .ToLibrary)
-            try std.process.spawn(init.io, .{ .argv = &.{ "gcc", "-c", outputSrc, "-o", outputBin } })
+            try std.process.spawn(init.io, .{ .argv = &.{ "gcc", "-c", sourceFiles, "-o", outputBin } })
         else
-            try std.process.spawn(init.io, .{ .argv = &.{ "gcc", outputSrc, "-o", outputBin } });
+            try std.process.spawn(init.io, .{ .argv = &.{ "gcc", sourceFiles, "-o", outputBin } });
 
         const status = try cmd.wait(init.io);
         if (status.exited != 0) {
@@ -139,12 +157,13 @@ pub fn main(init: std.process.Init) !void {
 const Args = struct {
     debug: bool = false,
     stage: Stage = .ToExecutable,
-    inputFile: []const u8 = "",
+    inputFiles: [][]const u8 = undefined,
     outputBin: []const u8 = "a.out",
 };
 
-fn processArgs(init: std.process.Init) Args {
+fn processArgs(allocator: Allocator, init: std.process.Init) Allocator.Error!Args {
     var args: Args = .{};
+    var inputFiles: ArrayList([]const u8) = .empty;
 
     var argsIt = try init.minimal.args.iterateAllocator(init.gpa);
     defer argsIt.deinit();
@@ -178,10 +197,11 @@ fn processArgs(init: std.process.Init) Args {
         else if (mem.eql(u8, "-e", arg))
             args.stage = .ToExecutable
         else
-            args.inputFile = arg;
+            try inputFiles.append(allocator, arg);
     }
+    args.inputFiles = try inputFiles.toOwnedSlice(allocator);
 
-    if (args.inputFile.len == 0) usage();
+    if (args.inputFiles.len == 0) usage();
 
     return args;
 }
@@ -207,17 +227,22 @@ fn usage() noreturn {
     std.process.exit(0);
 }
 
+fn isELF(contents: []const u8) bool {
+    if (contents[0] == 0x7f and mem.eql(u8, "ELF", contents[1..4])) {
+        return true;
+    }
+    return false;
+}
+
 const Files = struct {
     text: [:0]const u8,
     lines: [][]const u8,
     outputSrc: []const u8,
-    outputBin: []const u8,
 
     pub fn deinit(self: Files, allocator: Allocator) void {
         allocator.free(self.text);
         allocator.free(self.lines);
         allocator.free(self.outputSrc);
-        allocator.free(self.outputBin);
     }
 };
 
@@ -234,8 +259,7 @@ fn processFiles(
 
     const text = try allocator.dupeSentinel(u8, rawText, 0);
 
-    const outputBin: []const u8 = try getOutputBinary(allocator, inputFile);
-    const outputSrc = try allocator.print("{s}.s", .{outputBin});
+    const outputSrc: []const u8 = try getSourceName(allocator, inputFile);
 
     var it = mem.splitScalar(u8, text, '\n');
     var list: ArrayList([]const u8) = .empty;
@@ -244,12 +268,12 @@ fn processFiles(
     }
     const lines = try list.toOwnedSlice(allocator);
 
-    return .{ .text = text, .lines = lines, .outputSrc = outputSrc, .outputBin = outputBin };
+    return .{ .text = text, .lines = lines, .outputSrc = outputSrc };
 }
 
-/// Based on the input file name, generate an output binary name based on the last
+/// Based on the input file name, generate an output source name based on the last
 /// position of '.' (e.g. compiled output for "myprogram.c" will be "myprogram")
-fn getOutputBinary(allocator: Allocator, inputFile: []const u8) ![]const u8 {
+fn getSourceName(allocator: Allocator, inputFile: []const u8) ![]const u8 {
     var outputBin = inputFile;
     for (1..inputFile.len + 1) |i| {
         const backIndex = inputFile.len - i;
@@ -258,5 +282,5 @@ fn getOutputBinary(allocator: Allocator, inputFile: []const u8) ![]const u8 {
             break;
         }
     }
-    return try allocator.print("{s}", .{outputBin});
+    return try allocator.print("{s}.s", .{outputBin});
 }
