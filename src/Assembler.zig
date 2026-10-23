@@ -2,6 +2,7 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const ArrayList = std.ArrayList;
+const StringHashMap = std.StringHashMap;
 
 const TAC = @import("TAC.zig");
 
@@ -75,13 +76,14 @@ pub fn assembleFunction(allocator: Allocator, function: TAC.Function) Function {
         i += 1;
     }
 
-    // Offset of two words: top of the stack will be the callee base-pointer, followed
-    // by the return address. Then the stack begin the stack args
-    var stackOffset: isize = 2 * WORD_SIZE_BYTES;
+    var pseudoMap: std.StringHashMap(isize) = .init(allocator);
+    defer pseudoMap.deinit();
+
+    // Since the stack args already exist in memory, add an entry to the pseudo
+    // table for the already existing stack offsets
+    var stackOffset: isize = 2 * WORD_SIZE_BYTES; // return address + callee base-pointer
     while (i < function.params.len) {
-        const src: Operand = .{ .Stack = stackOffset };
-        const dst: Operand = .{ .Pseudo = function.params[i].unique.? };
-        instructionList.append(allocator, .{ .Mov = .{ .src = src, .dst = dst } }) catch allocError();
+        pseudoMap.put(function.params[i].unique.?, stackOffset) catch allocError();
 
         i += 1;
         stackOffset += WORD_SIZE_BYTES;
@@ -106,7 +108,7 @@ pub fn assembleFunction(allocator: Allocator, function: TAC.Function) Function {
     }
 
     // Second pass, replace Pseudo registers with stack locations and prepend the prelude
-    setupStack(allocator, &instructionList);
+    setupStack(allocator, &instructionList, &pseudoMap);
 
     // Find illegal instructions (see specifications in the Patcher module)
     var instructions = instructionList.toOwnedSlice(allocator) catch allocError();
@@ -119,61 +121,57 @@ pub fn assembleFunction(allocator: Allocator, function: TAC.Function) Function {
     };
 }
 
-fn setupStack(allocator: Allocator, instructions: *InstructionList) void {
-    var pseudoMap: std.StringHashMap(isize) = .init(allocator);
-    defer pseudoMap.deinit();
-
+fn setupStack(allocator: Allocator, instructions: *InstructionList, pseudoMap: *StringHashMap(isize)) void{
     var localStack: isize = 0;
 
     for (instructions.items) |*instr| {
         switch (instr.*) {
             .Mov => |*mov| {
-                replaceIfPseudo(&pseudoMap, &localStack, &mov.src);
-                replaceIfPseudo(&pseudoMap, &localStack, &mov.dst);
+                replaceIfPseudo(pseudoMap, &localStack, &mov.src);
+                replaceIfPseudo(pseudoMap, &localStack, &mov.dst);
             },
             .Unary => |*unary| {
-                replaceIfPseudo(&pseudoMap, &localStack, &unary.operand);
+                replaceIfPseudo(pseudoMap, &localStack, &unary.operand);
             },
             .Binary => |*binary| {
-                replaceIfPseudo(&pseudoMap, &localStack, &binary.src);
-                replaceIfPseudo(&pseudoMap, &localStack, &binary.dst);
+                replaceIfPseudo(pseudoMap, &localStack, &binary.src);
+                replaceIfPseudo(pseudoMap, &localStack, &binary.dst);
             },
             .Idiv => |*idiv| {
-                replaceIfPseudo(&pseudoMap, &localStack, &idiv.operand);
+                replaceIfPseudo(pseudoMap, &localStack, &idiv.operand);
             },
             .Cmp => |*cmp| {
-                replaceIfPseudo(&pseudoMap, &localStack, &cmp.arg1);
-                replaceIfPseudo(&pseudoMap, &localStack, &cmp.arg2);
+                replaceIfPseudo(pseudoMap, &localStack, &cmp.arg1);
+                replaceIfPseudo(pseudoMap, &localStack, &cmp.arg2);
             },
             .SetCC => |*setcc| {
-                replaceIfPseudo(&pseudoMap, &localStack, &setcc.operand);
+                replaceIfPseudo(pseudoMap, &localStack, &setcc.operand);
             },
             .Push => |*push| {
-                replaceIfPseudo(&pseudoMap, &localStack, &push.operand);
+                replaceIfPseudo(pseudoMap, &localStack, &push.operand);
             },
             else => {},
         }
     }
 
     // Prepend the instructions with stack space allocation based on the number of
-    // pseudo registers replaced with memory
-    instructions.insert(allocator, 0, .{ .AllocateStack = .{ .stackSpace = localStack } }) catch allocError();
+    // pseudo registers (i.e. local variables) replaced with memory
+    instructions.insert(allocator, 0, .{ .AllocateStack = .{ .stackSpace = -localStack } }) catch allocError();
 }
 
 /// Replace 'Psuedo' registers generated in the first pass with memory locations
 /// on the stack
-fn replaceIfPseudo(map: *std.StringHashMap(isize), stackSpace: *isize, operand: *Operand) void {
+fn replaceIfPseudo(map: *std.StringHashMap(isize), stackPointer: *isize, operand: *Operand) void {
     if (operand.* == .Pseudo) {
         const key = operand.Pseudo;
         // If the pseudo register has not been mapped to a location on the stack,
-        // map it to the location at the current top of the stack (stackSpace)
-        // and bump the stackSpace
+        // map it to the location in the local stack space
         if (map.get(key) == null) {
-            stackSpace.* += INT_SIZE_BYTES;
-            map.put(key, stackSpace.*) catch allocError();
+            stackPointer.* -= INT_SIZE_BYTES;
+            map.put(key, stackPointer.*) catch allocError();
         }
         const value = map.get(key).?;
-        operand.* = .{ .Stack = -value };
+        operand.* = .{ .Stack = value };
     }
 }
 
