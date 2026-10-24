@@ -89,26 +89,25 @@ pub fn assembleFunction(allocator: Allocator, function: TAC.Function, defined: *
 
     // Since the stack args already exist in memory, add an entry to the pseudo
     // table for the already existing stack offsets
-    var stackOffset: isize = 2 * WORD_SIZE_BYTES; // return address + callee base-pointer
+    var stackPointerOffset: isize = 2 * WORD_SIZE_BYTES; // return-address + callee base-pointer
     while (i < function.params.len) {
-        pseudoMap.put(function.params[i].unique.?, stackOffset) catch allocError();
+        pseudoMap.put(function.params[i].unique.?, stackPointerOffset) catch allocError();
 
         i += 1;
-        stackOffset += WORD_SIZE_BYTES;
+        stackPointerOffset += WORD_SIZE_BYTES;
     }
 
     // First pass to build Assembly AST
     for (function.body) |instr| {
         const assembly = switch (instr) {
-            .Unary => |unary| Unary.toAssembly(allocator, unary),
-            .Return => |ret| Ret.toAssembly(allocator, ret),
-            .Binary => |binary| Binary.toAssembly(allocator, binary),
-            .Copy => |copy| Mov.toAssembly(allocator, copy),
-            .Jump => |jmp| Jmp.toAssembly(allocator, jmp),
-            .JumpIfZero => JmpCC.toAssembly(allocator, instr),
-            .JumpIfNotZero => JmpCC.toAssembly(allocator, instr),
-            .Label => |label| Label.toAssembly(allocator, label),
-            .FunCall => |funCall| instruction.funCallToAssembly(allocator, funCall) catch allocError(),
+            .Unary => Unary.toAssembly(allocator, instr.Unary),
+            .Return => Ret.toAssembly(allocator, instr.Return),
+            .Binary => Binary.toAssembly(allocator, instr.Binary),
+            .Copy => Mov.toAssembly(allocator, instr.Copy),
+            .Jump => Jmp.toAssembly(allocator, instr.Jump),
+            .JumpIfZero, .JumpIfNotZero => JmpCC.toAssembly(allocator, instr),
+            .Label => Label.toAssembly(allocator, instr.Label),
+            .FunCall => instruction.funCallToAssembly(allocator, instr.FunCall) catch allocError(),
         };
         defer allocator.free(assembly);
 
