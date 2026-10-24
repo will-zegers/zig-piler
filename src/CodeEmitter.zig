@@ -6,6 +6,7 @@ const ArrayList = std.ArrayList;
 const Io = std.Io;
 const builtin = @import("builtin");
 const ArenaAllocator = std.heap.ArenaAllocator;
+const StringHashMap = std.StringHashMap;
 
 const Assembler = @import("Assembler.zig");
 
@@ -29,7 +30,7 @@ pub fn init(allocator: Allocator, ast: Assembler.Assembly) !CodeEmitter {
 
     var instructions: ArrayList([]const u8) = .empty;
     for (ast.functions) |function| {
-        const slice = try emitFunction(arenaAllocator, function);
+        const slice = try emitFunction(arenaAllocator, function, ast.defined);
 
         try instructions.appendSlice(arenaAllocator, slice);
     }
@@ -43,7 +44,7 @@ pub fn init(allocator: Allocator, ast: Assembler.Assembly) !CodeEmitter {
     return .{ .arena = arena, .instructions = instructions };
 }
 
-pub fn emitFunction(allocator: Allocator, function: Assembler.Function) ![][]const u8 {
+pub fn emitFunction(allocator: Allocator, function: Assembler.Function, defined: StringHashMap(bool)) ![][]const u8 {
     const assembly = function.instructions;
 
     var instructions: ArrayList([] const u8) = .empty;
@@ -95,9 +96,14 @@ pub fn emitFunction(allocator: Allocator, function: Assembler.Function) ![][]con
             },
             .Call => |call| {
                 const template =
-                    \\  call    {s}
+                    \\  call    {s}{s}
                 ;
-                break :code allocator.print(template, .{call.identifier});
+
+                break :code if (defined.contains(call.identifier))
+                    allocator.print(template, .{call.identifier, ""})
+                else
+                    allocator.print(template, .{call.identifier, "@PLT"});
+
             },
             .Ret =>  {
                 const instr =

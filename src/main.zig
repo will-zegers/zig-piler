@@ -33,9 +33,9 @@ pub fn main(init: std.process.Init) !void {
     const args = try processArgs(allocator, init);
     const debug = args.debug;
     const stage = args.stage;
-    const outputBin = args.outputBin;
     const inputFiles = args.inputFiles;
-    defer allocator.free(inputFiles);
+    const outputFile = args.outputFile.?;
+    defer args.deinit(allocator);
 
     var sourceList: ArrayList([]const u8) = .empty;
     defer {
@@ -52,8 +52,11 @@ pub fn main(init: std.process.Init) !void {
         const text = files.text;
         const lines = files.lines;
         const outputSrc = files.outputSrc;
+        try sourceList.append(allocator, try allocator.dupe(u8, outputSrc));
 
-        if (isELF(text)) continue; // only process text files (i.e. non-executables)
+        // TODO: Bring these two checks into one function, should 'continue' at top of loop
+        if (isELF(text)) continue; // only process text files (i.e. non-ELF)
+        if (mem.endsWith(u8, inputFile, ".s")) continue; // don't process source (.s) files
 
         var tokens: Lexer.Token.Iterator = undefined;
         var ast: Parser.AST = undefined;
@@ -132,24 +135,27 @@ pub fn main(init: std.process.Init) !void {
             defer ce.deinit();
             try ce.writeToFile(allocator, init.io, outputSrc);
         } else return;
-
-        try sourceList.append(allocator, try allocator.dupe(u8, outputSrc));
     }
-    const sourceFiles = try mem.join(allocator, " ", sourceList.items);
-    defer allocator.free(sourceFiles);
 
     if (stage.includes(.ToExecutable) or stage.includes(.ToLibrary)) {
-        var cmd = if (stage == .ToLibrary)
-            try std.process.spawn(init.io, .{ .argv = &.{ "gcc", "-c", sourceFiles, "-o", outputBin } })
-        else
-            try std.process.spawn(init.io, .{ .argv = &.{ "gcc", sourceFiles, "-o", outputBin } });
+        var argv: ArrayList([]const u8) = .empty;
+        defer argv.deinit(allocator);
 
+        try argv.append(allocator, "gcc");
+        if (stage == .ToLibrary) {
+            try argv.appendSlice(allocator, &.{ "-c", "-o", outputFile });
+        } else {
+            try argv.appendSlice(allocator, &.{ "-o", outputFile });
+        }
+        try argv.appendSlice(allocator, sourceList.items);
+
+        var cmd = try std.process.spawn(init.io, .{ .argv = argv.items });
         const status = try cmd.wait(init.io);
         if (status.exited != 0) {
-            std.log.err("Failed to compile {s}", .{outputBin});
+            std.log.err("Failed to compile {s}", .{outputFile});
             std.process.exit(status.exited);
         } else {
-            std.log.info("'{s}' successfully compiled!", .{outputBin});
+            std.log.info("'{s}' successfully compiled!", .{outputFile});
         }
     }
 }
@@ -158,7 +164,12 @@ const Args = struct {
     debug: bool = false,
     stage: Stage = .ToExecutable,
     inputFiles: [][]const u8 = undefined,
-    outputBin: []const u8 = "a.out",
+    outputFile: ?[]const u8 = null,
+
+    pub fn deinit(self: Args, allocator: Allocator) void {
+        allocator.free(self.inputFiles);
+        allocator.free(self.outputFile.?);
+    }
 };
 
 fn processArgs(allocator: Allocator, init: std.process.Init) Allocator.Error!Args {
@@ -175,8 +186,8 @@ fn processArgs(allocator: Allocator, init: std.process.Init) Allocator.Error!Arg
         else if (mem.eql(u8, "-d", arg) or mem.eql(u8, "--debug", arg))
             args.debug = true
         else if (mem.eql(u8, "-o", arg)) {
-            if (argsIt.next()) |outputBin| {
-                args.outputBin = outputBin;
+            if (argsIt.next()) |outputFile| {
+                args.outputFile = outputFile;
             } else {
                 usage();
             }
@@ -200,6 +211,14 @@ fn processArgs(allocator: Allocator, init: std.process.Init) Allocator.Error!Arg
             try inputFiles.append(allocator, arg);
     }
     args.inputFiles = try inputFiles.toOwnedSlice(allocator);
+
+    if (args.outputFile == null) {
+        const baseName = getBaseName(args.inputFiles[0]);
+        args.outputFile = switch (args.stage) {
+            .ToLibrary => try allocator.print("{s}.o", .{baseName}),
+            else => try allocator.dupe(u8, baseName),
+        };
+    }
 
     if (args.inputFiles.len == 0) usage();
 
@@ -259,7 +278,8 @@ fn processFiles(
 
     const text = try allocator.dupeSentinel(u8, rawText, 0);
 
-    const outputSrc: []const u8 = try getSourceName(allocator, inputFile);
+    const baseName: []const u8 = getBaseName(inputFile);
+    const outputSrc = try allocator.print("{s}.s", .{baseName});
 
     var it = mem.splitScalar(u8, text, '\n');
     var list: ArrayList([]const u8) = .empty;
@@ -273,7 +293,7 @@ fn processFiles(
 
 /// Based on the input file name, generate an output source name based on the last
 /// position of '.' (e.g. compiled output for "myprogram.c" will be "myprogram")
-fn getSourceName(allocator: Allocator, inputFile: []const u8) ![]const u8 {
+fn getBaseName(inputFile: []const u8) []const u8 {
     var outputBin = inputFile;
     for (1..inputFile.len + 1) |i| {
         const backIndex = inputFile.len - i;
@@ -282,5 +302,5 @@ fn getSourceName(allocator: Allocator, inputFile: []const u8) ![]const u8 {
             break;
         }
     }
-    return try allocator.print("{s}.s", .{outputBin});
+    return outputBin;
 }

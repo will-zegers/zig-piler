@@ -50,7 +50,7 @@ pub fn funCallToAssembly(allocator: Allocator, funCall: TAC.FunCall) ![]Instruct
 
     // Define and check how much we need to allocate initially to the stack to make sure it's
     // aligned to 16-bytes on function call, per Sys V ABI
-    var allocatedStack: isize = undefined;
+    var allocatedStack: usize = undefined;
     if (funCall.args.len <= ARG_REGISTERS.len) {
         // No stack arguments, so no alignment needed
         allocatedStack = 0;
@@ -180,7 +180,7 @@ pub const Unary = struct {
 };
 
 pub const AllocateStack = struct {
-    stackSpace: isize,
+    stackSpace: usize,
 
     pub fn prepend(allocator: Allocator, stackSpace: isize) []Instruction {
         return allocator.dupe(Instruction, .{.{ .AllocateStack = .{ .stackSpace = stackSpace } }}) catch std.process.exit(0);
@@ -188,7 +188,7 @@ pub const AllocateStack = struct {
 };
 
 pub const DeallocateStack = struct {
-    int: isize,
+    int: usize,
 };
 
 pub const Binary = struct {

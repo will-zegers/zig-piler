@@ -32,12 +32,14 @@ pub const Assembly = Program;
 const Program = struct {
     allocator: Allocator,
     functions: []Function,
+    defined: StringHashMap(bool),
 
     pub fn deinit(self: *Assembly) void {
         for (self.functions) |*function| {
             function.deinit();
         }
         self.allocator.free(self.functions);
+        self.defined.deinit();
     }
 };
 
@@ -53,17 +55,23 @@ pub const Function = struct {
 
 pub fn assemble(allocator: Allocator, tree: TAC.Program) Assembly {
     var functions: ArrayList(Function) = .empty;
+    var defined: StringHashMap(bool) = .init(allocator);
+
     for (tree.functions) |function| {
-        functions.append(allocator, assembleFunction(allocator, function)) catch allocError();
+        const assembly = assembleFunction(allocator, function, &defined);
+        functions.append(allocator, assembly) catch allocError();
     }
 
     return .{
         .allocator = allocator,
         .functions = functions.toOwnedSlice(allocator) catch allocError(),
+        .defined = defined,
     };
 }
 
-pub fn assembleFunction(allocator: Allocator, function: TAC.Function) Function {
+pub fn assembleFunction(allocator: Allocator, function: TAC.Function, defined: *StringHashMap(bool)) Function {
+    defined.put(function.name, true) catch allocError();
+
     var instructionList: InstructionList = .empty;
 
     // Move arguments into memory
@@ -154,9 +162,12 @@ fn setupStack(allocator: Allocator, instructions: *InstructionList, pseudoMap: *
         }
     }
 
+    // Make sure the stack is 16-byte aligned
+    const stackSpace = 16 * @divCeil(@abs(localStack), 16);
+
     // Prepend the instructions with stack space allocation based on the number of
     // pseudo registers (i.e. local variables) replaced with memory
-    instructions.insert(allocator, 0, .{ .AllocateStack = .{ .stackSpace = -localStack } }) catch allocError();
+    instructions.insert(allocator, 0, .{ .AllocateStack = .{ .stackSpace = stackSpace } }) catch allocError();
 }
 
 /// Replace 'Psuedo' registers generated in the first pass with memory locations
