@@ -17,15 +17,15 @@ pub fn run(allocator: Allocator, context: *Context, tree: *Parser.AST) void {
 }
 
 fn resolveProgram(allocator: Allocator, context: *Context, tree: *Parser.AST) void {
-    for (tree.functions) |*funDecl| {
-        resolveFunDecl(allocator, context, funDecl);
+    for (tree.declarations) |*decl| {
+        resolveDeclaration(allocator, context, decl);
     }
 }
 
 fn resolveDeclaration(allocator: Allocator, context: *Context, decl: *Declaration) void {
     switch (decl.*) {
         .FunDecl => |*funDecl| resolveFunDecl(allocator, context, funDecl),
-        .VarDecl => |*varDecl| resolveVarDecl(allocator, context, varDecl),
+        .VarDecl => |*varDecl| resolveLocalVarDecl(allocator, context, varDecl),
     }
 }
 
@@ -47,11 +47,18 @@ fn resolveFunDecl(allocator: Allocator, context: *Context, decl: *FunDecl) void 
     defer context.popScope();
 
     for (decl.params) |*param| {
-        resolveVarDecl(allocator, context, param);
+        resolveLocalVarDecl(allocator, context, param);
+    }
+
+    // Static storage class only allowed for function at file-scope
+    if (context.getScope().type != .File and decl.storageClass == .Static) {
+        context.err.report(.BlockScopeStaticFunDecl, decl.lineIndex, null);
+        return;
     }
 
     if (decl.body) |*body| {
-        if (!mem.eql(u8, Context.GLOBAL_TAG, scope.tag)) {
+        // Function definitions no allowed outside of file scope
+        if (!mem.eql(u8, Context.FILE_SCOPE, scope.tag)) {
             context.err.report(.NestedFunction, decl.lineIndex, null);
             return;
         }
@@ -60,18 +67,41 @@ fn resolveFunDecl(allocator: Allocator, context: *Context, decl: *FunDecl) void 
 }
 
 fn resolveVarDecl(allocator: Allocator, context: *Context, decl: *VarDecl) void {
+    if (context.tag == Context.FILE_SCOPE) {
+        resolveFileScopeVarDecl(context, decl);
+    } else {
+        resolveLocalVarDecl(allocator, context, decl);
+    }
+}
+
+fn resolveFileScopeVarDecl(context: *Context, decl: *VarDecl) void {
+    // Since file-scope declaration must be initialized with constant values (and
+    // 'constexpr' is not currently supported), we don't need to resolve anything
+    // int the initialization if it exists
+    const scope = context.getScope();
+    scope.identifiers.put(decl.name, .{ .unique = decl.name, .hasLinkage = true }) catch allocError();
+}
+
+fn resolveLocalVarDecl(allocator: Allocator, context: *Context, decl: *VarDecl) void {
     const name = decl.name; // cache the parsed name
 
     if (context.getScope().identifiers.get(name)) |entry| {
         if (entry.fromCurrentScope) {
-            context.err.report(.Redeclaration, decl.lineIndex, decl.name);
-            return;
+            if (!entry.hasLinkage or decl.storageClass != .Extern) {
+                context.err.report(.Redeclaration, decl.lineIndex, decl.name);
+                return;
+            }
         }
     }
 
-    decl.unique = generateUnique(allocator, context, name); // add a unique tag to the name
-    // add the parsed name and now unique name as a key-value pair
-    context.getScope().identifiers.put(name, .{ .unique = decl.unique.? }) catch allocError();
+    const scope = context.getScope();
+    if (decl.storageClass == .Extern) {
+        scope.identifiers.put(decl.name, .{ .unique = decl.name, .hasLinkage = true }) catch allocError();
+        return;
+    }
+
+    decl.unique = generateUnique(allocator, context, name);
+    scope.identifiers.put(name, .{ .unique = decl.unique.? }) catch allocError();
 
     if (decl.init) |*initExpr| {
         resolveExpression(allocator, context, initExpr);

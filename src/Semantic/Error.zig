@@ -7,6 +7,7 @@ const std = @import("std");
 const log = std.log;
 
 pub const SemanticError = enum {
+    BlockScopeStaticFunDecl,
     Break,
     CallOnNonFunction,
     CaseDuplicate,
@@ -18,6 +19,7 @@ pub const SemanticError = enum {
     OrphanGoto,
     OrphanLabel,
     Redeclaration,
+    InvalidStaticDeclaration,
     TooFewArguments,
     TooManyArguments,
     UndeclaredIdentifier,
@@ -34,12 +36,14 @@ pub const Reporter = struct {
 
     pub fn report(self: *Reporter, err: SemanticError, lineIndex: usize, name: ?[]const u8) void {
         switch (err) {
+            .BlockScopeStaticFunDecl => log.err("Function declared in block scope cannot have a 'static' storage class", .{}),
             .Break => log.err("'break' statement outside of loop or switch statement", .{}),
             .CallOnNonFunction => log.err("Called object is not a function or function pointer", .{}),
             .CaseOutside => log.err("'case' or 'default' label outside of switch statement", .{}),
             .CaseDuplicate => log.err("Duplicate 'case' or 'default'", .{}),
             .Continue => log.err("'continue' statement outside of loop statement", .{}),
             .IncompatibleFunctions => log.err("Incompatible function declarations", .{}),
+            .InvalidStaticDeclaration => log.err("Static declaration  of '{s}' follows  non-static declaration", .{name.?}),
             .NotAssignable => log.err("Expression is not an assignable lvalue", .{}),
             .NestedFunction => log.err("Function definitions may only exist at the top level", .{}),
             .OrphanGoto => {},

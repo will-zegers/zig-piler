@@ -22,10 +22,6 @@ var ErrorReporter: *Error.Reporter = undefined;
 
 const TypeChecker = @This();
 
-const SymbolType = enum {
-    Int,
-};
-
 const Int = struct {};
 
 const FunType = struct {
@@ -39,9 +35,33 @@ const Type = union(TypeTag) {
     FunType: FunType,
 };
 
+const FunAttr = struct {
+    defined: bool,
+    global: bool,
+};
+
+const Attrs = union {
+    const InitialValue = union {
+        Tentative: struct {},
+        Initial: struct {
+            int: isize,
+        },
+    };
+
+    Fun: struct {
+        defined: bool,
+        global: bool,
+    },
+    Static: struct {
+        initialValue: ?InitialValue,
+        global: bool,
+    },
+    Local: struct {},
+};
+
 const Entry = struct {
     type: Type,
-    defined: ?bool = null,
+    attrs: Attrs,
 };
 
 const SymbolTable = StringHashMap(Entry);
@@ -52,8 +72,8 @@ pub fn run(allocator: Allocator, errorReporter: *Error.Reporter, tree: *AST) voi
     var symbols: SymbolTable = .init(allocator);
     defer symbols.deinit();
 
-    for (tree.functions) |func| {
-        typeCheckFunDecl(&symbols, func);
+    for (tree.declarations) |decl| {
+        typeCheckDeclaration(&symbols, decl);
     }
 }
 
@@ -66,7 +86,8 @@ fn typeCheckDeclaration(symbols: *SymbolTable, decl: Declaration) void {
 
 fn typeCheckFunDecl(symbols: *SymbolTable, decl: FunDecl) void {
     const funType: FunType = .{ .type = .{}, .nParams = decl.params.len };
-    var isDefined = false;
+    var isDefined: bool = undefined;
+    var isGlobal: bool = undefined;
 
     if (symbols.get(decl.name)) |entry| {
         if (entry.type != .FunType or entry.type.FunType.nParams != funType.nParams) {
@@ -74,24 +95,35 @@ fn typeCheckFunDecl(symbols: *SymbolTable, decl: FunDecl) void {
             return;
         }
 
-        isDefined = entry.defined.?;
+        isDefined = entry.attrs.Fun.defined;
         if (isDefined and decl.body != null) {
             ErrorReporter.report(.Redeclaration, decl.lineIndex, decl.name);
             return;
         }
+
+        isGlobal = entry.attrs.Fun.global;
+        if (isGlobal and decl.storageClass == .Static) {
+            ErrorReporter.report(.InvalidStaticDeclaration, decl.lineIndex, decl.name);
+            return;
+        }
     }
-    symbols.put(decl.name, .{ .type = .{ .FunType = funType }, .defined = isDefined or decl.body != null }) catch @panic("OOM");
+
+    const attrs: Attrs = .{ .Fun = .{
+        .defined = isDefined or decl.body != null,
+        .global = isGlobal,
+    } };
+    symbols.put(decl.name, .{ .type = .{ .FunType = funType }, .attrs = attrs }) catch @panic("OOM");
 
     if (decl.body) |body| {
         for (decl.params) |param| {
-            symbols.put(param.unique.?, .{ .type = .Int }) catch @panic("OOM");
+            symbols.put(param.unique.?, .{ .type = .Int, .attrs = .{ .Local = .{} } }) catch @panic("OOM");
         }
         typeCheckBlock(symbols, body);
     }
 }
 
 fn typeCheckVarDecl(symbols: *SymbolTable, decl: VarDecl) void {
-    symbols.put(decl.unique.?, .{ .type = .Int }) catch @panic("OOM");
+    symbols.put(decl.unique.?, .{ .type = .Int, .attrs = .{ .Local = .{} } }) catch @panic("OOM");
     if (decl.init) |init| {
         typeCheckExpression(symbols, init);
     }

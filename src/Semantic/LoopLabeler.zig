@@ -11,9 +11,11 @@ const Statement = Parser.Statement;
 const Context = @import("Context.zig");
 
 pub fn run(allocator: Allocator, context: *Context, tree: *AST) void {
-    for (tree.functions) |*function| {
-        if (function.body) |*body| {
-            context.function = function.name;
+    for (tree.declarations) |*decl| {
+        if (decl.* != .FunDecl) continue;
+
+        if (decl.FunDecl.body) |*body| {
+            context.function = decl.FunDecl.name;
             defer context.function = null;
 
             labelBlockLoops(allocator, context, body);

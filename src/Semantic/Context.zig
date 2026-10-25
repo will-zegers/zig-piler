@@ -22,9 +22,9 @@ const Entry = struct {
 
 const IdentifierMap = std.StringHashMap(Entry);
 
-pub const GLOBAL_TAG = "_global";
+pub const FILE_SCOPE = "_global";
 const ScopeType = enum {
-    Global,
+    File,
     Function,
     Block,
     Loop,
@@ -48,9 +48,9 @@ counter: usize = 0,
 pub fn init(allocator: Allocator, errorReporter: *Error.Reporter) Context {
     var scopeStack: ArrayList(Scope) = .empty;
     scopeStack.append(allocator, .{
-        .type = .Block,
+        .type = .File,
         .identifiers = .init(allocator),
-        .tag = GLOBAL_TAG,
+        .tag = FILE_SCOPE,
     }) catch allocError();
 
     return .{
