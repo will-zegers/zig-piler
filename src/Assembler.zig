@@ -70,11 +70,13 @@ pub fn assemble(allocator: Allocator, tree: TAC.Program) Assembly {
 }
 
 pub fn assembleFunction(allocator: Allocator, function: TAC.Function, defined: *StringHashMap(bool)) Function {
+    var instructionList: InstructionList = .empty;
+    var pseudoMap: std.StringHashMap(isize) = .init(allocator);
+    defer pseudoMap.deinit();
+
     defined.put(function.name, true) catch allocError();
 
-    var instructionList: InstructionList = .empty;
-
-    // Move arguments into memory
+    // Move register arguments into stack memory so as not to clobber callee-saved registers
     var i: usize = 0;
     while (i < function.params.len and i < ARG_REGISTERS.len) {
         const src: Operand = .{ .Reg = ARG_REGISTERS[i] };
@@ -84,12 +86,9 @@ pub fn assembleFunction(allocator: Allocator, function: TAC.Function, defined: *
         i += 1;
     }
 
-    var pseudoMap: std.StringHashMap(isize) = .init(allocator);
-    defer pseudoMap.deinit();
-
     // Since the stack args already exist in memory, add an entry to the pseudo
     // table for the already existing stack offsets
-    var stackPointerOffset: isize = 2 * WORD_SIZE_BYTES; // return-address + callee base-pointer
+    var stackPointerOffset: isize = 2 * WORD_SIZE_BYTES; // return-address + caller base-pointer
     while (i < function.params.len) {
         pseudoMap.put(function.params[i].unique.?, stackPointerOffset) catch allocError();
 

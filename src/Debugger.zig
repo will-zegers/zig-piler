@@ -15,10 +15,10 @@ pub fn printLexerTokens(tokens: *TokenIterator) void {
 }
 
 pub fn printParserAST(tree: Parser.AST) void {
-    const functions = tree.functions;
+    const declarations = tree.declarations;
     print("{any}(\n", .{@TypeOf(tree)});
-    for (functions) |function| {
-        printDeclaration(.{ .FunDecl = function }, 4);
+    for (declarations) |declaration| {
+        printDeclaration(declaration, 4);
     }
     print("  )\n", .{});
     print(")\n", .{});

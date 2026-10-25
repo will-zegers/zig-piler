@@ -8,6 +8,8 @@ pub const identifier = []const u8;
 pub const ParsingError = error{
     DuplicateCase,
     EOF,
+    InvalidType,
+    InvalidStorageClass,
     Lvalue,
     NonConstExpr,
     Syntax,

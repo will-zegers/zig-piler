@@ -2,6 +2,7 @@ const std = @import("std");
 const mem = std.mem;
 const Allocator = mem.Allocator;
 const ArrayList = std.ArrayList;
+const log = std.log;
 
 const common = @import("Parser/common.zig");
 const ParsingError = common.ParsingError;
@@ -39,21 +40,21 @@ pub fn parse(allocator: Allocator, tokens: *TokenIterator) ParsingError!AST {
 
 pub const Program = struct {
     allocator: Allocator,
-    functions: []FunDecl,
+    declarations: []Declaration,
 
     pub fn parse(allocator: Allocator, tokens: *TokenIterator) ParsingError!Program {
-        var functions: ArrayList(FunDecl) = .empty;
+        var declarations: ArrayList(Declaration) = .empty;
         while (!tokens.eofReached()) {
-            functions.append(allocator, try .parse(allocator, tokens)) catch allocError();
+            declarations.append(allocator, try .parse(allocator, tokens)) catch allocError();
         }
-        return .{ .allocator = allocator, .functions = functions.toOwnedSlice(allocator) catch allocError() };
+        return .{ .allocator = allocator, .declarations = declarations.toOwnedSlice(allocator) catch allocError() };
     }
 
     pub fn deinit(self: *Program, allocator: Allocator) void {
-        for (self.functions) |*function| {
-            function.deinit(allocator);
+        for (self.declarations) |*declaration| {
+            declaration.deinit(allocator);
         }
-        allocator.free(self.functions);
+        allocator.free(self.declarations);
     }
 };
 
@@ -62,16 +63,61 @@ pub const Declaration = union(DeclarationTag) {
     FunDecl: FunDecl,
     VarDecl: VarDecl,
 
+    const Specifiers = struct {
+        type: ?Token.Type = null,
+        storageClass: ?StorageClass = null,
+    };
+
     pub fn parse(allocator: Allocator, tokens: *TokenIterator) ParsingError!Declaration {
         // We need to look a couple tokens ahead to determine if this is a function declaration,
         // which be of the form "int" <identifier> "(" (i.e., the 'marker' be an open paranthesis).
         // If not, assume it a variable declaration of the form "int" <identifier> (";" | "=") and
         // try to parse it as such;
-        const markerToken = tokens.lookAhead(2);
-        return switch (markerToken.type) {
-            .OpenParenthesis => .{ .FunDecl = try .parse(allocator, tokens) },
-            else => .{ .VarDecl = try .parse(allocator, tokens) },
+        const specifiers = try parseTypeAndStorageClass(tokens);
+        return switch (tokens.lookAhead(1).type) {
+            .OpenParenthesis => .{ .FunDecl = try .parse(allocator, tokens, specifiers) },
+            else => .{ .VarDecl = try .parse(allocator, tokens, specifiers) },
         };
+    }
+
+    pub fn parseTypeAndStorageClass(tokens: *TokenIterator) ParsingError!Specifiers {
+        var specifiers: Specifiers = .{};
+        var nextToken = tokens.peek();
+        while (nextToken.type != .Identifier) {
+            switch (nextToken.type) {
+                .Int => {
+                    if (specifiers.type != null) {
+                        log.err("Invalid type specifier", .{});
+                        return ParsingError.InvalidType;
+                    }
+                    specifiers.type = .Int;
+                },
+                .Extern => {
+                    if (specifiers.storageClass != null) {
+                        log.err("Invalid or duplicate storage class '{s}'", .{nextToken.symbol});
+                        return ParsingError.InvalidStorageClass;
+                    }
+                    specifiers.storageClass = .Extern;
+                },
+                .Static => {
+                    if (specifiers.storageClass != null) {
+                        log.err("Invalid or duplicate storage class '{s}'", .{nextToken.symbol});
+                        return ParsingError.InvalidStorageClass;
+                    }
+                    specifiers.storageClass = .Static;
+                },
+                else => return ParsingError.Token,
+            }
+            tokens.skip();
+            nextToken = tokens.peek();
+        }
+
+        if (specifiers.type == null) {
+            log.err("Declaration for '{s}' does not name a type", .{nextToken.symbol});
+            return ParsingError.InvalidType;
+        }
+
+        return specifiers;
     }
 
     pub fn deinit(self: *Declaration, allocator: Allocator) void {
@@ -87,10 +133,10 @@ pub const FunDecl = struct {
     name: identifier,
     params: []VarDecl,
     body: ?Block,
+    type: Token.Type,
+    storageClass: ?StorageClass,
 
-    pub fn parse(allocator: Allocator, tokens: *TokenIterator) ParsingError!FunDecl {
-        try expect(.Int, tokens.next());
-
+    pub fn parse(allocator: Allocator, tokens: *TokenIterator, specifiers: Declaration.Specifiers) ParsingError!FunDecl {
         const name = tokens.next();
         try expect(.Identifier, name);
 
@@ -106,7 +152,14 @@ pub const FunDecl = struct {
             break :blk null;
         };
 
-        return .{ .name = name.symbol, .params = params, .body = body, .lineIndex = token.lineIndex };
+        return .{
+            .lineIndex = token.lineIndex,
+            .name = name.symbol,
+            .params = params,
+            .body = body,
+            .type = specifiers.type.?,
+            .storageClass = specifiers.storageClass,
+        };
     }
 
     pub fn deinit(self: *FunDecl, allocator: Allocator) void {
@@ -146,17 +199,23 @@ pub const VarDecl = struct {
     name: identifier,
     unique: ?identifier = null,
     init: ?Expression = null,
+    type: Token.Type,
+    storageClass: ?StorageClass = null,
 
-    pub fn parse(allocator: Allocator, tokens: *TokenIterator) ParsingError!VarDecl {
-        try expect(.Int, tokens.next());
-
+    pub fn parse(allocator: Allocator, tokens: *TokenIterator, specifiers: Declaration.Specifiers) ParsingError!VarDecl {
         const token = tokens.peek();
         try expect(.Identifier, token);
 
         const init = try Assignment.fromDecl(allocator, tokens);
         try expect(.Semicolon, tokens.next());
 
-        return .{ .lineIndex = token.lineIndex, .name = token.symbol, .init = init };
+        return .{
+            .lineIndex = token.lineIndex,
+            .name = token.symbol,
+            .init = init,
+            .type = specifiers.type.?,
+            .storageClass = specifiers.storageClass,
+        };
     }
 
     pub fn asParam(tokens: *TokenIterator) ParsingError!VarDecl {
@@ -167,7 +226,7 @@ pub const VarDecl = struct {
 
         const name = token.symbol;
 
-        return .{ .lineIndex = token.lineIndex, .name = name };
+        return .{ .lineIndex = token.lineIndex, .name = name, .type = .Int };
     }
 
     pub fn deinit(self: *VarDecl, allocator: Allocator) void {
@@ -176,6 +235,8 @@ pub const VarDecl = struct {
     }
 };
 
+const StorageClass = enum { Extern, Static };
+
 pub const BlockItemTag = enum { Declaration, Statement };
 pub const BlockItem = union(BlockItemTag) {
     Declaration: Declaration,
@@ -183,10 +244,10 @@ pub const BlockItem = union(BlockItemTag) {
 
     pub fn parse(allocator: Allocator, tokens: *TokenIterator) ParsingError!BlockItem {
         const nextToken = tokens.peek();
-        return if (.Int == nextToken.type)
-            .{ .Declaration = try .parse(allocator, tokens) }
-        else
-            .{ .Statement = try .parse(allocator, tokens) };
+        return switch (nextToken.type) {
+            .Int, .Extern, .Static => .{ .Declaration = try .parse(allocator, tokens) },
+            else => .{ .Statement = try .parse(allocator, tokens) },
+        };
     }
 
     pub fn deinit(self: *BlockItem, allocator: Allocator) void {
@@ -287,17 +348,23 @@ const ForInit = union(ForInitTag) {
 
     pub fn parse(allocator: Allocator, tokens: *TokenIterator) ParsingError!ForInit {
         const nextToken = tokens.peek();
-        return switch (nextToken.type) {
-            .Int => .{ .Declaration = .{ .VarDecl = try .parse(allocator, tokens) } },
-            else => blk: {
+        switch (nextToken.type) {
+            .Int, .Extern, .Static => {
+                const specifiers = try Declaration.parseTypeAndStorageClass(tokens);
+
+                const varDecl: VarDecl = try .parse(allocator, tokens, specifiers);
+                return .{ .Declaration = .{ .VarDecl = varDecl } };
+            },
+            else => {
                 const expr: ?Expression = if (.Semicolon != nextToken.type)
                     try .parse(allocator, tokens, 0)
                 else
                     null;
+
                 try expect(.Semicolon, tokens.next());
-                break :blk .{ .Expression = expr };
+                return .{ .Expression = expr };
             },
-        };
+        }
     }
 
     pub fn deinit(self: *ForInit, allocator: Allocator) void {
