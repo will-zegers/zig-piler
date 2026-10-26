@@ -8,7 +8,7 @@ const process = std.process;
 
 const Parser = @import("Parser.zig");
 const Semantic = @import("Semantic.zig");
-const Symbols = @import("Semantic/Symbols.zig");
+const Symbol = @import("Semantic/Symbols.zig");
 const instr = @import("TAC/instruction.zig");
 
 pub const Binary = instr.Binary;
@@ -24,11 +24,12 @@ const Val = instr.Val;
 pub const TAC = @This();
 
 const Instructions = ArrayList(Instruction);
-var SymbolTable: StringHashMap(Symbols.Entry) = undefined;
+var SymbolTable: StringHashMap(Symbol.Entry) = undefined;
 
 pub const Program = struct {
     arena: ArenaAllocator,
     topLevel: []TopLevel,
+    symbols: StringHashMap(Symbol.Entry),
 
     pub fn deinit(self: *Program) void {
         self.arena.deinit();
@@ -83,7 +84,7 @@ pub fn emit(allocator: Allocator, tree: Semantic.AST) Program {
     topLevelList.appendSlice(arenaAllocator, symbolDefs) catch allocError();
 
     const topLevel = topLevelList.toOwnedSlice(arenaAllocator) catch allocError();
-    return .{ .arena = arena, .topLevel = topLevel };
+    return .{ .arena = arena, .topLevel = topLevel, .symbols = tree.symbols };
 }
 
 fn emitDeclaration(allocator: Allocator, context: *Context, body: *Instructions, decl: Parser.Declaration) !void {

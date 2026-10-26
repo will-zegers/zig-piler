@@ -122,9 +122,9 @@ fn isIllegalIdiv(idiv: Idiv) bool {
     return idiv.operand == .Imm;
 }
 
-// Mov may not have memory (i.e. stack) as both its source and destination
+// Mov may not have memory (i.e. stack or data/bss) as both its source and destination
 fn isIllegalMove(mov: Mov) bool {
-    return mov.dst == .Stack and mov.src == .Stack;
+    return (mov.dst == .Stack or mov.dst == .Data) and (mov.src == .Stack or mov.src == .Data);
 }
 
 // Multiply instructions must not have the destination as a memory address (i.e. stack)

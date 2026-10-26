@@ -3,6 +3,7 @@ const std = @import("std");
 const mem = std.mem;
 const Allocator = mem.Allocator;
 const process = std.process;
+const StringHashMap = std.StringHashMap;
 
 const Resolver = @import("Semantic/Resolver.zig");
 const LoopLabeler = @import("Semantic/LoopLabeler.zig");
@@ -11,10 +12,20 @@ const Error = @import("Semantic/Error.zig");
 
 const Context = @import("Semantic/Context.zig");
 const IdentifierMap = Context.IdentifierMap;
+const Symbols = @import("Semantic/Symbols.zig");
 
-const AST = @import("Parser.zig").AST;
+const Parser = @import("Parser.zig");
 
-pub fn run(allocator: Allocator, tree: *AST, textLines: [][]const u8) void {
+pub const AST = struct {
+    tree: Parser.AST,
+    symbols: StringHashMap(Symbols.Entry),
+
+    pub fn deinit(self: *AST) void {
+        self.symbols.deinit();
+    }
+};
+
+pub fn run(allocator: Allocator, tree: *Parser.AST, textLines: [][]const u8) AST {
     var reporter = Error.Reporter.init(textLines);
 
     var context: Context = .init(allocator, &reporter);
@@ -26,6 +37,9 @@ pub fn run(allocator: Allocator, tree: *AST, textLines: [][]const u8) void {
     LoopLabeler.run(allocator, &context, tree);
     if (reporter.errorFlag) process.exit(1);
 
-    TypeChecker.run(allocator, &reporter, tree);
+    var symbols: StringHashMap(Symbols.Entry) = .init(allocator);
+    TypeChecker.run(&symbols, &reporter, tree);
     if (reporter.errorFlag) process.exit(1);
+
+    return .{ .tree = tree.*, .symbols = symbols };
 }

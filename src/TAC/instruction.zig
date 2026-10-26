@@ -1,8 +1,5 @@
 const Parser = @import("../Parser.zig");
 
-pub const identifier = []const u8;
-pub const int = []const u8;
-
 const InstructionTag = enum {
     Binary,
     Return,
@@ -74,4 +71,4 @@ pub const Val = union(ValTag) {
 
 pub const Constant = usize;
 
-const Var = identifier;
+const Var = []const u8;

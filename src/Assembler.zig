@@ -4,16 +4,17 @@ const Allocator = std.mem.Allocator;
 const ArrayList = std.ArrayList;
 const StringHashMap = std.StringHashMap;
 
+const Symbol = @import("Semantic/Symbols.zig");
 const TAC = @import("TAC.zig");
 
 const Patcher = @import("Assembler/Patcher.zig");
 const instruction = @import("Assembler/instruction.zig");
+pub const Instruction = instruction.Instruction;
 pub const Operand = instruction.Operand;
 pub const Reg = instruction.Reg;
 const ARG_REGISTERS = instruction.ARG_REGISTERS;
 const INT_SIZE_BYTES = instruction.INT_SIZE_BYTES;
 const WORD_SIZE_BYTES = instruction.WORD_SIZE_BYTES;
-const Instruction = instruction.Instruction;
 const Unary = instruction.Unary;
 const Ret = instruction.Ret;
 const Binary = instruction.Binary;
@@ -29,16 +30,21 @@ const Assembler = @This();
 
 pub const Assembly = Program;
 
+var SymbolTable: Symbol.Table = undefined;
+
 const Program = struct {
     allocator: Allocator,
-    functions: []Function,
+    topLevel: []TopLevel,
     defined: StringHashMap(bool),
 
     pub fn deinit(self: *Assembly) void {
-        for (self.functions) |*function| {
-            function.deinit();
+        for (self.topLevel) |*topLevel| {
+            switch (topLevel.*) {
+                .Function => |*function| function.deinit(),
+                .StaticVariable => {},
+            }
         }
-        self.allocator.free(self.functions);
+        self.allocator.free(self.topLevel);
         self.defined.deinit();
     }
 };
@@ -46,6 +52,7 @@ const Program = struct {
 pub const Function = struct {
     allocator: Allocator,
     name: []const u8,
+    global: bool,
     instructions: []Instruction,
 
     pub fn deinit(self: *Function) void {
@@ -53,18 +60,42 @@ pub const Function = struct {
     }
 };
 
-pub fn assemble(allocator: Allocator, tree: TAC.Program) Assembly {
-    var functions: ArrayList(Function) = .empty;
-    var defined: StringHashMap(bool) = .init(allocator);
+const StaticVariable = struct {
+    name: []const u8,
+    global: bool,
+    int: usize,
+};
 
-    for (tree.functions) |function| {
-        const assembly = assembleFunction(allocator, function, &defined);
-        functions.append(allocator, assembly) catch allocError();
+const TopLevelTag = enum { Function, StaticVariable };
+const TopLevel = union(TopLevelTag) {
+    Function: Function,
+    StaticVariable: StaticVariable,
+};
+
+pub fn assemble(allocator: Allocator, tree: TAC.Program) Assembly {
+    var topLevelList: ArrayList(TopLevel) = .empty;
+    var defined: StringHashMap(bool) = .init(allocator);
+    SymbolTable = tree.symbols;
+
+    for (tree.topLevel) |topLevel| {
+        switch (topLevel) {
+            .Function => {
+                const assembly = assembleFunction(allocator, topLevel.Function, &defined);
+                topLevelList.append(allocator, .{ .Function = assembly }) catch allocError();
+            },
+            .StaticVariable => |staticVar| {
+                topLevelList.append(allocator, .{ .StaticVariable = .{
+                    .name = staticVar.identifier,
+                    .global = staticVar.global,
+                    .int = staticVar.int,
+                } }) catch allocError();
+            },
+        }
     }
 
     return .{
         .allocator = allocator,
-        .functions = functions.toOwnedSlice(allocator) catch allocError(),
+        .topLevel = topLevelList.toOwnedSlice(allocator) catch allocError(),
         .defined = defined,
     };
 }
@@ -123,6 +154,7 @@ pub fn assembleFunction(allocator: Allocator, function: TAC.Function, defined: *
     return .{
         .allocator = allocator,
         .name = function.name,
+        .global = SymbolTable.get(function.name).?.attrs.Fun.global,
         .instructions = instructions,
     };
 }
@@ -175,6 +207,13 @@ fn replaceIfPseudo(map: *std.StringHashMap(isize), stackPointer: *isize, operand
         const key = operand.Pseudo;
         // If the pseudo register has not been mapped to a location on the stack,
         // map it to the location in the local stack space
+        if (SymbolTable.get(key)) |entry| {
+            if (entry.attrs == .Static and entry.attrs.Static.global == true) {
+                operand.* = . { .Data = key };
+                return;
+            }
+        }
+
         if (map.get(key) == null) {
             stackPointer.* -= INT_SIZE_BYTES;
             map.put(key, stackPointer.*) catch allocError();

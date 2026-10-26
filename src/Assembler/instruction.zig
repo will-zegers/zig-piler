@@ -308,17 +308,19 @@ pub const Label = struct {
     }
 };
 
-const OperandType = enum {
+const OperandTag = enum {
     Imm,
     Reg,
     Pseudo,
     Stack,
+    Data,
 };
-pub const Operand = union(OperandType) {
+pub const Operand = union(OperandTag) {
     Imm: usize,
     Reg: Reg,
     Pseudo: []const u8,
     Stack: isize,
+    Data: []const u8,
 };
 
 pub const Reg = enum {

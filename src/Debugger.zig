@@ -369,100 +369,122 @@ fn printTACStaticVariable(staticVar: TAC.StaticVariable) void {
 pub fn printAssemblerAST(ast: Assembler.Assembly) void {
     const program = ast;
     print("{any} (\n", .{@TypeOf(program)});
-    for (program.functions) |function| {
-        print("  {any} (\n", .{@TypeOf(function)});
-        print("    name={s}\n", .{function.name});
-        print("    instructions=[\n", .{});
+    for (program.topLevel) |topLevel| {
+        switch (topLevel) {
+            .Function => |function| {
+                print("  {any} (\n", .{@TypeOf(function)});
+                print("    name={s}\n", .{function.name});
+                print("    instructions=[\n", .{});
 
-        for (function.instructions) |instr| {
-            print("      {s} (", .{@tagName(instr)});
-            switch (instr) {
-                .Push => |push| {
-                    switch (push.operand) {
-                        .Imm => |imm| print("src: Imm({d}) ", .{imm}),
-                        .Pseudo => |reg| print("src: Pseudo({s}) ", .{reg}),
-                        .Reg => |reg| print("src: Reg({s}) ", .{@tagName(reg)}),
-                        .Stack => |stack| print("src: Stack({d}) ", .{stack}),
-                    }
-                },
-                .Call => |call| print("name: {s}", .{call.identifier}),
-                .DeallocateStack => |deall| print("int: {d}", .{deall.int}),
-                .Ret, .Cdq => {},
-                .Mov => |mov| {
-                    switch (mov.src) {
-                        .Imm => |imm| print("src: Imm({d}) ", .{imm}),
-                        .Pseudo => |reg| print("src: Pseudo({s}) ", .{reg}),
-                        .Reg => |reg| print("src: Reg({s}) ", .{@tagName(reg)}),
-                        .Stack => |stack| print("src: Stack({d}) ", .{stack}),
-                    }
-                    switch (mov.dst) {
-                        .Imm => |imm| print("dst: Imm({d})", .{imm}),
-                        .Pseudo => |reg| print("dst: Pseudo({s})", .{reg}),
-                        .Reg => |reg| print("dst: Reg({s})", .{@tagName(reg)}),
-                        .Stack => |stack| print("dst: Stack({d})", .{stack}),
-                    }
-                },
-                .Unary => |unary| {
-                    print("operator={s} ", .{@tagName(unary.operator)});
-                    switch (unary.operand) {
-                        .Imm => |imm| print("dst: Imm({d})", .{imm}),
-                        .Pseudo => |reg| print("dst: Pseudo({s})", .{reg}),
-                        .Reg => |reg| print("dst: Reg({s})", .{@tagName(reg)}),
-                        .Stack => |stack| print("dst: Stack({d})", .{stack}),
-                    }
-                },
-                .AllocateStack => |allocStack| {
-                    print("int: {d}", .{allocStack.stackSpace});
-                },
-                .Binary => |binary| {
-                    print("operator: {s} ", .{@tagName(binary.operator)});
-                    switch (binary.src) {
-                        .Imm => |imm| print("src: Imm({d}) ", .{imm}),
-                        .Pseudo => |reg| print("src: Pseudo({s}) ", .{reg}),
-                        .Reg => |reg| print("src: Reg({s}) ", .{@tagName(reg)}),
-                        .Stack => |stack| print("src: Stack({d}) ", .{stack}),
-                    }
-                    switch (binary.dst) {
-                        .Imm => |imm| print("dst: Imm({d})", .{imm}),
-                        .Pseudo => |reg| print("dst: Pseudo({s})", .{reg}),
-                        .Reg => |reg| print("dst: Reg({s})", .{@tagName(reg)}),
-                        .Stack => |stack| print("dst: Stack({d})", .{stack}),
-                    }
-                },
-                .Idiv => |idiv| {
-                    switch (idiv.operand) {
-                        .Imm => |imm| print("src: Imm({d})", .{imm}),
-                        .Pseudo => |reg| print("src: Pseudo({s})", .{reg}),
-                        .Reg => |reg| print("src: Reg({s})", .{@tagName(reg)}),
-                        .Stack => |stack| print("src: Stack({d})", .{stack}),
-                    }
-                },
-                .Cmp => |cmp| {
-                    std.debug.print("arg1: {any}, arg2: {any}", .{ cmp.arg1, cmp.arg2 });
-                },
-                .Jmp => |jmp| {
-                    std.debug.print("target: {s}", .{jmp.target});
-                },
-                .JmpCC => |jmp| {
-                    std.debug.print("condition: {s}, target: {s}", .{ @tagName(jmp.condition), jmp.target });
-                },
-                .SetCC => |set| {
-                    switch (set.operand) {
-                        .Imm => std.debug.print("condition: {s}, target: Imm({d})", .{ @tagName(set.condition), set.operand.Stack }),
-                        .Pseudo => std.debug.print("condition: {s}, target: Pseudo({d})", .{ @tagName(set.condition), set.operand.Stack }),
-                        .Reg => std.debug.print("condition: {s}, target: Reg({d})", .{ @tagName(set.condition), set.operand.Stack }),
-                        .Stack => std.debug.print("condition: {s}, target: Stack({d})", .{ @tagName(set.condition), set.operand.Stack }),
-                    }
-                },
-                .Label => |label| {
-                    std.debug.print("id: {s}", .{label.id});
-                },
-            }
-            print(")\n", .{});
+                for (function.instructions) |instr| {
+                    printAssemblerFunction(instr);
+                }
+                print("    ]\n", .{});
+                print("  )\n", .{});
+            },
+            .StaticVariable => |staticVar| {
+                print("  {any} (\n", .{@TypeOf(staticVar)});
+                print("    identifier={s}\n", .{staticVar.name});
+                print("    global={any}\n", .{staticVar.global});
+                print("    int={d}\n", .{staticVar.int});
+                print("  )\n", .{});
+            },
         }
+    }
+    print(")\n", .{});
+}
 
-        print("    ]\n", .{});
-        print("  )\n", .{});
+fn printAssemblerFunction(instr: Assembler.Instruction) void {
+    print("      {s} (", .{@tagName(instr)});
+    switch (instr) {
+        .Push => |push| {
+            switch (push.operand) {
+                .Imm => |imm| print("src: Imm({d}) ", .{imm}),
+                .Pseudo => |reg| print("src: Pseudo({s}) ", .{reg}),
+                .Reg => |reg| print("src: Reg({s}) ", .{@tagName(reg)}),
+                .Stack => |stack| print("src: Stack({d}) ", .{stack}),
+                .Data => |data| print("src: Data({s}) ", .{data}),
+            }
+        },
+        .Call => |call| print("name: {s}", .{call.identifier}),
+        .DeallocateStack => |deall| print("int: {d}", .{deall.int}),
+        .Ret, .Cdq => {},
+        .Mov => |mov| {
+            switch (mov.src) {
+                .Imm => |imm| print("src: Imm({d}) ", .{imm}),
+                .Pseudo => |reg| print("src: Pseudo({s}) ", .{reg}),
+                .Reg => |reg| print("src: Reg({s}) ", .{@tagName(reg)}),
+                .Stack => |stack| print("src: Stack({d}) ", .{stack}),
+                .Data => |data| print("src: Data({s}) ", .{data}),
+            }
+            switch (mov.dst) {
+                .Imm => |imm| print("dst: Imm({d})", .{imm}),
+                .Pseudo => |reg| print("dst: Pseudo({s})", .{reg}),
+                .Reg => |reg| print("dst: Reg({s})", .{@tagName(reg)}),
+                .Stack => |stack| print("dst: Stack({d})", .{stack}),
+                .Data => |data| print("dst: Data({s}) ", .{data}),
+            }
+        },
+        .Unary => |unary| {
+            print("operator={s} ", .{@tagName(unary.operator)});
+            switch (unary.operand) {
+                .Imm => |imm| print("dst: Imm({d})", .{imm}),
+                .Pseudo => |reg| print("dst: Pseudo({s})", .{reg}),
+                .Reg => |reg| print("dst: Reg({s})", .{@tagName(reg)}),
+                .Stack => |stack| print("dst: Stack({d})", .{stack}),
+                .Data => |data| print("dst: Data({s}) ", .{data}),
+            }
+        },
+        .AllocateStack => |allocStack| {
+            print("int: {d}", .{allocStack.stackSpace});
+        },
+        .Binary => |binary| {
+            print("operator: {s} ", .{@tagName(binary.operator)});
+            switch (binary.src) {
+                .Imm => |imm| print("src: Imm({d}) ", .{imm}),
+                .Pseudo => |reg| print("src: Pseudo({s}) ", .{reg}),
+                .Reg => |reg| print("src: Reg({s}) ", .{@tagName(reg)}),
+                .Stack => |stack| print("src: Stack({d}) ", .{stack}),
+                .Data => |data| print("src: Data({s}) ", .{data}),
+            }
+            switch (binary.dst) {
+                .Imm => |imm| print("dst: Imm({d})", .{imm}),
+                .Pseudo => |reg| print("dst: Pseudo({s})", .{reg}),
+                .Reg => |reg| print("dst: Reg({s})", .{@tagName(reg)}),
+                .Stack => |stack| print("dst: Stack({d})", .{stack}),
+                .Data => |data| print("dst: Data({s}) ", .{data}),
+            }
+        },
+        .Idiv => |idiv| {
+            switch (idiv.operand) {
+                .Imm => |imm| print("src: Imm({d})", .{imm}),
+                .Pseudo => |reg| print("src: Pseudo({s})", .{reg}),
+                .Reg => |reg| print("src: Reg({s})", .{@tagName(reg)}),
+                .Stack => |stack| print("src: Stack({d})", .{stack}),
+                .Data => |data| print("src: Data({s}) ", .{data}),
+            }
+        },
+        .Cmp => |cmp| {
+            std.debug.print("arg1: {any}, arg2: {any}", .{ cmp.arg1, cmp.arg2 });
+        },
+        .Jmp => |jmp| {
+            std.debug.print("target: {s}", .{jmp.target});
+        },
+        .JmpCC => |jmp| {
+            std.debug.print("condition: {s}, target: {s}", .{ @tagName(jmp.condition), jmp.target });
+        },
+        .SetCC => |set| {
+            switch (set.operand) {
+                .Imm => std.debug.print("condition: {s}, target: Imm({d})", .{ @tagName(set.condition), set.operand.Imm }),
+                .Pseudo => std.debug.print("condition: {s}, target: Pseudo({s})", .{ @tagName(set.condition), set.operand.Pseudo }),
+                .Reg => std.debug.print("condition: {s}, target: Reg({s})", .{ @tagName(set.condition), @tagName(set.operand.Reg) }),
+                .Stack => std.debug.print("condition: {s}, target: Stack({d})", .{ @tagName(set.condition), set.operand.Stack }),
+                .Data => std.debug.print("condition: {s}, target: Data({s})", .{ @tagName(set.condition), set.operand.Data }),
+            }
+        },
+        .Label => |label| {
+            std.debug.print("id: {s}", .{label.id});
+        },
     }
     print(")\n", .{});
 }
