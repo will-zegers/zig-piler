@@ -60,7 +60,7 @@ pub const Function = struct {
     }
 };
 
-const StaticVariable = struct {
+pub const StaticVariable = struct {
     name: []const u8,
     global: bool,
     int: usize,
@@ -208,7 +208,7 @@ fn replaceIfPseudo(map: *std.StringHashMap(isize), stackPointer: *isize, operand
         // If the pseudo register has not been mapped to a location on the stack,
         // map it to the location in the local stack space
         if (SymbolTable.get(key)) |entry| {
-            if (entry.attrs == .Static and entry.attrs.Static.global == true) {
+            if (entry.attrs == .Static) {
                 operand.* = . { .Data = key };
                 return;
             }

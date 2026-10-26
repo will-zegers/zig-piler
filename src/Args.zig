@@ -68,6 +68,7 @@ pub fn parse(allocator: Allocator, init: std.process.Init) Allocator.Error!Args 
             try inputFiles.append(allocator, arg);
     }
     args.inputFiles = try inputFiles.toOwnedSlice(allocator);
+    if (args.inputFiles.len == 0) usage();
 
     if (args.outputELF == null) {
         const baseName = File.getBaseName(args.inputFiles[0]);
@@ -76,8 +77,6 @@ pub fn parse(allocator: Allocator, init: std.process.Init) Allocator.Error!Args 
             else => try allocator.dupe(u8, baseName),
         };
     }
-
-    if (args.inputFiles.len == 0) usage();
 
     return args;
 }

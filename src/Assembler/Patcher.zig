@@ -10,6 +10,7 @@ const Mov = instructions.Mov;
 const Binary = instructions.Binary;
 const Idiv = instructions.Idiv;
 const Instruction = instructions.Instruction;
+const Operand = instructions.Operand;
 
 const IllegalInstruction = enum {
     Ill_Binary_Operands,
@@ -102,9 +103,14 @@ fn detectIllegal(instr: Instruction) ?IllegalInstruction {
     return null;
 }
 
+// Check if the operand lies in either the stack or static memory space
+fn isMemoryAddress(operand: Operand) bool {
+    return operand == .Data or operand == .Stack;
+}
+
 // Binary operations must not have memory as both its source and destination
 fn isIllegalBinary(bin: Binary) bool {
-    return bin.src == .Stack and bin.dst == .Stack;
+    return isMemoryAddress(bin.src) and isMemoryAddress(bin.dst);
 }
 
 // The second argument of a 'cmp' instruction must not be a constant (i.e. immediate value)
@@ -114,7 +120,7 @@ fn isIllegalCmpImmDst(cmp: Cmp) bool {
 
 // Comparison 'cmp' instructions must not have both args as memory addresses
 fn isIllegalCmpOperands(cmp: Cmp) bool {
-    return cmp.arg1 == .Stack and cmp.arg2 == .Stack;
+    return isMemoryAddress(cmp.arg1) and isMemoryAddress(cmp.arg2);
 }
 
 // Operand of idiv must not be an immediate value
@@ -124,17 +130,17 @@ fn isIllegalIdiv(idiv: Idiv) bool {
 
 // Mov may not have memory (i.e. stack or data/bss) as both its source and destination
 fn isIllegalMove(mov: Mov) bool {
-    return (mov.dst == .Stack or mov.dst == .Data) and (mov.src == .Stack or mov.src == .Data);
+    return isMemoryAddress(mov.src) and isMemoryAddress(mov.dst);
 }
 
 // Multiply instructions must not have the destination as a memory address (i.e. stack)
 fn isIllegalMul(bin: Binary) bool {
-    return bin.operator == .Mul and bin.dst == .Stack;
+    return bin.operator == .Mul and isMemoryAddress(bin.dst);
 }
 
 // Shift instructions must not have the destination as a memory address (i.e. stack)
 fn isIllegalShift(bin: Binary) bool {
-    return (bin.operator == .SAL or bin.operator == .SAR) and bin.dst == .Stack;
+    return (bin.operator == .SAL or bin.operator == .SAR) and isMemoryAddress(bin.dst);
 }
 
 pub fn allocError() noreturn {

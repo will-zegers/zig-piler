@@ -89,8 +89,12 @@ pub fn emit(allocator: Allocator, tree: Semantic.AST) Program {
 
 fn emitDeclaration(allocator: Allocator, context: *Context, body: *Instructions, decl: Parser.Declaration) !void {
     switch (decl) {
-        .VarDecl => |varDecl| if (varDecl.init) |initExpr| {
-            _ = emitExpression(allocator, context, body, initExpr);
+        .VarDecl => |varDecl| {
+            if (varDecl.storageClass != null) return;
+
+            if (varDecl.init) |initExpr| {
+                _ = emitExpression(allocator, context, body, initExpr);
+            }
         },
         .FunDecl => |funDecl| _ = emitFunDecl(allocator, funDecl),
     }

@@ -29,8 +29,11 @@ pub fn init(allocator: Allocator, ast: Assembler.Assembly) !CodeEmitter {
     const arenaAllocator = arena.allocator();
 
     var instructions: ArrayList([]const u8) = .empty;
-    for (ast.functions) |function| {
-        const slice = try emitFunction(arenaAllocator, function, ast.defined);
+    for (ast.topLevel) |topLevel| {
+        const slice = switch (topLevel) {
+            .Function => |function| try emitFunction(arenaAllocator, function, ast.defined),
+            .StaticVariable => |staticVar| try emitStaticVar(arenaAllocator, staticVar),
+        };
 
         try instructions.appendSlice(arenaAllocator, slice);
     }
@@ -44,13 +47,49 @@ pub fn init(allocator: Allocator, ast: Assembler.Assembly) !CodeEmitter {
     return .{ .arena = arena, .instructions = instructions };
 }
 
+pub fn  emitStaticVar(allocator: Allocator, staticVar: Assembler.StaticVariable) ![][]const u8 {
+    var instructions: ArrayList([]const u8) = .empty;
+
+    if (staticVar.global) {
+        const global = try allocator.print("  .globl {s}", .{staticVar.name});
+        try instructions.append(allocator, global);
+    }
+
+    var code: []const u8 = undefined;
+    if (staticVar.int == 0) {
+        const template =
+            \\  .bss
+            \\  .align 4
+            \\{s}:
+            \\  .zero 4
+        ;
+        code = try allocator.print(template, .{staticVar.name});
+    } else {
+        const template =
+            \\  .data
+            \\  .align 4
+            \\{s}:
+            \\  .long {d}
+        ;
+        code = try allocator.print(template, .{staticVar.name, staticVar.int});
+    }
+    try instructions.append(allocator, code);
+
+    return try instructions.toOwnedSlice(allocator);
+}
+
 pub fn emitFunction(allocator: Allocator, function: Assembler.Function, defined: StringHashMap(bool)) ![][]const u8 {
     const assembly = function.instructions;
 
     var instructions: ArrayList([] const u8) = .empty;
 
+    if (function.global) {
+        const global = try allocator.print("  .globl {s}", .{function.name});
+        try instructions.append(allocator, global);
+    }
+
     const functionDefTemplate =
-        \\  .globl {0s}
+        \\  .text
         \\{0s}:
         \\  pushq   %rbp
         \\  movq    %rsp, %rbp
@@ -226,6 +265,7 @@ fn getOperandString(allocator: Allocator, operand: Assembler.Operand, size: Unit
         .Imm => |op| allocator.print("{c}{d}", .{'$', op}),
         .Reg => |op| getRegisterName(allocator, op, size),
         .Stack => |op| allocator.print("{d}(%rbp)", .{op}),
+        .Data => |op| allocator.print("{s}(%rip)", .{op}),
         .Pseudo => unreachable,
     } catch allocError();
 }

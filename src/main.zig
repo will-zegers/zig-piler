@@ -48,12 +48,14 @@ pub fn main(init: process.Init) !void {
         try sourceList.append(allocator, try allocator.dupe(u8, file.outputSrc));
 
         var tokens: Lexer.Token.Iterator = undefined;
-        var ast: Parser.AST = undefined;
+        var parserAST: Parser.AST = undefined;
+        var semanticAST: Semantic.AST = undefined;
         var tac: TAC.Program = undefined;
         var assembly: Assembler.Assembly = undefined;
         defer {
             if (stage.includes(.Lex)) tokens.deinit();
-            if (stage.includes(.Parse)) ast.deinit(allocator);
+            if (stage.includes(.Parse)) parserAST.deinit(allocator);
+            if (stage.includes(.Validate)) semanticAST.deinit();
             if (stage.includes(.TACky)) tac.deinit();
             if (stage.includes(.CodeGen)) assembly.deinit();
         }
@@ -74,7 +76,7 @@ pub fn main(init: process.Init) !void {
 
         if (stage.includes(.Parse)) {
             log.info("Running parser...", .{});
-            ast = Parser.parse(allocator, &tokens) catch {
+            parserAST = Parser.parse(allocator, &tokens) catch {
                 const index = tokens.lineIndex;
                 log.err(" {d} | {s}\n", .{ index + 1, file.lines[index] });
                 process.exit(1);
@@ -82,25 +84,23 @@ pub fn main(init: process.Init) !void {
 
             if (debug) {
                 std.debug.print("-------parsed-------\n", .{});
-                Debugger.printParserAST(ast);
+                Debugger.printParserAST(parserAST);
             }
         } else return;
 
         if (stage.includes(.Validate)) {
             log.info("Running semantic analysis...", .{});
-            // var semantic = Semantic.init(allocator, file.lines);
-
-            Semantic.run(allocator, &ast, file.lines);
+            semanticAST = Semantic.run(allocator, &parserAST, file.lines);
 
             if (debug) {
                 std.debug.print("-------parsed-------\n", .{});
-                Debugger.printParserAST(ast);
+                Debugger.printParserAST(semanticAST.tree);
             }
         } else return;
 
         if (stage.includes(.TACky)) {
             log.info("Generating Tacky...", .{});
-            tac = TAC.emit(allocator, ast);
+            tac = TAC.emit(allocator, semanticAST);
 
             if (debug) {
                 std.debug.print("-------TAC-------\n", .{});
