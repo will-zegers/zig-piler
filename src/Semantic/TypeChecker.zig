@@ -1,7 +1,6 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const StringHashMap = std.StringHashMap;
-const log = std.log;
 const process = std.process;
 
 const Parser = @import("../Parser.zig");
@@ -39,13 +38,14 @@ const FunAttr = struct {
     defined: bool,
     global: bool,
 };
-
 const Attrs = union {
-    const InitialValue = union {
-        Tentative: struct {},
-        Initial: struct {
-            int: isize,
-        },
+    const Initial = struct { int: usize };
+    const Tentative = struct {};
+
+    const InitialValueTag = enum { Initial, Tentative };
+    const InitialValue = union(InitialValueTag) {
+        Initial: Initial,
+        Tentative: Tentative,
     };
 
     Fun: struct {
@@ -73,25 +73,28 @@ pub fn run(allocator: Allocator, errorReporter: *Error.Reporter, tree: *AST) voi
     defer symbols.deinit();
 
     for (tree.declarations) |decl| {
-        typeCheckDeclaration(&symbols, decl);
+        switch (decl) {
+            .FunDecl => typeCheckFunDecl(&symbols, decl.FunDecl),
+            .VarDecl => typeCheckFileScopeVarDecl(&symbols, decl.VarDecl),
+        }
     }
 }
 
-fn typeCheckDeclaration(symbols: *SymbolTable, decl: Declaration) void {
+fn typeCheckLocalDeclaration(symbols: *SymbolTable, decl: Declaration) void {
     switch (decl) {
         .FunDecl => |funDecl| typeCheckFunDecl(symbols, funDecl),
-        .VarDecl => |varDecl| typeCheckVarDecl(symbols, varDecl),
+        .VarDecl => |varDecl| typeCheckLocalVarDecl(symbols, varDecl),
     }
 }
 
 fn typeCheckFunDecl(symbols: *SymbolTable, decl: FunDecl) void {
     const funType: FunType = .{ .type = .{}, .nParams = decl.params.len };
-    var isDefined: bool = undefined;
-    var isGlobal: bool = undefined;
+    var isDefined: bool = decl.body != null;
+    var isGlobal: bool = decl.storageClass != .Static;
 
     if (symbols.get(decl.name)) |entry| {
         if (entry.type != .FunType or entry.type.FunType.nParams != funType.nParams) {
-            ErrorReporter.report(.IncompatibleFunctions, decl.lineIndex, decl.name);
+            ErrorReporter.report(.ConflictingFunctions, decl.lineIndex, decl.name);
             return;
         }
 
@@ -112,27 +115,109 @@ fn typeCheckFunDecl(symbols: *SymbolTable, decl: FunDecl) void {
         .defined = isDefined or decl.body != null,
         .global = isGlobal,
     } };
-    symbols.put(decl.name, .{ .type = .{ .FunType = funType }, .attrs = attrs }) catch @panic("OOM");
+    symbols.put(decl.name, .{ .type = .{ .FunType = funType }, .attrs = attrs }) catch allocError();
 
     if (decl.body) |body| {
         for (decl.params) |param| {
-            symbols.put(param.unique.?, .{ .type = .Int, .attrs = .{ .Local = .{} } }) catch @panic("OOM");
+            symbols.put(param.unique.?, .{ .type = .Int, .attrs = .{ .Local = .{} } }) catch allocError();
         }
         typeCheckBlock(symbols, body);
     }
 }
 
-fn typeCheckVarDecl(symbols: *SymbolTable, decl: VarDecl) void {
-    symbols.put(decl.unique.?, .{ .type = .Int, .attrs = .{ .Local = .{} } }) catch @panic("OOM");
+fn typeCheckFileScopeVarDecl(symbols: *SymbolTable, decl: VarDecl) void {
+    var initialValue: ?Attrs.InitialValue = undefined;
     if (decl.init) |init| {
-        typeCheckExpression(symbols, init);
+        // TODO: extend initialize to use constant binary and unary expressions
+        if (init.Assignment.rhs.* == .Constant) {
+            initialValue = .{ .Initial = .{ .int = init.Assignment.rhs.Constant } };
+        } else {
+            ErrorReporter.report(.NonConstInitializer, decl.lineIndex, decl.name);
+            std.process.exit(1);
+        }
+    } else { // no initializer
+        if (decl.storageClass == .Extern) {
+            initialValue = null;
+        } else {
+            initialValue = .{ .Tentative = .{} };
+        }
+    }
+
+    var isGlobal = decl.storageClass != .Static;
+    if (symbols.get(decl.name)) |entry| {
+        _ = entry.attrs.Fun catch {};
+        // Previous declaration was a function
+        if (entry.type != .Int) {
+            ErrorReporter.report(.Redeclaration, decl.lineIndex, decl.name);
+            return;
+        }
+
+        // Ensure this declaration and previous declarations align on linkage
+        if (decl.storageClass == .Extern) {
+            isGlobal = entry.attrs.Static.global;
+        } else if (entry.attrs.Static.global != isGlobal) {
+            ErrorReporter.report(.ConflictingLinkage, decl.lineIndex, decl.name);
+            return;
+        }
+
+        if (entry.attrs.Static.initialValue) |oldInit| {
+            if (oldInit == .Initial) { // ensure no redefinitions of global variables
+                if (initialValue != null and initialValue.? == .Initial) {
+                    ErrorReporter.report(.VariableRedefinition, decl.lineIndex, decl.name);
+                    return;
+                }
+                initialValue = oldInit;
+            } else if (oldInit == .Tentative) {
+                if (initialValue != null and initialValue.? != .Initial) {
+                    initialValue = .Tentative;
+                }
+            }
+        }
+    }
+
+    const attrs: Attrs = .{ .Static = .{ .initialValue = initialValue, .global = isGlobal } };
+    symbols.put(decl.name, .{ .type = .Int, .attrs = attrs }) catch allocError();
+}
+
+fn typeCheckLocalVarDecl(symbols: *SymbolTable, decl: VarDecl) void {
+    if (decl.storageClass == .Extern) {
+        if (decl.init) |_| {
+            ErrorReporter.report(.LocalExternDefined, decl.lineIndex, decl.name);
+            return;
+        }
+        if (symbols.get(decl.name)) |entry| {
+            if (entry.type != .Int) {
+                ErrorReporter.report(.Redeclaration, decl.lineIndex, decl.name);
+                return;
+            }
+        } else {
+            const attrs: Attrs = .{ .Static = .{ .initialValue = null, .global = true } };
+            symbols.put(decl.name, .{ .type = .Int, .attrs = attrs }) catch allocError();
+        }
+    } else if (decl.storageClass == .Static) {
+        var initialValue: Attrs.InitialValue = .{ .Initial = .{ .int = 0 } };
+        if (decl.init) |init| {
+            if (init.Assignment.rhs.* != .Constant) {
+                ErrorReporter.report(.NonConstInitializer, decl.lineIndex, decl.name);
+                return;
+            }
+            initialValue = .{ .Initial = .{ .int = init.Assignment.rhs.Constant } };
+        }
+
+        const attrs: Attrs = .{ .Static = .{ .initialValue = initialValue, .global = true } };
+        symbols.put(decl.unique.?, .{ .type = .Int, .attrs = attrs }) catch allocError();
+    } else { // automatic (local scope) storage class
+        symbols.put(decl.unique.?, .{ .type = .Int, .attrs = .{ .Local = .{} } }) catch allocError();
+        if (decl.init) |init| {
+            typeCheckExpression(symbols, init);
+        }
     }
 }
 
 fn typeCheckBlock(symbols: *SymbolTable, block: Block) void {
     for (block.items) |item| {
         switch (item) {
-            .Declaration => |decl| typeCheckDeclaration(symbols, decl),
+            .Declaration => |decl| typeCheckLocalDeclaration(symbols, decl),
             .Statement => |stmt| typeCheckStatement(symbols, stmt),
         }
     }
@@ -159,7 +244,13 @@ fn typeCheckStatement(symbols: *SymbolTable, stmt: Statement) void {
         },
         .For => |f| {
             switch (f.init) {
-                .Declaration => |decl| typeCheckDeclaration(symbols, decl),
+                .Declaration => |decl| {
+                    if (decl == .VarDecl and decl.VarDecl.storageClass != null) {
+                        ErrorReporter.report(.ForLoopStorageClassDecl, decl.VarDecl.lineIndex, decl.VarDecl.name);
+                        return;
+                    }
+                    typeCheckLocalDeclaration(symbols, decl);
+                },
                 .Expression => |expr| if (expr) |e| typeCheckExpression(symbols, e),
             }
             if (f.cond) |cond| typeCheckExpression(symbols, cond);
@@ -188,7 +279,10 @@ fn typeCheckExpression(symbols: *SymbolTable, expr: Expression) void {
             typeCheckExpression(symbols, bin.right.*);
         },
         .Var => |v| {
-            const symbol = symbols.get(v.name).?; // semantics already ensures the function has been defined
+            const symbol = symbols.get(v.name) orelse {
+                ErrorReporter.report(.UnresolvedSymbol, v.lineIndex, v.name);
+                return;
+            };
             if (symbol.type != .Int) {
                 ErrorReporter.report(.VarUsedAsFunction, v.lineIndex, v.name);
                 return;
@@ -210,11 +304,11 @@ fn typeCheckExpression(symbols: *SymbolTable, expr: Expression) void {
             const funType = symbol.type.FunType;
             if (funType.nParams > fcall.args.len) {
                 ErrorReporter.report(.TooFewArguments, fcall.lineIndex, null);
-                process.exit(1);
+                return;
             }
             if (funType.nParams < fcall.args.len) {
                 ErrorReporter.report(.TooManyArguments, fcall.lineIndex, null);
-                process.exit(1);
+                return;
             }
             for (fcall.args) |arg| {
                 typeCheckExpression(symbols, arg);
@@ -222,4 +316,10 @@ fn typeCheckExpression(symbols: *SymbolTable, expr: Expression) void {
         },
         .Constant => {},
     }
+}
+
+pub fn allocError() noreturn {
+    std.log.err("Memory allocation error", .{});
+    std.debug.dumpCurrentStackTrace(.{ .first_address = @returnAddress() });
+    std.process.exit(1);
 }

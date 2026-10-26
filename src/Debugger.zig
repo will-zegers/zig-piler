@@ -46,16 +46,24 @@ fn printDeclaration(decl: Parser.Declaration, indent: usize) void {
     switch (decl) {
         .VarDecl => |varDecl| {
             print("{s}{any}(", .{ indentStr, @TypeOf(varDecl) });
+            if (varDecl.storageClass) |sc| {
+                print("{any} ", .{sc});
+            }
+            print("{any} {s}", .{ varDecl.type, varDecl.name });
             if (varDecl.init) |init| {
                 print("\n", .{});
                 printExpression(init, indent + 2);
                 print("{s})\n", .{indentStr});
             } else {
-                print("{s}{s})\n", .{ indentStr, varDecl.name });
+                print(")\n", .{});
             }
         },
         .FunDecl => |funDecl| {
-            print("{s}{any} {s}(", .{ indentStr, @TypeOf(funDecl), funDecl.name });
+            print("{s}{any} ", .{ indentStr, @TypeOf(funDecl) });
+            if (funDecl.storageClass) |sc| {
+                print("{any} ", .{sc});
+            }
+            print("{any} {s}(", .{ funDecl.type, funDecl.name });
             for (funDecl.params) |param| {
                 print("{s} ", .{param.name});
             }

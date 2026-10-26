@@ -18,7 +18,10 @@ pub fn run(allocator: Allocator, context: *Context, tree: *Parser.AST) void {
 
 fn resolveProgram(allocator: Allocator, context: *Context, tree: *Parser.AST) void {
     for (tree.declarations) |*decl| {
-        resolveDeclaration(allocator, context, decl);
+        switch (decl.*) {
+            .FunDecl => |*funDecl| resolveFunDecl(allocator, context, funDecl),
+            .VarDecl => |*varDecl| resolveFileScopeVarDecl(context, varDecl),
+        }
     }
 }
 
@@ -31,6 +34,12 @@ fn resolveDeclaration(allocator: Allocator, context: *Context, decl: *Declaratio
 
 fn resolveFunDecl(allocator: Allocator, context: *Context, decl: *FunDecl) void {
     const scope = context.getScope();
+    // Static storage class only allowed for function at file-scope
+    if (context.getScope().type != .File and decl.storageClass == .Static) {
+        context.err.report(.BlockScopeStaticFunDecl, decl.lineIndex, null);
+        return;
+    }
+
     if (scope.identifiers.get(decl.name)) |entry| {
         if (entry.fromCurrentScope and !entry.hasLinkage) {
             context.err.report(.Redeclaration, decl.lineIndex, decl.name);
@@ -48,12 +57,6 @@ fn resolveFunDecl(allocator: Allocator, context: *Context, decl: *FunDecl) void 
 
     for (decl.params) |*param| {
         resolveLocalVarDecl(allocator, context, param);
-    }
-
-    // Static storage class only allowed for function at file-scope
-    if (context.getScope().type != .File and decl.storageClass == .Static) {
-        context.err.report(.BlockScopeStaticFunDecl, decl.lineIndex, null);
-        return;
     }
 
     if (decl.body) |*body| {
