@@ -251,108 +251,119 @@ fn printExpression(expr: Parser.Expression, indent: usize) void {
 pub fn printTAC(ir: TAC.Program) void {
     const program = ir;
     print("{any} (\n", .{@TypeOf(program)});
-    for (program.functions) |function| {
-        print("  {any} {s}(", .{ @TypeOf(function), function.name });
-        if (function.params.len > 0) {
-            std.debug.print("int {s}", .{function.params[0].name});
-            for (1..function.params.len) |i| {
-                std.debug.print(", int {s}", .{function.params[i].name});
-            }
+    for (program.topLevel) |topLevel| {
+        switch (topLevel) {
+            .Function => printTACFunction(topLevel.Function),
+            .StaticVariable => printTACStaticVariable(topLevel.StaticVariable),
         }
-        print(")\n", .{});
-        // print("    name: {s}\n", .{function.name});
-        print("    body:\n", .{});
-        for (function.body) |instr| {
-            print("      {s} (", .{@tagName(instr)});
-            switch (instr) {
-                .Unary => |unary| {
-                    print("operator={any}, ", .{unary.operator});
-                    switch (unary.src) {
-                        .Constant => |src| print("src: {any}({d}), ", .{ @TypeOf(src), src }),
-                        .Var => |src| print("src: {s}, ", .{src}),
-                    }
-                    switch (unary.dst) {
-                        .Constant => |dst| print("src: {any}({d})", .{ @TypeOf(dst), dst }),
-                        .Var => |dst| print("dst: {s}", .{dst}),
-                    }
-                    print(")\n", .{});
-                },
-                .Return => |ret| {
-                    switch (ret.val) {
-                        .Constant => |factor| print("val: {any}({d}))\n", .{ @TypeOf(factor), factor }),
-                        .Var => |name| print("val: {s})\n", .{name}),
-                    }
-                },
-                .Binary => |binary| {
-                    print("operator={any}, ", .{binary.operator});
-                    switch (binary.src1) {
-                        .Constant => |src1| print("src1: {d} ", .{src1}),
-                        .Var => |src1| print("src1: {s} ", .{src1}),
-                    }
-                    switch (binary.src2) {
-                        .Constant => |src2| print("src2: {d} ", .{src2}),
-                        .Var => |src2| print("src2: {s} ", .{src2}),
-                    }
-                    switch (binary.dst) {
-                        .Constant => |dst| print("dst: {d}", .{dst}),
-                        .Var => |dst| print("dst: {s}", .{dst}),
-                    }
-                    print(")\n", .{});
-                },
-                .Copy => |copy| {
-                    switch (copy.src) {
-                        .Constant => |src| print("src: {d} ", .{src}),
-                        .Var => |src| print("src: {s} ", .{src}),
-                    }
-                    switch (copy.dst) {
-                        .Constant => |dst| print("dst: {d}", .{dst}),
-                        .Var => |dst| print("dst: {s}", .{dst}),
-                    }
-                    print(")\n", .{});
-                },
-                .Label => |label| {
-                    print("name: {s})\n", .{label.identifier});
-                },
-                .Jump => |jump| {
-                    print("label: {s})\n", .{jump.target});
-                },
-                .JumpIfZero => |jump| {
-                    switch (jump.condition) {
-                        .Constant => |cond| print("cond: {any}({d}) ", .{ @TypeOf(cond), cond }),
-                        .Var => |cond| print("cond: {s} ", .{cond}),
-                    }
-                    print("label={s})\n", .{jump.target});
-                },
-                .JumpIfNotZero => |jump| {
-                    switch (jump.condition) {
-                        .Constant => |cond| print("cond: {any}({d}) ", .{ @TypeOf(cond), cond }),
-                        .Var => |cond| print("cond: {s} ", .{cond}),
-                    }
-                    print("label: {s})\n", .{jump.target});
-                },
-                .FunCall => |funCall| {
-                    print("{s}(", .{funCall.name});
-                    if (funCall.args.len > 0) {
-                        switch (funCall.args[0]) {
-                            .Constant => |c| print("{d}", .{c}),
-                            .Var => |v| print("{s}", .{v}),
-                        }
-                        for (1..funCall.args.len) |i| {
-                            switch (funCall.args[i]) {
-                                .Constant => |c| print(", {d}", .{c}),
-                                .Var => |v| print(", {s}", .{v}),
-                            }
-                        }
-                    }
-                    std.debug.print(")", .{});
-                    print(" -> {s})\n", .{funCall.dst.Var});
-                },
-            }
-        }
-        print("    )\n", .{});
-        print("  )\n", .{});
     }
     print(")\n", .{});
+}
+
+fn printTACFunction(function: TAC.Function) void {
+    print("  {any} {s}(", .{ @TypeOf(function), function.name });
+    if (function.params.len > 0) {
+        std.debug.print("int {s}", .{function.params[0].name});
+        for (1..function.params.len) |i| {
+            std.debug.print(", int {s}", .{function.params[i].name});
+        }
+    }
+    print(")\n", .{});
+    // print("    name: {s}\n", .{function.name});
+    print("    body:\n", .{});
+    for (function.body) |instr| {
+        print("      {s} (", .{@tagName(instr)});
+        switch (instr) {
+            .Unary => |unary| {
+                print("operator={any}, ", .{unary.operator});
+                switch (unary.src) {
+                    .Constant => |src| print("src: {any}({d}), ", .{ @TypeOf(src), src }),
+                    .Var => |src| print("src: {s}, ", .{src}),
+                }
+                switch (unary.dst) {
+                    .Constant => |dst| print("src: {any}({d})", .{ @TypeOf(dst), dst }),
+                    .Var => |dst| print("dst: {s}", .{dst}),
+                }
+                print(")\n", .{});
+            },
+            .Return => |ret| {
+                switch (ret.val) {
+                    .Constant => |factor| print("val: {any}({d}))\n", .{ @TypeOf(factor), factor }),
+                    .Var => |name| print("val: {s})\n", .{name}),
+                }
+            },
+            .Binary => |binary| {
+                print("operator={any}, ", .{binary.operator});
+                switch (binary.src1) {
+                    .Constant => |src1| print("src1: {d} ", .{src1}),
+                    .Var => |src1| print("src1: {s} ", .{src1}),
+                }
+                switch (binary.src2) {
+                    .Constant => |src2| print("src2: {d} ", .{src2}),
+                    .Var => |src2| print("src2: {s} ", .{src2}),
+                }
+                switch (binary.dst) {
+                    .Constant => |dst| print("dst: {d}", .{dst}),
+                    .Var => |dst| print("dst: {s}", .{dst}),
+                }
+                print(")\n", .{});
+            },
+            .Copy => |copy| {
+                switch (copy.src) {
+                    .Constant => |src| print("src: {d} ", .{src}),
+                    .Var => |src| print("src: {s} ", .{src}),
+                }
+                switch (copy.dst) {
+                    .Constant => |dst| print("dst: {d}", .{dst}),
+                    .Var => |dst| print("dst: {s}", .{dst}),
+                }
+                print(")\n", .{});
+            },
+            .Label => |label| {
+                print("name: {s})\n", .{label.identifier});
+            },
+            .Jump => |jump| {
+                print("label: {s})\n", .{jump.target});
+            },
+            .JumpIfZero => |jump| {
+                switch (jump.condition) {
+                    .Constant => |cond| print("cond: {any}({d}) ", .{ @TypeOf(cond), cond }),
+                    .Var => |cond| print("cond: {s} ", .{cond}),
+                }
+                print("label={s})\n", .{jump.target});
+            },
+            .JumpIfNotZero => |jump| {
+                switch (jump.condition) {
+                    .Constant => |cond| print("cond: {any}({d}) ", .{ @TypeOf(cond), cond }),
+                    .Var => |cond| print("cond: {s} ", .{cond}),
+                }
+                print("label: {s})\n", .{jump.target});
+            },
+            .FunCall => |funCall| {
+                print("{s}(", .{funCall.name});
+                if (funCall.args.len > 0) {
+                    switch (funCall.args[0]) {
+                        .Constant => |c| print("{d}", .{c}),
+                        .Var => |v| print("{s}", .{v}),
+                    }
+                    for (1..funCall.args.len) |i| {
+                        switch (funCall.args[i]) {
+                            .Constant => |c| print(", {d}", .{c}),
+                            .Var => |v| print(", {s}", .{v}),
+                        }
+                    }
+                }
+                std.debug.print(")", .{});
+                print(" -> {s})\n", .{funCall.dst.Var});
+            },
+        }
+    }
+    print("    )\n", .{});
+    print("  )\n", .{});
+}
+
+fn printTACStaticVariable(staticVar: TAC.StaticVariable) void {
+    print("  {any} {s} = {d} (global: {any})\n", .{ @TypeOf(staticVar), staticVar.identifier, staticVar.int, staticVar.global });
 }
 
 pub fn printAssemblerAST(ast: Assembler.Assembly) void {

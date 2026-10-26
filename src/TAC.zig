@@ -2,8 +2,13 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const ArenaAllocator = std.heap.ArenaAllocator;
 const ArrayList = std.ArrayList;
+const StringHashMap = std.StringHashMap;
+const log = std.log;
+const process = std.process;
 
 const Parser = @import("Parser.zig");
+const Semantic = @import("Semantic.zig");
+const Symbols = @import("Semantic/Symbols.zig");
 const instr = @import("TAC/instruction.zig");
 
 pub const Binary = instr.Binary;
@@ -14,16 +19,16 @@ pub const Jump = instr.Jump;
 pub const Label = instr.Label;
 pub const Return = instr.Return;
 pub const Unary = instr.Unary;
-const identifier = instr.identifier;
 const Val = instr.Val;
 
 pub const TAC = @This();
 
 const Instructions = ArrayList(Instruction);
+var SymbolTable: StringHashMap(Symbols.Entry) = undefined;
 
 pub const Program = struct {
     arena: ArenaAllocator,
-    functions: []Function,
+    topLevel: []TopLevel,
 
     pub fn deinit(self: *Program) void {
         self.arena.deinit();
@@ -37,27 +42,48 @@ const Context = struct {
 
 pub const Function = struct {
     name: []const u8,
+    global: bool,
     params: []Parser.VarDecl,
     body: []Instruction,
 };
 
-pub fn emit(allocator: Allocator, tree: Parser.AST) Program {
+pub const StaticVariable = struct {
+    identifier: []const u8,
+    global: bool,
+    int: usize,
+};
+
+const TopLevelTag = enum { Function, StaticVariable };
+const TopLevel = union(TopLevelTag) {
+    Function: Function,
+    StaticVariable: StaticVariable,
+};
+
+pub fn emit(allocator: Allocator, tree: Semantic.AST) Program {
     // This will be doing a lot of miscellaneous allocations for tags and labels,
     // so just handle clean-up with an arena instead of meticulous bookkeeping
     var arena: ArenaAllocator = .init(allocator);
     const arenaAllocator = arena.allocator();
 
-    var funcList: ArrayList(Function) = .empty;
+    SymbolTable = tree.symbols;
 
-    for (tree.functions) |funDecl| {
-        if (funDecl.body == null) continue; // discard function declaration without bodies
+    var topLevelList: ArrayList(TopLevel) = .empty;
+    for (tree.tree.declarations) |decl| {
+        switch (decl) {
+            .FunDecl => |funDecl| {
+                if (funDecl.body == null) continue; // discard function declaration without bodies
 
-        const func = emitFunDecl(arenaAllocator, funDecl);
-        funcList.append(arenaAllocator, func) catch allocError();
+                const func = emitFunDecl(arenaAllocator, funDecl);
+                topLevelList.append(arenaAllocator, .{ .Function = func }) catch allocError();
+            },
+            .VarDecl => {},
+        }
     }
+    const symbolDefs = emitStorageClassSymbols(arenaAllocator);
+    topLevelList.appendSlice(arenaAllocator, symbolDefs) catch allocError();
 
-    const functions = funcList.toOwnedSlice(arenaAllocator) catch allocError();
-    return .{ .arena = arena, .functions = functions };
+    const topLevel = topLevelList.toOwnedSlice(arenaAllocator) catch allocError();
+    return .{ .arena = arena, .topLevel = topLevel };
 }
 
 fn emitDeclaration(allocator: Allocator, context: *Context, body: *Instructions, decl: Parser.Declaration) !void {
@@ -80,7 +106,13 @@ fn emitFunDecl(allocator: Allocator, funDecl: Parser.FunDecl) Function {
     instructions.append(allocator, .{ .Return = .{ .val = .{ .Constant = 0 } } }) catch allocError();
 
     const body = instructions.toOwnedSlice(allocator) catch allocError();
-    return .{ .name = funDecl.name, .params = funDecl.params, .body = body };
+    const entry = SymbolTable.get(funDecl.name) orelse {
+        // Should never hit this if semantic analysis is doing its job
+        log.err("Symbol '{s}' not found", .{funDecl.name});
+        process.exit(1);
+    };
+
+    return .{ .name = funDecl.name, .global = entry.attrs.Fun.global, .params = funDecl.params, .body = body };
 }
 
 fn emitBlock(allocator: Allocator, context: *Context, instructions: *Instructions, block: Parser.Block) !void {
@@ -363,6 +395,42 @@ fn emitFunCall(allocator: Allocator, context: *Context, instructions: *Instructi
     try instructions.append(allocator, .{ .FunCall = .{ .name = funCall.name, .args = try args.toOwnedSlice(allocator), .dst = dst } });
 
     return dst;
+}
+
+fn emitStorageClassSymbols(allocator: Allocator) []TopLevel {
+    var symbolDefs: ArrayList(TopLevel) = .empty;
+
+    var symbolTableIt = SymbolTable.iterator();
+    while (symbolTableIt.next()) |symbol| {
+        const name = symbol.key_ptr.*;
+        const entry = symbol.value_ptr.*;
+
+        switch (entry.attrs) {
+            .Static => |static| {
+                switch (static.initialValue) {
+                    .Initial => {
+                        const staticVariable: TopLevel = .{ .StaticVariable = .{
+                            .identifier = name,
+                            .global = static.global,
+                            .int = static.initialValue.Initial.int,
+                        } };
+                        symbolDefs.append(allocator, staticVariable) catch allocError();
+                    },
+                    .Tentative => {
+                        const staticVariable: TopLevel = .{ .StaticVariable = .{
+                            .identifier = name,
+                            .global = static.global,
+                            .int = 0,
+                        } };
+                        symbolDefs.append(allocator, staticVariable) catch allocError();
+                    },
+                    .None => {},
+                }
+            },
+            else => {},
+        }
+    }
+    return symbolDefs.toOwnedSlice(allocator) catch allocError();
 }
 
 fn nextTag(allocator: Allocator, context: *Context) []u8 {
