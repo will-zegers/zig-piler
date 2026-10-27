@@ -1,6 +1,8 @@
 const std = @import("std");
 const StringHashMap = std.StringHashMap;
 
+const Parser = @import("../Parser.zig");
+
 const TypeTag = enum { Int, FunType };
 const Type = union(TypeTag) {
     Int: void,
@@ -13,7 +15,7 @@ const Type = union(TypeTag) {
 pub const Static = struct {
     const InitialValueTag = enum { Initial, Tentative, None };
     pub const InitialValue = union(InitialValueTag) {
-        Initial: struct { int: usize },
+        Initial: Parser.Constant,
         Tentative: void,
         None: void,
     };

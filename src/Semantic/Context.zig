@@ -42,7 +42,7 @@ err: *Error.Reporter,
 labels: IdentifierMap,
 scopeStack: ArrayList(Scope),
 switchTags: std.StringHashMap(*Switch),
-function: ?[]const u8 = null,
+function: ?[]const u8 = null, // TODO: use scope instead
 counter: usize = 0,
 
 pub fn init(allocator: Allocator, errorReporter: *Error.Reporter) Context {

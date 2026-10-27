@@ -209,7 +209,14 @@ fn resolveStatementIdentifiers(allocator: Allocator, context: *Context, statemen
         .Case => |*case| {
             if (context.getSwitchTag()) |switchTag| {
                 if (case.cond) |cond| {
-                    case.tag = allocator.print("{s}.{d}", .{ switchTag, cond.Constant }) catch allocError();
+                    switch (cond.Constant) {
+                        .int => {
+                            case.tag = allocator.print("{s}.{d}", .{ switchTag, cond.Constant.int }) catch allocError();
+                        },
+                        .long => {
+                            case.tag = allocator.print("{s}.{d}", .{ switchTag, cond.Constant.long }) catch allocError();
+                        },
+                    }
                 } else {
                     case.tag = allocator.print("{s}.default", .{switchTag}) catch allocError();
                 }
@@ -281,6 +288,7 @@ fn resolveExpression(allocator: Allocator, context: *Context, expr: *Expression)
                 context.err.report(.UndeclaredIdentifier, func.lineIndex, func.name);
             }
         },
+        .Cast => {},
     }
 }
 

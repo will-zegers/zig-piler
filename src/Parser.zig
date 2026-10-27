@@ -176,6 +176,7 @@ pub const VarDecl = struct {
         };
     }
 
+    // TODO: merge this with parse
     pub fn asParam(tokens: *TokenIterator) ParsingError!VarDecl {
         const specifiers = try Specifiers.parse(tokens);
 
@@ -184,7 +185,12 @@ pub const VarDecl = struct {
 
         const name = token.symbol;
 
-        return .{ .lineIndex = token.lineIndex, .name = name, .type = specifiers.type.? };
+        return .{
+            .lineIndex = token.lineIndex,
+            .name = name,
+            .type = specifiers.type.?,
+            .storageClass = specifiers.storageClass,
+        };
     }
 
     pub fn deinit(self: *VarDecl, allocator: Allocator) void {

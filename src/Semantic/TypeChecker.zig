@@ -72,6 +72,16 @@ fn typeCheckFunDecl(symbols: *Symbols.Table, decl: FunDecl) void {
         .attrs = attrs,
     }) catch allocError();
 
+    for (decl.params) |param| {
+        std.debug.print("{any}\n", .{param});
+        if (param.storageClass != null) {
+            ErrorReporter.report(.StorageClassOnParam, param.lineIndex, param.name);
+            return;
+        }
+
+        if (param.init != null) {}
+    }
+
     if (decl.body) |body| {
         for (decl.params) |param| {
             symbols.put(param.unique.?, .{ .type = .Int, .attrs = .Local }) catch allocError();
@@ -85,7 +95,7 @@ fn typeCheckFileScopeVarDecl(symbols: *Symbols.Table, decl: VarDecl) void {
     if (decl.init) |init| {
         // TODO: extend initialize to use constant binary and unary expressions
         if (init.Assignment.rhs.* == .Constant) {
-            initialValue = .{ .Initial = .{ .int = init.Assignment.rhs.Constant } };
+            initialValue = .{ .Initial = init.Assignment.rhs.Constant };
         } else {
             ErrorReporter.report(.NonConstInitializer, decl.lineIndex, decl.name);
             std.process.exit(1);
@@ -157,7 +167,7 @@ fn typeCheckLocalVarDecl(symbols: *Symbols.Table, decl: VarDecl) void {
                 ErrorReporter.report(.NonConstInitializer, decl.lineIndex, decl.name);
                 return;
             }
-            initialValue = .{ .Initial = .{ .int = init.Assignment.rhs.Constant } };
+            initialValue = .{ .Initial = init.Assignment.rhs.Constant };
         }
 
         const attrs: Symbols.Attrs = .{ .Static = .{ .initialValue = initialValue, .global = true } };
@@ -270,6 +280,7 @@ fn typeCheckExpression(symbols: *Symbols.Table, expr: Expression) void {
                 typeCheckExpression(symbols, arg);
             }
         },
+        .Cast => {},
         .Constant => {},
     }
 }
