@@ -1,4 +1,5 @@
 const std = @import("std");
+const log = std.log;
 
 const Token = @import("../Lexer.zig").Token;
 
@@ -14,6 +15,92 @@ pub const ParsingError = error{
     NonConstExpr,
     Syntax,
     Token,
+};
+
+pub const TypeTag = enum { Int, Long, FunType };
+pub const Type = union(TypeTag) {
+    Int: void,
+    Long: void,
+    FunType: struct {
+        params: []*Type,
+        ret: *Type,
+    },
+
+    pub fn parse(types: [2]?Type, symbol: []const u8) !Type {
+        if (types[1] == null) {
+            if (types[0] == null) {
+                log.err("Declaration for '{s}' does not name a type", .{symbol});
+                return ParsingError.InvalidType;
+            }
+
+            switch (types[0].?) {
+                .Int => return .Int,
+                .Long => return .Long,
+                else => {
+                    log.err("Invalid type specifier '{any} {any}'", .{ types[0].?, types[1].? });
+                    return ParsingError.InvalidType;
+                },
+            }
+        }
+
+        if ((types[0].? == .Int and types[1].? == .Long) or (types[0].? == .Long and types[1].? == .Int)) {
+            return .Long;
+        }
+
+        log.err("Invalid type specifier '{any} {any}'", .{ types[0].?, types[1].? });
+        return ParsingError.InvalidType;
+    }
+};
+
+pub const StorageClass = enum { Extern, Static };
+
+pub const Specifiers = struct {
+    type: ?Type = null,
+    storageClass: ?StorageClass = null,
+
+    pub fn parse(tokens: *Token.Iterator) ParsingError!Specifiers {
+        var specifiers: Specifiers = .{};
+        var nextToken = tokens.peek();
+
+        var typeIndex: usize = 0;
+        var types = [2]?Type{ null, null };
+        while (true) {
+            switch (nextToken.type) {
+                .Int, .Long => {
+                    if (typeIndex >= types.len) {
+                        log.err("Unvalid type specifier '{s}'", .{nextToken.symbol});
+                        return ParsingError.InvalidType;
+                    }
+
+                    switch (nextToken.type) {
+                        .Int => types[typeIndex] = .Int,
+                        .Long => types[typeIndex] = .Long,
+                        else => unreachable,
+                    }
+                    tokens.skip();
+                    typeIndex += 1;
+                },
+                .Extern, .Static => {
+                    if (specifiers.storageClass != null) {
+                        log.err("Invalid or duplicate storage class '{s}'", .{nextToken.symbol});
+                        return ParsingError.InvalidStorageClass;
+                    }
+
+                    switch (nextToken.type) {
+                        .Static => specifiers.storageClass = .Static,
+                        .Extern => specifiers.storageClass = .Extern,
+                        else => unreachable,
+                    }
+                    tokens.skip();
+                },
+                else => break,
+            }
+            nextToken = tokens.peek();
+        }
+
+        specifiers.type = try Type.parse(types, nextToken.symbol);
+        return specifiers;
+    }
 };
 
 pub fn allocError() noreturn {

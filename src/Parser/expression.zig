@@ -2,12 +2,16 @@ const std = @import("std");
 const mem = std.mem;
 const Allocator = mem.Allocator;
 const ArrayList = std.ArrayList;
+const log = std.log;
+const math = std.math;
 
 const Token = @import("../Lexer.zig").Token;
 const TokenIterator = Token.Iterator;
 
 const common = @import("common.zig");
 const ParsingError = common.ParsingError;
+const Specifiers = common.Specifiers;
+const Type = common.Type;
 const allocError = common.allocError;
 const expect = common.expect;
 const identifier = common.identifier;
@@ -20,6 +24,7 @@ pub const ExpressionTag = enum {
     Assignment,
     Ternary,
     FunctionCall,
+    Cast,
 };
 
 pub const Expression = union(ExpressionTag) {
@@ -30,6 +35,7 @@ pub const Expression = union(ExpressionTag) {
     Assignment: Assignment,
     Ternary: Ternary,
     FunctionCall: FunctionCall,
+    Cast: Cast,
 
     /// Evaluates expression from left-to-right for arithmetic, or right-to-left for assignment, operators.
     /// This is a recursive descent parser that uses the precedence climbing algorithm.
@@ -89,6 +95,7 @@ pub const Expression = union(ExpressionTag) {
             .Assignment => expr.Assignment.deinit(allocator),
             .Ternary => expr.Ternary.deinit(allocator),
             .FunctionCall => expr.FunctionCall.deinit(allocator),
+            .Cast => expr.Cast.deinit(allocator),
         }
     }
 };
@@ -96,7 +103,7 @@ pub const Expression = union(ExpressionTag) {
 fn parseFactor(allocator: Allocator, tokens: *TokenIterator) ParsingError!Expression {
     const token = tokens.next();
     const expr: Expression = switch (token.type) {
-        .Constant => .{ .Constant = std.fmt.parseInt(usize, token.symbol, 10) catch return ParsingError.Token },
+        .Constant => .{ .Constant = try .parse(token) },
         .UnaryOp => blk: { // '~'|'!'|'-'|'++'|'--' <factor>
             const right = try parseFactor(allocator, tokens);
             break :blk .{ .Unary = try Unary.initPre(allocator, token, right) };
@@ -111,10 +118,16 @@ fn parseFactor(allocator: Allocator, tokens: *TokenIterator) ParsingError!Expres
             }
         },
         .OpenParenthesis => blk: { // '(' <expr> ')'
-            const expr = try Expression.parse(allocator, tokens, 0);
-            const next = tokens.next();
-            if (next.type != .CloseParenthesis) return unexpectedToken(token);
-            break :blk expr;
+            const nextToken = tokens.peek();
+            if (nextToken.type == .Int or nextToken.type == .Long) {
+                tokens.rewind();
+                break :blk .{ .Cast = try Cast.parse(allocator, tokens) };
+            } else {
+                const expr = try Expression.parse(allocator, tokens, 0);
+                const next = tokens.next();
+                if (next.type != .CloseParenthesis) return unexpectedToken(token);
+                break :blk expr;
+            }
         },
         else => return unexpectedToken(token),
     };
@@ -127,7 +140,29 @@ fn parseFactor(allocator: Allocator, tokens: *TokenIterator) ParsingError!Expres
     return expr;
 }
 
-pub const Constant = usize;
+const ConstantTag = enum { int, long };
+pub const Constant = union(ConstantTag) {
+    int: i32,
+    long: i64,
+
+    pub fn parse(token: Token) ParsingError!Constant {
+        const num = mem.trimEnd(u8, token.symbol, "Ll");
+        const longValue = std.fmt.parseInt(i64, num, 10) catch |err| {
+            switch (err) {
+                error.Overflow => log.err("Numberic constant '{s}' exceeds capacity of long", .{num}),
+                error.InvalidCharacter => log.err("Could not parse numeric constant '{s}'", .{token.symbol}),
+            }
+            return ParsingError.Token;
+        };
+
+        if (longValue < math.pow(i64, 2, 31) - 1) {
+            const intValue = std.fmt.parseInt(i32, num, 10) catch unreachable;
+            return .{ .int = intValue };
+        }
+
+        return .{ .long = longValue };
+    }
+};
 
 pub const Var = struct {
     name: identifier,
@@ -294,7 +329,7 @@ pub const Assignment = struct {
     pub fn fromDecl(allocator: Allocator, tokens: *TokenIterator) ParsingError!?Expression {
         const lhs = try parseFactor(allocator, tokens);
         if (lhs != .Var) {
-            std.log.err("Expression type {any} is not an assignable lvalue", .{lhs});
+            log.err("Expression type {any} is not an assignable lvalue", .{lhs});
             return ParsingError.Lvalue;
         }
         const nextToken = tokens.peek();
@@ -375,7 +410,27 @@ pub const FunctionCall = struct {
     }
 };
 
+pub const Cast = struct {
+    target: Specifiers, // This will get type-checked during semantic analysis, which will forbid storage classes
+    exp: *Expression,
+
+    pub fn parse(allocator: Allocator, tokens: *Token.Iterator) ParsingError!Cast {
+        try expect(.OpenParenthesis, tokens.next());
+        const target = try Specifiers.parse(tokens);
+        try expect(.CloseParenthesis, tokens.next());
+
+        const exp = allocator.create(Expression) catch allocError();
+        exp.* = try parseFactor(allocator, tokens);
+
+        return .{ .target = target, .exp = exp };
+    }
+
+    pub fn deinit(self: *Cast, allocator: Allocator) void {
+        allocator.destroy(self.exp);
+    }
+};
+
 fn unexpectedToken(token: Token) ParsingError {
-    std.log.err("Got unexpected {any} token '{s}'", .{ token.type, token.symbol });
+    log.err("Got unexpected {any} token '{s}'", .{ token.type, token.symbol });
     return ParsingError.Token;
 }

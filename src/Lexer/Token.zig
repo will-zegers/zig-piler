@@ -28,6 +28,7 @@ pub const Type = enum {
     Identifier,
     If,
     Int,
+    Long,
     OpenBrace,
     OpenParenthesis,
     Return,

@@ -201,7 +201,11 @@ fn printExpression(expr: Parser.Expression, indent: usize) void {
 
     print("{s}{s}(", .{ indentStr, @tagName(expr) });
     switch (expr) {
-        .Constant => print("{d})\n", .{expr.Constant}),
+        .Cast => {},
+        .Constant => |constant| switch (constant) {
+            .int => print("{d})\n", .{expr.Constant.int}),
+            .long => print("{d})\n", .{expr.Constant.long}),
+        },
         .Var => print("{s})\n", .{expr.Var.name}),
         .Unary => |unary| {
             print("\n", .{});
