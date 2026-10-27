@@ -73,13 +73,15 @@ fn typeCheckFunDecl(symbols: *Symbols.Table, decl: FunDecl) void {
     }) catch allocError();
 
     for (decl.params) |param| {
-        std.debug.print("{any}\n", .{param});
         if (param.storageClass != null) {
             ErrorReporter.report(.StorageClassOnParam, param.lineIndex, param.name);
             return;
         }
 
-        if (param.init != null) {}
+        if (param.init != null) {
+            ErrorReporter.report(.DefaultArgument, param.lineIndex, param.name);
+            return;
+        }
     }
 
     if (decl.body) |body| {
@@ -211,6 +213,10 @@ fn typeCheckStatement(symbols: *Symbols.Table, stmt: Statement) void {
         .For => |f| {
             switch (f.init) {
                 .Declaration => |decl| {
+                    if (decl == .FunDecl) {
+                        ErrorReporter.report(.ForLoopFunctionDecl, decl.FunDecl.lineIndex, decl.FunDecl.name);
+                        return;
+                    }
                     if (decl == .VarDecl and decl.VarDecl.storageClass != null) {
                         ErrorReporter.report(.ForLoopStorageClassDecl, decl.VarDecl.lineIndex, decl.VarDecl.name);
                         return;
