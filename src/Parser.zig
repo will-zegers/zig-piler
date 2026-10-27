@@ -4,27 +4,27 @@ const Allocator = mem.Allocator;
 const ArrayList = std.ArrayList;
 const log = std.log;
 
+const Token = @import("Lexer.zig").Token;
+const TokenIterator = Token.Iterator;
+
 const common = @import("Parser/common.zig");
 const ParsingError = common.ParsingError;
-const StorageClass = common.StorageClass;
 const Specifiers = common.Specifiers;
+const StorageClass = common.StorageClass;
 const Type = common.Type;
 const allocError = common.allocError;
 const expect = common.expect;
 const identifier = common.identifier;
 
 const expression = @import("Parser/expression.zig");
-pub const Expression = expression.Expression;
-pub const Binary = expression.Binary;
-pub const Unary = expression.Unary;
-pub const Factor = expression.Factor;
-pub const Constant = expression.Constant;
 pub const Assignment = expression.Assignment;
-pub const Ternary = expression.Ternary;
+pub const Binary = expression.Binary;
+pub const Constant = expression.Constant;
+pub const Expression = expression.Expression;
+pub const Factor = expression.Factor;
 pub const FunctionCall = expression.FunctionCall;
-
-const Token = @import("Lexer.zig").Token;
-const TokenIterator = Token.Iterator;
+pub const Ternary = expression.Ternary;
+pub const Unary = expression.Unary;
 
 const Parser = @This();
 
@@ -248,6 +248,77 @@ pub const Block = struct {
     }
 };
 
+const StatementTag = enum { Break, Case, Compound, Continue, DoWhile, Expression, For, Goto, If, Label, Return, Switch, While, Null };
+pub const Statement = union(StatementTag) {
+    Break: Break,
+    Case: Case,
+    Compound: Block,
+    Continue: Continue,
+    DoWhile: DoWhile,
+    Expression: Expression,
+    For: For,
+    Goto: Goto,
+    If: If,
+    Label: Label,
+    Return: Return,
+    Switch: Switch,
+    While: While,
+    Null: void, // needed to represent empty semicolon-delimited statements
+
+    pub fn parse(allocator: Allocator, tokens: *TokenIterator) ParsingError!Statement {
+        const nextToken = tokens.peek();
+        return switch (nextToken.type) {
+            .Break => .{ .Break = try .parse(tokens) },
+            .Case, .Default => .{ .Case = try .parse(allocator, tokens) },
+            .Continue => .{ .Continue = try .parse(tokens) },
+            .Do => .{ .DoWhile = try .parse(allocator, tokens) },
+            .For => .{ .For = try .parse(allocator, tokens) },
+            .Goto => .{ .Goto = try .parse(tokens) },
+            .Identifier => blk: { // <identifier> ':' <statement>
+                // We need to check if the token after the the identifier is a ':', in which case process the
+                // the token stream as a label; otherwise, parse it as an expression
+                const markerToken = tokens.lookAhead(1);
+                if (markerToken.type == .Colon) {
+                    const ident = tokens.next();
+                    break :blk .{ .Label = try .parse(allocator, ident, tokens) };
+                } else {
+                    const expr: Statement = .{ .Expression = try Expression.parse(allocator, tokens, 0) };
+                    try expect(.Semicolon, tokens.next());
+                    break :blk expr;
+                }
+            },
+            .If => .{ .If = try .parse(allocator, tokens) },
+            .OpenBrace => .{ .Compound = try .parse(allocator, tokens) },
+            .Return => .{ .Return = try .parse(allocator, tokens) },
+            .Semicolon => .{ .Null = tokens.skip() },
+            .Switch => .{ .Switch = try .parse(allocator, tokens) },
+            .While => .{ .While = try .parse(allocator, tokens) },
+            else => blk: { // <expr> ';'
+                const expr: Statement = .{ .Expression = try Expression.parse(allocator, tokens, 0) };
+                try expect(.Semicolon, tokens.next());
+                break :blk expr;
+            },
+        };
+    }
+
+    pub fn deinit(statement: *Statement, allocator: Allocator) void {
+        switch (statement.*) {
+            .Break, .Continue => {},
+            .Case => statement.Case.deinit(allocator),
+            .Compound => statement.Compound.deinit(allocator),
+            .DoWhile => statement.DoWhile.deinit(allocator),
+            .Expression => Expression.deinit(&statement.Expression, allocator),
+            .For => statement.For.deinit(allocator),
+            .If => statement.If.deinit(allocator),
+            .Label => statement.Label.deinit(allocator),
+            .Null, .Goto => {},
+            .Return => statement.Return.deinit(allocator),
+            .Switch => statement.Switch.deinit(allocator),
+            .While => statement.While.deinit(allocator),
+        }
+    }
+};
+
 pub const Break = struct {
     lineIndex: usize,
     tag: ?[]const u8 = null, // this will get set during semantic analysis
@@ -259,6 +330,52 @@ pub const Break = struct {
     }
 
     // no deinit needed since the tag is owned by the enclosing loop/switch
+};
+
+pub const Case = struct {
+    lineIndex: usize,
+    tag: ?[]const u8 = null,
+    cond: ?Expression,
+    body: ?*Statement,
+
+    pub fn parse(allocator: Allocator, tokens: *TokenIterator) ParsingError!Case {
+        var nextToken = tokens.next();
+        const cond: ?Expression = switch (nextToken.type) {
+            .Case => try Expression.parse(allocator, tokens, 0),
+            .Default => null, // 'default' is just treated as special "case" with no cond expr
+            else => unreachable, // the statement parser already guards against other cases
+        };
+
+        // No current support for chars or the 'const' keyword, so only expect null or literal constants
+        if (cond != null and cond.? != .Constant) {
+            std.log.err("Non-constant expression", .{});
+            return ParsingError.NonConstExpr;
+        }
+        const lineIndex = nextToken.lineIndex;
+        try expect(.Colon, tokens.next());
+
+        var body: ?*Statement = null;
+        nextToken = tokens.peek();
+        if (nextToken.type != .Case and nextToken.type != .Default) {
+            body = allocator.create(Statement) catch allocError();
+            body.?.* = try Statement.parse(allocator, tokens);
+        }
+
+        return .{ .lineIndex = lineIndex, .cond = cond, .body = body };
+    }
+
+    pub fn deinit(self: *Case, allocator: Allocator) void {
+        if (self.tag) |tag| allocator.free(tag);
+
+        if (self.cond) |*cond| {
+            Expression.deinit(cond, allocator);
+        }
+
+        if (self.body) |body| {
+            Statement.deinit(body, allocator);
+            allocator.destroy(body);
+        }
+    }
 };
 
 pub const Continue = struct {
@@ -378,32 +495,6 @@ pub const For = struct {
     }
 };
 
-pub const While = struct {
-    tag: ?[]const u8 = null, // this will get set during semantic analysis
-    cond: Expression,
-    body: *Statement,
-
-    pub fn parse(allocator: Allocator, tokens: *TokenIterator) ParsingError!While {
-        try expect(.While, tokens.next());
-        try expect(.OpenParenthesis, tokens.peek());
-        const cond = try Expression.parse(allocator, tokens, 0);
-
-        const body = allocator.create(Statement) catch allocError();
-        body.* = try Statement.parse(allocator, tokens);
-
-        return .{ .cond = cond, .body = body };
-    }
-
-    pub fn deinit(self: *While, allocator: Allocator) void {
-        if (self.tag) |tag| allocator.free(tag);
-
-        Expression.deinit(&self.cond, allocator);
-
-        Statement.deinit(self.body, allocator);
-        allocator.destroy(self.body);
-    }
-};
-
 pub const Goto = struct {
     lineIndex: usize,
     target: identifier,
@@ -460,6 +551,47 @@ pub const If = struct {
     }
 };
 
+pub const Label = struct {
+    lineIndex: usize,
+    name: []const u8,
+    tag: ?[]const u8 = null,
+    body: *Statement,
+
+    pub fn parse(allocator: Allocator, name: Token, tokens: *TokenIterator) ParsingError!Label {
+        try expect(.Identifier, name);
+        try expect(.Colon, tokens.next());
+
+        const body = allocator.create(Statement) catch allocError();
+        body.* = try Statement.parse(allocator, tokens);
+
+        return .{ .name = name.symbol, .body = body, .lineIndex = name.lineIndex };
+    }
+
+    pub fn deinit(self: *Label, allocator: Allocator) void {
+        if (self.tag) |tag| allocator.free(tag);
+
+        defer allocator.destroy(self.body);
+        Statement.deinit(self.body, allocator);
+    }
+};
+
+pub const Return = struct {
+    expr: Expression,
+
+    pub fn parse(allocator: Allocator, tokens: *TokenIterator) ParsingError!Return {
+        try expect(.Return, tokens.next());
+        const expr = try Expression.parse(allocator, tokens, 0);
+        const self: Return = .{ .expr = expr };
+        try expect(.Semicolon, tokens.next());
+
+        return self;
+    }
+
+    pub fn deinit(self: *Return, allocator: Allocator) void {
+        Expression.deinit(&self.expr, allocator);
+    }
+};
+
 pub const Switch = struct {
     tag: ?[]const u8 = null,
     cond: Expression,
@@ -503,160 +635,28 @@ pub const Switch = struct {
     }
 };
 
-pub const Case = struct {
-    lineIndex: usize,
-    tag: ?[]const u8 = null,
-    cond: ?Expression,
-    body: ?*Statement,
-
-    pub fn parse(allocator: Allocator, tokens: *TokenIterator) ParsingError!Case {
-        var nextToken = tokens.next();
-        const cond: ?Expression = switch (nextToken.type) {
-            .Case => try Expression.parse(allocator, tokens, 0),
-            .Default => null, // 'default' is just treated as special "case" with no cond expr
-            else => unreachable, // the statement parser already guards against other cases
-        };
-
-        // No current support for chars or the 'const' keyword, so only expect null or literal constants
-        if (cond != null and cond.? != .Constant) {
-            std.log.err("Non-constant expression", .{});
-            return ParsingError.NonConstExpr;
-        }
-        const lineIndex = nextToken.lineIndex;
-        try expect(.Colon, tokens.next());
-
-        var body: ?*Statement = null;
-        nextToken = tokens.peek();
-        if (nextToken.type != .Case and nextToken.type != .Default) {
-            body = allocator.create(Statement) catch allocError();
-            body.?.* = try Statement.parse(allocator, tokens);
-        }
-
-        return .{ .lineIndex = lineIndex, .cond = cond, .body = body };
-    }
-
-    pub fn deinit(self: *Case, allocator: Allocator) void {
-        if (self.tag) |tag| allocator.free(tag);
-
-        if (self.cond) |*cond| {
-            Expression.deinit(cond, allocator);
-        }
-
-        if (self.body) |body| {
-            Statement.deinit(body, allocator);
-            allocator.destroy(body);
-        }
-    }
-};
-
-pub const Label = struct {
-    lineIndex: usize,
-    name: []const u8,
-    tag: ?[]const u8 = null,
+pub const While = struct {
+    tag: ?[]const u8 = null, // this will get set during semantic analysis
+    cond: Expression,
     body: *Statement,
 
-    pub fn parse(allocator: Allocator, name: Token, tokens: *TokenIterator) ParsingError!Label {
-        try expect(.Identifier, name);
-        try expect(.Colon, tokens.next());
+    pub fn parse(allocator: Allocator, tokens: *TokenIterator) ParsingError!While {
+        try expect(.While, tokens.next());
+        try expect(.OpenParenthesis, tokens.peek());
+        const cond = try Expression.parse(allocator, tokens, 0);
 
         const body = allocator.create(Statement) catch allocError();
         body.* = try Statement.parse(allocator, tokens);
 
-        return .{ .name = name.symbol, .body = body, .lineIndex = name.lineIndex };
+        return .{ .cond = cond, .body = body };
     }
 
-    pub fn deinit(self: *Label, allocator: Allocator) void {
+    pub fn deinit(self: *While, allocator: Allocator) void {
         if (self.tag) |tag| allocator.free(tag);
 
-        defer allocator.destroy(self.body);
+        Expression.deinit(&self.cond, allocator);
+
         Statement.deinit(self.body, allocator);
-    }
-};
-
-pub const Return = struct {
-    expr: Expression,
-
-    pub fn parse(allocator: Allocator, tokens: *TokenIterator) ParsingError!Return {
-        try expect(.Return, tokens.next());
-        const expr = try Expression.parse(allocator, tokens, 0);
-        const self: Return = .{ .expr = expr };
-        try expect(.Semicolon, tokens.next());
-
-        return self;
-    }
-
-    pub fn deinit(self: *Return, allocator: Allocator) void {
-        Expression.deinit(&self.expr, allocator);
-    }
-};
-
-const StatementTag = enum { Break, Case, Compound, Continue, DoWhile, Expression, For, Goto, If, Label, Return, Switch, While, Null };
-pub const Statement = union(StatementTag) {
-    Break: Break,
-    Case: Case,
-    Compound: Block,
-    Continue: Continue,
-    DoWhile: DoWhile,
-    Expression: Expression,
-    For: For,
-    Goto: Goto,
-    If: If,
-    Label: Label,
-    Return: Return,
-    Switch: Switch,
-    While: While,
-    Null: void, // needed to represent empty semicolon-delimited statements
-
-    pub fn parse(allocator: Allocator, tokens: *TokenIterator) ParsingError!Statement {
-        const nextToken = tokens.peek();
-        return switch (nextToken.type) {
-            .Break => .{ .Break = try .parse(tokens) },
-            .Case, .Default => .{ .Case = try .parse(allocator, tokens) },
-            .OpenBrace => .{ .Compound = try .parse(allocator, tokens) },
-            .Continue => .{ .Continue = try .parse(tokens) },
-            .Do => .{ .DoWhile = try .parse(allocator, tokens) },
-            .Goto => .{ .Goto = try .parse(tokens) },
-            .For => .{ .For = try .parse(allocator, tokens) },
-            .If => .{ .If = try .parse(allocator, tokens) },
-            .Return => .{ .Return = try .parse(allocator, tokens) },
-            .While => .{ .While = try .parse(allocator, tokens) },
-            .Semicolon => .{ .Null = tokens.skip() },
-            .Switch => .{ .Switch = try .parse(allocator, tokens) },
-            .Identifier => blk: { // <identifier> ':' <statement>
-                // We need to check if the token after the the identifier is a ':', in which case process the
-                // the token stream as a label; otherwise, parse it as an expression
-                const markerToken = tokens.lookAhead(1);
-                if (markerToken.type == .Colon) {
-                    const ident = tokens.next();
-                    break :blk .{ .Label = try .parse(allocator, ident, tokens) };
-                } else {
-                    const expr: Statement = .{ .Expression = try Expression.parse(allocator, tokens, 0) };
-                    try expect(.Semicolon, tokens.next());
-                    break :blk expr;
-                }
-            },
-            else => blk: { // <expr> ';'
-                const expr: Statement = .{ .Expression = try Expression.parse(allocator, tokens, 0) };
-                try expect(.Semicolon, tokens.next());
-                break :blk expr;
-            },
-        };
-    }
-
-    pub fn deinit(statement: *Statement, allocator: Allocator) void {
-        switch (statement.*) {
-            .Compound => statement.Compound.deinit(allocator),
-            .DoWhile => statement.DoWhile.deinit(allocator),
-            .Expression => Expression.deinit(&statement.Expression, allocator),
-            .For => statement.For.deinit(allocator),
-            .If => statement.If.deinit(allocator),
-            .Label => statement.Label.deinit(allocator),
-            .Null, .Goto => {},
-            .Return => statement.Return.deinit(allocator),
-            .While => statement.While.deinit(allocator),
-            .Switch => statement.Switch.deinit(allocator),
-            .Case => statement.Case.deinit(allocator),
-            .Break, .Continue => {},
-        }
+        allocator.destroy(self.body);
     }
 };
