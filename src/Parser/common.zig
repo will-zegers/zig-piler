@@ -22,7 +22,7 @@ pub const Type = union(TypeTag) {
     Int: void,
     Long: void,
     FunType: struct {
-        params: []*Type,
+        params: []*const Type,
         ret: *Type,
     },
 
@@ -55,12 +55,13 @@ pub const Type = union(TypeTag) {
 pub const StorageClass = enum { Extern, Static };
 
 pub const Specifiers = struct {
+    lineIndex: usize,
     type: ?Type = null,
     storageClass: ?StorageClass = null,
 
     pub fn parse(tokens: *Token.Iterator) ParsingError!Specifiers {
-        var specifiers: Specifiers = .{};
         var nextToken = tokens.peek();
+        var specifiers: Specifiers = .{ .lineIndex = nextToken.lineIndex };
 
         var typeIndex: usize = 0;
         var types = [2]?Type{ null, null };

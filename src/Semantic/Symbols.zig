@@ -2,15 +2,7 @@ const std = @import("std");
 const StringHashMap = std.StringHashMap;
 
 const Parser = @import("../Parser.zig");
-
-const TypeTag = enum { Int, FunType };
-const Type = union(TypeTag) {
-    Int: void,
-    FunType: struct {
-        type: void,
-        nParams: usize,
-    },
-};
+const Type = Parser.Type;
 
 pub const Static = struct {
     const InitialValueTag = enum { Initial, Tentative, None };

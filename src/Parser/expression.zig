@@ -113,10 +113,11 @@ pub const Assignment = struct {
         .{ "^=", Binary.Operator.Xor },
     });
 
+    lineIndex: usize,
+    type: ?Type = null,
     operator: ?Binary.Operator,
     lhs: *Expression,
     rhs: *Expression,
-    lineIndex: usize,
 
     pub fn parse(allocator: Allocator, operator: Token, lhs: Expression, rhs: Expression) ParsingError!Assignment {
         const op = if (mem.eql(u8, "=", operator.symbol))
@@ -130,7 +131,7 @@ pub const Assignment = struct {
         const rhsPtr = allocator.create(Expression) catch allocError();
         rhsPtr.* = rhs;
 
-        return .{ .operator = op, .lhs = lhsPtr, .rhs = rhsPtr, .lineIndex = operator.lineIndex };
+        return .{ .lineIndex = operator.lineIndex, .operator = op, .lhs = lhsPtr, .rhs = rhsPtr };
     }
 
     pub fn deinit(self: Assignment, allocator: Allocator) void {
@@ -185,6 +186,8 @@ pub const Binary = struct {
         .{ "^", .Xor },
     });
 
+    lineIndex: usize,
+    type: ?Type = null,
     operator: Operator,
     left: *Expression,
     right: *Expression,
@@ -198,7 +201,7 @@ pub const Binary = struct {
         const rightPtr = allocator.create(Expression) catch allocError();
         rightPtr.* = right;
 
-        return .{ .operator = operator, .left = leftPtr, .right = rightPtr };
+        return .{ .lineIndex = token.lineIndex, .operator = operator, .left = leftPtr, .right = rightPtr };
     }
 
     pub fn deinit(self: Binary, allocator: Allocator) void {
@@ -211,6 +214,7 @@ pub const Binary = struct {
 };
 
 pub const Cast = struct {
+    lineIndex: usize,
     target: Specifiers, // This will get type-checked during semantic analysis, which will forbid storage classes
     exp: *Expression,
 
@@ -222,7 +226,7 @@ pub const Cast = struct {
         const exp = allocator.create(Expression) catch allocError();
         exp.* = try parseFactor(allocator, tokens);
 
-        return .{ .target = target, .exp = exp };
+        return .{ .lineIndex = target.lineIndex, .target = target, .exp = exp };
     }
 
     pub fn deinit(self: *Cast, allocator: Allocator) void {
@@ -239,7 +243,7 @@ pub const Constant = union(ConstantTag) {
         const num = mem.trimEnd(u8, token.symbol, "Ll");
         const longValue = std.fmt.parseInt(i64, num, 10) catch |err| {
             switch (err) {
-                error.Overflow => log.err("Numberic constant '{s}' exceeds capacity of long", .{num}),
+                error.Overflow => log.err("Numeric constant '{s}' exceeds capacity of long", .{num}),
                 error.InvalidCharacter => log.err("Could not parse numeric constant '{s}'", .{token.symbol}),
             }
             return ParsingError.Token;
@@ -256,6 +260,7 @@ pub const Constant = union(ConstantTag) {
 
 pub const FunctionCall = struct {
     lineIndex: usize,
+    type: ?Type = null,
     name: identifier,
     args: []Expression,
 
@@ -295,6 +300,7 @@ pub const FunctionCall = struct {
 };
 
 pub const Ternary = struct {
+    type: ?Type = null,
     condition: *Expression,
     thenStmt: *Expression,
     elseStmt: *Expression,
@@ -340,17 +346,18 @@ pub const Unary = struct {
         .{ "--", .Dec },
     });
 
+    lineIndex: usize,
+    type: ?Type = null,
     operator: Operator,
     operand: *Expression,
-    type: enum { Pre, Post },
-    lineIndex: usize,
+    order: enum { Pre, Post },
 
     pub fn pre(allocator: Allocator, token: Token, left: Expression) ParsingError!Unary {
         const operand = allocator.create(Expression) catch allocError();
         operand.* = left;
 
         const operator: Operator = OperatorMap.get(token.symbol) orelse return unexpectedToken(token);
-        return .{ .operator = operator, .operand = operand, .type = .Pre, .lineIndex = token.lineIndex };
+        return .{ .operator = operator, .operand = operand, .order = .Pre, .lineIndex = token.lineIndex };
     }
 
     pub fn post(allocator: Allocator, token: Token, right: Expression) ParsingError!Unary {
@@ -360,7 +367,7 @@ pub const Unary = struct {
         operand.* = right;
 
         const operator: Operator = OperatorMap.get(token.symbol) orelse return unexpectedToken(token);
-        return .{ .operator = operator, .operand = operand, .type = .Post, .lineIndex = token.lineIndex };
+        return .{ .operator = operator, .operand = operand, .order = .Post, .lineIndex = token.lineIndex };
     }
 
     pub fn deinit(self: *Unary, allocator: Allocator) void {
@@ -371,6 +378,7 @@ pub const Unary = struct {
 };
 
 pub const Var = struct {
+    type: ?Type = null,
     name: identifier,
     lineIndex: usize,
 };

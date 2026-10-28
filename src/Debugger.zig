@@ -203,8 +203,8 @@ fn printExpression(expr: Parser.Expression, indent: usize) void {
     switch (expr) {
         .Cast => {},
         .Constant => |constant| switch (constant) {
-            .int => print("{d})\n", .{expr.Constant.int}),
-            .long => print("{d})\n", .{expr.Constant.long}),
+            .int => |int| print("{d})\n", .{int}),
+            .long => |long| print("{d})\n", .{long}),
         },
         .Var => print("{s})\n", .{expr.Var.name}),
         .Unary => |unary| {

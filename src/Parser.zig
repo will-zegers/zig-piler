@@ -11,7 +11,7 @@ const common = @import("Parser/common.zig");
 const ParsingError = common.ParsingError;
 const Specifiers = common.Specifiers;
 const StorageClass = common.StorageClass;
-const Type = common.Type;
+pub const Type = common.Type;
 const allocError = common.allocError;
 const expect = common.expect;
 const identifier = common.identifier;
@@ -19,6 +19,7 @@ const identifier = common.identifier;
 const expression = @import("Parser/expression.zig");
 pub const Assignment = expression.Assignment;
 pub const Binary = expression.Binary;
+pub const Cast = expression.Cast;
 pub const Constant = expression.Constant;
 pub const Expression = expression.Expression;
 pub const Factor = expression.Factor;
@@ -107,10 +108,10 @@ pub const Declaration = union(DeclarationTag) {
 
 pub const FunDecl = struct {
     lineIndex: usize,
+    type: Type,
     name: identifier,
     params: []VarDecl,
     body: ?Block,
-    type: Type,
     storageClass: ?StorageClass,
 
     pub fn parse(allocator: Allocator, tokens: *TokenIterator) ParsingError!FunDecl {
@@ -130,12 +131,22 @@ pub const FunDecl = struct {
             break :blk null;
         };
 
+        var paramTypes = ArrayList(*const Type).initCapacity(allocator, params.len) catch allocError();
+        for (params) |param| {
+            paramTypes.appendAssumeCapacity(&param.type);
+        }
+        const ret = allocator.create(Type) catch allocError();
+        ret.* = specifiers.type.?;
+
         return .{
             .lineIndex = token.lineIndex,
+            .type = .{ .FunType = .{
+                .params = paramTypes.toOwnedSlice(allocator) catch allocError(),
+                .ret = ret,
+            } },
             .name = name.symbol,
             .params = params,
             .body = body,
-            .type = specifiers.type.?,
             .storageClass = specifiers.storageClass,
         };
     }
@@ -149,6 +160,8 @@ pub const FunDecl = struct {
             param.deinit(allocator);
         }
         allocator.free(self.params);
+        allocator.free(self.type.FunType.params);
+        allocator.destroy(self.type.FunType.ret);
     }
 
     fn parseParamsList(allocator: Allocator, tokens: *TokenIterator) ParsingError![]VarDecl {
@@ -175,10 +188,10 @@ pub const FunDecl = struct {
 
 pub const VarDecl = struct {
     lineIndex: usize,
+    type: Type,
     name: identifier,
     unique: ?identifier = null,
-    init: ?Expression = null, // TODO: change this to Assignment type
-    type: Type, // TODO: change to Specifiers type and check at semantic
+    init: ?Expression = null,
     storageClass: ?StorageClass = null,
 
     pub fn parse(allocator: Allocator, tokens: *TokenIterator) ParsingError!VarDecl {
@@ -190,7 +203,7 @@ pub const VarDecl = struct {
 
         var init: ?Expression = null;
         if (mem.eql(u8, "=", tokens.peek().symbol)) {
-            const lhs: Expression = .{ .Var = .{ .name = name, .lineIndex = token.lineIndex } };
+            const lhs: Expression = .{ .Var = .{ .type = specifiers.type, .name = name, .lineIndex = token.lineIndex } };
             const operator = tokens.next();
             const rhs: Expression = try .parse(allocator, tokens, 0);
             init = .{ .Assignment = try Assignment.parse(allocator, operator, lhs, rhs) };
@@ -198,9 +211,9 @@ pub const VarDecl = struct {
 
         return .{
             .lineIndex = token.lineIndex,
+            .type = specifiers.type.?,
             .name = name,
             .init = init,
-            .type = specifiers.type.?,
             .storageClass = specifiers.storageClass,
         };
     }

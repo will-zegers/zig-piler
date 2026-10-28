@@ -10,6 +10,7 @@ const Declaration = Parser.Declaration;
 const Expression = Parser.Expression;
 const FunDecl = Parser.FunDecl;
 const Statement = Parser.Statement;
+const Type = Parser.Type;
 const VarDecl = Parser.VarDecl;
 
 const Error = @import("Error.zig");
@@ -45,7 +46,7 @@ fn typeCheckFunDecl(symbols: *Symbols.Table, decl: FunDecl) void {
     var isGlobal: bool = decl.storageClass != .Static;
 
     if (symbols.get(decl.name)) |entry| {
-        if (entry.type != .FunType or entry.type.FunType.nParams != decl.params.len) {
+        if (entry.type != .FunType or entry.type.FunType.params.len != decl.params.len) {
             ErrorReporter.report(.ConflictingFunctions, decl.lineIndex, decl.name);
             return;
         }
@@ -68,13 +69,13 @@ fn typeCheckFunDecl(symbols: *Symbols.Table, decl: FunDecl) void {
         .global = isGlobal,
     } };
     symbols.put(decl.name, .{
-        .type = .{ .FunType = .{ .type = {}, .nParams = decl.params.len } },
+        .type = decl.type,
         .attrs = attrs,
     }) catch allocError();
 
     for (decl.params) |param| {
         if (param.storageClass != null) {
-            ErrorReporter.report(.StorageClassOnParam, param.lineIndex, param.name);
+            ErrorReporter.report(.InvalidStorageClass, param.lineIndex, param.name);
             return;
         }
 
@@ -99,8 +100,8 @@ fn typeCheckFileScopeVarDecl(symbols: *Symbols.Table, decl: VarDecl) void {
         if (init.Assignment.rhs.* == .Constant) {
             initialValue = .{ .Initial = init.Assignment.rhs.Constant };
         } else {
+            // Report an error, but continue as if there's no initialization
             ErrorReporter.report(.NonConstInitializer, decl.lineIndex, decl.name);
-            std.process.exit(1);
         }
     } else { // no initializer
         if (decl.storageClass == .Extern) {
@@ -132,7 +133,7 @@ fn typeCheckFileScopeVarDecl(symbols: *Symbols.Table, decl: VarDecl) void {
                     ErrorReporter.report(.VariableRedefinition, decl.lineIndex, decl.name);
                     return;
                 }
-                initialValue = .{ .Initial = .{ .int = init.int } };
+                initialValue = .{ .Initial = init };
             },
             .Tentative => {
                 if (initialValue != .Initial) {
@@ -151,7 +152,6 @@ fn typeCheckLocalVarDecl(symbols: *Symbols.Table, decl: VarDecl) void {
     if (decl.storageClass == .Extern) {
         if (decl.init) |_| {
             ErrorReporter.report(.LocalExternDefined, decl.lineIndex, decl.name);
-            return;
         }
         if (symbols.get(decl.name)) |entry| {
             if (entry.type != .Int) {
@@ -163,13 +163,18 @@ fn typeCheckLocalVarDecl(symbols: *Symbols.Table, decl: VarDecl) void {
             symbols.put(decl.name, .{ .type = .Int, .attrs = attrs }) catch allocError();
         }
     } else if (decl.storageClass == .Static) {
-        var initialValue: Symbols.Static.InitialValue = .{ .Initial = .{ .int = 0 } };
+        var initialValue: Symbols.Static.InitialValue = switch (decl.type) {
+            .Int => .{ .Initial = .{ .int = 0 } },
+            .Long => .{ .Initial = .{ .long = 0 } },
+            .FunType => unreachable,
+        };
         if (decl.init) |init| {
-            if (init.Assignment.rhs.* != .Constant) {
+            if (init.Assignment.rhs.* == .Constant) {
+                initialValue = .{ .Initial = init.Assignment.rhs.Constant };
+            } else {
+                // Report an error, but continue as if there's no initialization
                 ErrorReporter.report(.NonConstInitializer, decl.lineIndex, decl.name);
-                return;
             }
-            initialValue = .{ .Initial = init.Assignment.rhs.Constant };
         }
 
         const attrs: Symbols.Attrs = .{ .Static = .{ .initialValue = initialValue, .global = true } };
@@ -223,7 +228,7 @@ fn typeCheckStatement(symbols: *Symbols.Table, stmt: Statement) void {
                     }
                     typeCheckLocalDeclaration(symbols, decl);
                 },
-                .Expression => |expr| if (expr) |e| typeCheckExpression(symbols, e),
+                .Expression => |expr| if (expr) |e| typeCheckExpression(symbols, e) else null,
             }
             if (f.cond) |cond| typeCheckExpression(symbols, cond);
             if (f.post) |post| typeCheckExpression(symbols, post);
@@ -250,22 +255,13 @@ fn typeCheckExpression(symbols: *Symbols.Table, expr: Expression) void {
             typeCheckExpression(symbols, bin.left.*);
             typeCheckExpression(symbols, bin.right.*);
         },
-        .Var => |v| {
-            const symbol = symbols.get(v.name) orelse {
-                ErrorReporter.report(.UnresolvedSymbol, v.lineIndex, v.name);
-                return;
-            };
-            if (symbol.type != .Int) {
-                ErrorReporter.report(.VarUsedAsFunction, v.lineIndex, v.name);
-                return;
+        .Cast => |cast| {
+            if (cast.target.storageClass != null) {
+                ErrorReporter.report(.InvalidStorageClass, cast.lineIndex, null);
             }
+            return;
         },
-        .Unary => |un| typeCheckExpression(symbols, un.operand.*),
-        .Ternary => |tern| {
-            typeCheckExpression(symbols, tern.condition.*);
-            typeCheckExpression(symbols, tern.thenStmt.*);
-            typeCheckExpression(symbols, tern.elseStmt.*);
-        },
+        .Constant => {},
         .FunctionCall => |fcall| {
             const symbol = symbols.get(fcall.name).?; // semantics already ensures the function has been defined
             if (symbol.type != .FunType) {
@@ -274,11 +270,11 @@ fn typeCheckExpression(symbols: *Symbols.Table, expr: Expression) void {
             }
 
             const funType = symbol.type.FunType;
-            if (funType.nParams > fcall.args.len) {
+            if (funType.params.len > fcall.args.len) {
                 ErrorReporter.report(.TooFewArguments, fcall.lineIndex, null);
                 return;
             }
-            if (funType.nParams < fcall.args.len) {
+            if (funType.params.len < fcall.args.len) {
                 ErrorReporter.report(.TooManyArguments, fcall.lineIndex, null);
                 return;
             }
@@ -286,8 +282,18 @@ fn typeCheckExpression(symbols: *Symbols.Table, expr: Expression) void {
                 typeCheckExpression(symbols, arg);
             }
         },
-        .Cast => {},
-        .Constant => {},
+        .Ternary => |tern| {
+            typeCheckExpression(symbols, tern.condition.*);
+            typeCheckExpression(symbols, tern.thenStmt.*);
+            typeCheckExpression(symbols, tern.elseStmt.*);
+        },
+        .Unary => |un| typeCheckExpression(symbols, un.operand.*),
+        .Var => |v| {
+            const symbol = symbols.get(v.name) orelse unreachable;
+            if (symbol.type == .FunType) {
+                ErrorReporter.report(.VarUsedAsFunction, v.lineIndex, v.name);
+            }
+        },
     }
 }
 

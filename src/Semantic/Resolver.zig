@@ -210,11 +210,11 @@ fn resolveStatementIdentifiers(allocator: Allocator, context: *Context, statemen
             if (context.getSwitchTag()) |switchTag| {
                 if (case.cond) |cond| {
                     switch (cond.Constant) {
-                        .int => {
-                            case.tag = allocator.print("{s}.{d}", .{ switchTag, cond.Constant.int }) catch allocError();
+                        .int => |int| {
+                            case.tag = allocator.print("{s}.{d}", .{ switchTag, int }) catch allocError();
                         },
-                        .long => {
-                            case.tag = allocator.print("{s}.{d}", .{ switchTag, cond.Constant.long }) catch allocError();
+                        .long => |long| {
+                            case.tag = allocator.print("{s}.{d}", .{ switchTag, long }) catch allocError();
                         },
                     }
                 } else {
