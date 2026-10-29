@@ -214,9 +214,10 @@ pub const Binary = struct {
 };
 
 pub const Cast = struct {
-    lineIndex: usize,
+    lineIndex: usize = 0,
     target: Specifiers, // This will get type-checked during semantic analysis, which will forbid storage classes
     exp: *Expression,
+    needsDealloc: bool = false,
 
     pub fn parse(allocator: Allocator, tokens: *Token.Iterator) ParsingError!Cast {
         try expect(.OpenParenthesis, tokens.next());
@@ -226,11 +227,19 @@ pub const Cast = struct {
         const exp = allocator.create(Expression) catch allocError();
         exp.* = try parseFactor(allocator, tokens);
 
-        return .{ .lineIndex = target.lineIndex, .target = target, .exp = exp };
+        return .{ .lineIndex = target.lineIndex, .target = target, .exp = exp, .needsDealloc = true };
+    }
+
+    pub fn to(exp: *const Expression, toType: Type) Cast {
+        return .{
+            .lineIndex = 0,
+            .target = .{ .lineIndex = 0, .type = toType },
+            .exp = @constCast(exp),
+        };
     }
 
     pub fn deinit(self: *Cast, allocator: Allocator) void {
-        allocator.destroy(self.exp);
+        if (self.needsDealloc) allocator.destroy(self.exp);
     }
 };
 

@@ -31,7 +31,7 @@ pub const SemanticError = enum {
     TooManyArguments,
     UndeclaredIdentifier,
     UnresolvedSymbol,
-    VarUsedAsFunction,
+    FunctionUsedAsVariable,
     VariableRedefinition,
 };
 
@@ -69,7 +69,7 @@ pub const Reporter = struct {
             .InvalidStorageClass => log.err("Type name does not allow storage class to be specified", .{}),
             .UndeclaredIdentifier => log.err("Use of undeclared identifier '{s}'", .{name.?}),
             .UnresolvedSymbol => log.err("Could not resolve symbol '{s}'", .{name.?}),
-            .VarUsedAsFunction => log.err("Function '{s}' cannot be used as a variable", .{name.?}),
+            .FunctionUsedAsVariable => log.err("Function '{s}' cannot be used as a variable", .{name.?}),
             .VariableRedefinition => log.err("Redfinition of '{s}'", .{name.?}),
         }
         log.err(" {d} |{s}\n", .{ lineIndex + 1, self.textLines[lineIndex] });

@@ -6,6 +6,7 @@ const process = std.process;
 const Parser = @import("../Parser.zig");
 const AST = Parser.AST;
 const Block = Parser.Block;
+const Cast = Parser.Cast;
 const Declaration = Parser.Declaration;
 const Expression = Parser.Expression;
 const FunDecl = Parser.FunDecl;
@@ -20,28 +21,29 @@ const Symbols = @import("Symbols.zig");
 // reporting will be handled by a global object. TODO: maybe revisit for a better
 // solution
 var ErrorReporter: *Error.Reporter = undefined;
+var FunctionName: ?[]const u8 = null;
 
 const TypeChecker = @This();
 
 pub fn run(symbols: *Symbols.Table, errorReporter: *Error.Reporter, tree: *AST) void {
     ErrorReporter = errorReporter;
 
-    for (tree.declarations) |decl| {
-        switch (decl) {
-            .FunDecl => typeCheckFunDecl(symbols, decl.FunDecl),
-            .VarDecl => typeCheckFileScopeVarDecl(symbols, decl.VarDecl),
+    for (tree.declarations) |*decl| {
+        switch (decl.*) {
+            .FunDecl => |*funDecl| typeCheckFunDecl(symbols, funDecl),
+            .VarDecl => |*varDecl| typeCheckFileScopeVarDecl(symbols, varDecl),
         }
     }
 }
 
-fn typeCheckLocalDeclaration(symbols: *Symbols.Table, decl: Declaration) void {
-    switch (decl) {
-        .FunDecl => |funDecl| typeCheckFunDecl(symbols, funDecl),
-        .VarDecl => |varDecl| typeCheckLocalVarDecl(symbols, varDecl),
+fn typeCheckLocalDeclaration(symbols: *Symbols.Table, decl: *Declaration) void {
+    switch (decl.*) {
+        .FunDecl => |*funDecl| typeCheckFunDecl(symbols, funDecl),
+        .VarDecl => |*varDecl| typeCheckLocalVarDecl(symbols, varDecl),
     }
 }
 
-fn typeCheckFunDecl(symbols: *Symbols.Table, decl: FunDecl) void {
+fn typeCheckFunDecl(symbols: *Symbols.Table, decl: *FunDecl) void {
     var isDefined: bool = decl.body != null;
     var isGlobal: bool = decl.storageClass != .Static;
 
@@ -49,6 +51,14 @@ fn typeCheckFunDecl(symbols: *Symbols.Table, decl: FunDecl) void {
         if (entry.type != .FunType or entry.type.FunType.params.len != decl.params.len) {
             ErrorReporter.report(.ConflictingFunctions, decl.lineIndex, decl.name);
             return;
+        }
+
+        for (decl.params, entry.type.FunType.params) |p, t| {
+            std.debug.print("{any} {any}\n", .{ p.type, t.* });
+            if (!p.type.equals(t.*)) {
+                ErrorReporter.report(.ConflictingFunctions, decl.lineIndex, decl.name);
+                return;
+            }
         }
 
         isDefined = entry.attrs.Fun.defined;
@@ -85,15 +95,17 @@ fn typeCheckFunDecl(symbols: *Symbols.Table, decl: FunDecl) void {
         }
     }
 
-    if (decl.body) |body| {
+    if (decl.body) |*body| {
         for (decl.params) |param| {
-            symbols.put(param.unique.?, .{ .type = .Int, .attrs = .Local }) catch allocError();
+            symbols.put(param.unique.?, .{ .type = param.type, .attrs = .Local }) catch allocError();
         }
+        FunctionName = decl.name;
         typeCheckBlock(symbols, body);
+        FunctionName = null;
     }
 }
 
-fn typeCheckFileScopeVarDecl(symbols: *Symbols.Table, decl: VarDecl) void {
+fn typeCheckFileScopeVarDecl(symbols: *Symbols.Table, decl: *VarDecl) void {
     var initialValue: Symbols.Static.InitialValue = undefined;
     if (decl.init) |init| {
         // TODO: extend initialize to use constant binary and unary expressions
@@ -113,8 +125,7 @@ fn typeCheckFileScopeVarDecl(symbols: *Symbols.Table, decl: VarDecl) void {
 
     var isGlobal = decl.storageClass != .Static;
     if (symbols.get(decl.name)) |entry| {
-        // Previous declaration was a function
-        if (entry.type != .Int) {
+        if (!entry.type.equals(decl.type)) {
             ErrorReporter.report(.Redeclaration, decl.lineIndex, decl.name);
             return;
         }
@@ -145,22 +156,22 @@ fn typeCheckFileScopeVarDecl(symbols: *Symbols.Table, decl: VarDecl) void {
     }
 
     const attrs: Symbols.Attrs = .{ .Static = .{ .initialValue = initialValue, .global = isGlobal } };
-    symbols.put(decl.name, .{ .type = .Int, .attrs = attrs }) catch allocError();
+    symbols.put(decl.name, .{ .type = decl.type, .attrs = attrs }) catch allocError();
 }
 
-fn typeCheckLocalVarDecl(symbols: *Symbols.Table, decl: VarDecl) void {
+fn typeCheckLocalVarDecl(symbols: *Symbols.Table, decl: *VarDecl) void {
     if (decl.storageClass == .Extern) {
         if (decl.init) |_| {
             ErrorReporter.report(.LocalExternDefined, decl.lineIndex, decl.name);
         }
         if (symbols.get(decl.name)) |entry| {
-            if (entry.type != .Int) {
+            if (!entry.type.equals(decl.type)) {
                 ErrorReporter.report(.Redeclaration, decl.lineIndex, decl.name);
                 return;
             }
         } else {
             const attrs: Symbols.Attrs = .{ .Static = .{ .initialValue = .None, .global = true } };
-            symbols.put(decl.name, .{ .type = .Int, .attrs = attrs }) catch allocError();
+            symbols.put(decl.name, .{ .type = decl.type, .attrs = attrs }) catch allocError();
         }
     } else if (decl.storageClass == .Static) {
         var initialValue: Symbols.Static.InitialValue = switch (decl.type) {
@@ -178,123 +189,208 @@ fn typeCheckLocalVarDecl(symbols: *Symbols.Table, decl: VarDecl) void {
         }
 
         const attrs: Symbols.Attrs = .{ .Static = .{ .initialValue = initialValue, .global = true } };
-        symbols.put(decl.unique.?, .{ .type = .Int, .attrs = attrs }) catch allocError();
+        symbols.put(decl.unique.?, .{ .type = decl.type, .attrs = attrs }) catch allocError();
     } else { // automatic (local scope) storage class
-        symbols.put(decl.unique.?, .{ .type = .Int, .attrs = .Local }) catch allocError();
-        if (decl.init) |init| {
-            typeCheckExpression(symbols, init);
+        symbols.put(decl.unique.?, .{ .type = decl.type, .attrs = .Local }) catch allocError();
+        if (decl.init) |*init| {
+            _ = typeCheckExpression(symbols, init);
         }
     }
 }
 
-fn typeCheckBlock(symbols: *Symbols.Table, block: Block) void {
-    for (block.items) |item| {
-        switch (item) {
-            .Declaration => |decl| typeCheckLocalDeclaration(symbols, decl),
-            .Statement => |stmt| typeCheckStatement(symbols, stmt),
+fn typeCheckBlock(symbols: *Symbols.Table, block: *Block) void {
+    for (block.items) |*item| {
+        switch (item.*) {
+            .Declaration => |*decl| typeCheckLocalDeclaration(symbols, decl),
+            .Statement => |*stmt| typeCheckStatement(symbols, stmt),
         }
     }
 }
 
-fn typeCheckStatement(symbols: *Symbols.Table, stmt: Statement) void {
-    switch (stmt) {
-        .Compound => |compound| typeCheckBlock(symbols, compound),
-        .Return => |ret| typeCheckExpression(symbols, ret.expr),
-        .Expression => |expr| typeCheckExpression(symbols, expr),
-        .If => |ifStmt| {
-            typeCheckExpression(symbols, ifStmt.condition);
-            typeCheckStatement(symbols, ifStmt.thenStmt.*);
-            if (ifStmt.elseStmt) |els| typeCheckStatement(symbols, els.*);
+fn typeCheckStatement(symbols: *Symbols.Table, stmt: *Statement) void {
+    switch (stmt.*) {
+        .Compound => |*compound| typeCheckBlock(symbols, compound),
+        .Return => |*ret| {
+            _ = typeCheckExpression(symbols, &ret.expr);
+            const symbol = symbols.get(FunctionName.?) orelse unreachable;
+            ret.expr = castTo(ret.expr, symbol.type.FunType.ret.*);
         },
-        .Label => |lbl| typeCheckStatement(symbols, lbl.body.*),
-        .DoWhile => |doWhl| {
-            typeCheckStatement(symbols, doWhl.body.*);
-            typeCheckExpression(symbols, doWhl.cond);
+        .Expression => |*expr| _ = typeCheckExpression(symbols, expr),
+        .If => |*ifStmt| {
+            _ = typeCheckExpression(symbols, &ifStmt.condition);
+            typeCheckStatement(symbols, ifStmt.thenStmt);
+            if (ifStmt.elseStmt) |els| typeCheckStatement(symbols, els);
         },
-        .While => |whl| {
-            typeCheckExpression(symbols, whl.cond);
-            typeCheckStatement(symbols, whl.body.*);
+        .Label => |*lbl| typeCheckStatement(symbols, lbl.body),
+        .DoWhile => |*doWhl| {
+            typeCheckStatement(symbols, doWhl.body);
+            _ = typeCheckExpression(symbols, &doWhl.cond);
         },
-        .For => |f| {
+        .While => |*whl| {
+            _ = typeCheckExpression(symbols, &whl.cond);
+            typeCheckStatement(symbols, whl.body);
+        },
+        .For => |*f| {
             switch (f.init) {
-                .Declaration => |decl| {
-                    if (decl == .FunDecl) {
+                .Declaration => |*decl| {
+                    if (decl.* == .FunDecl) {
                         ErrorReporter.report(.ForLoopFunctionDecl, decl.FunDecl.lineIndex, decl.FunDecl.name);
                         return;
                     }
-                    if (decl == .VarDecl and decl.VarDecl.storageClass != null) {
+                    if (decl.* == .VarDecl and decl.VarDecl.storageClass != null) {
                         ErrorReporter.report(.ForLoopStorageClassDecl, decl.VarDecl.lineIndex, decl.VarDecl.name);
                         return;
                     }
                     typeCheckLocalDeclaration(symbols, decl);
                 },
-                .Expression => |expr| if (expr) |e| typeCheckExpression(symbols, e) else null,
+                .Expression => |*expr| _ = if (expr.*) |*e| typeCheckExpression(symbols, e) else null,
             }
-            if (f.cond) |cond| typeCheckExpression(symbols, cond);
-            if (f.post) |post| typeCheckExpression(symbols, post);
-            typeCheckStatement(symbols, f.body.*);
+            if (f.cond) |*cond| _ = typeCheckExpression(symbols, cond);
+            if (f.post) |*post| _ = typeCheckExpression(symbols, post);
+            typeCheckStatement(symbols, f.body);
         },
-        .Switch => |swtch| {
-            typeCheckExpression(symbols, swtch.cond);
-            typeCheckStatement(symbols, swtch.body.*);
+        .Switch => |*swtch| {
+            _ = typeCheckExpression(symbols, &swtch.cond);
+            typeCheckStatement(symbols, swtch.body);
         },
-        .Case => |case| {
-            if (case.body) |body| typeCheckStatement(symbols, body.*);
+        .Case => |*case| {
+            if (case.body) |body| typeCheckStatement(symbols, body);
         },
         .Break, .Continue, .Goto, .Null => {},
     }
 }
 
-fn typeCheckExpression(symbols: *Symbols.Table, expr: Expression) void {
-    switch (expr) {
-        .Assignment => |assign| {
-            typeCheckExpression(symbols, assign.lhs.*);
-            typeCheckExpression(symbols, assign.rhs.*);
+// TODO: use constCast to make this the only function that needs mutable
+fn typeCheckExpression(symbols: *Symbols.Table, expr: *Expression) Type {
+    switch (expr.*) {
+        .Assignment => |*assign| {
+            const lType = typeCheckExpression(symbols, assign.lhs);
+            _ = typeCheckExpression(symbols, assign.rhs);
+
+            assign.type = lType;
+            assign.rhs.* = castTo(assign.rhs.*, lType);
+
+            return assign.type.?;
         },
-        .Binary => |bin| {
-            typeCheckExpression(symbols, bin.left.*);
-            typeCheckExpression(symbols, bin.right.*);
+        .Binary => |*bin| {
+            const lType = typeCheckExpression(symbols, bin.left);
+            const rType = typeCheckExpression(symbols, bin.right);
+            const commonType = getCommonType(lType, rType);
+
+            bin.type = commonType;
+            bin.left.* = castTo(bin.left.*, lType);
+            bin.right.* = castTo(bin.right.*, lType);
+
+            return bin.type.?;
         },
-        .Cast => |cast| {
+        .Cast => |*cast| {
             if (cast.target.storageClass != null) {
                 ErrorReporter.report(.InvalidStorageClass, cast.lineIndex, null);
             }
-            return;
+
+            return cast.target.type.?;
         },
-        .Constant => {},
-        .FunctionCall => |fcall| {
+        .Constant => return switch (expr.Constant) {
+            .int => .Int,
+            .long => .Long,
+        },
+        .FunctionCall => |*fcall| {
             const symbol = symbols.get(fcall.name).?; // semantics already ensures the function has been defined
             if (symbol.type != .FunType) {
                 ErrorReporter.report(.CallOnNonFunction, fcall.lineIndex, null);
-                return;
+                fcall.type = symbol.type;
+                return fcall.type.?;
             }
-
             const funType = symbol.type.FunType;
             if (funType.params.len > fcall.args.len) {
                 ErrorReporter.report(.TooFewArguments, fcall.lineIndex, null);
-                return;
             }
             if (funType.params.len < fcall.args.len) {
                 ErrorReporter.report(.TooManyArguments, fcall.lineIndex, null);
-                return;
             }
-            for (fcall.args) |arg| {
-                typeCheckExpression(symbols, arg);
+
+            fcall.type = symbol.type.FunType.ret.*;
+            for (fcall.args) |*arg| {
+                _ = typeCheckExpression(symbols, arg);
             }
+
+            return fcall.type.?;
         },
-        .Ternary => |tern| {
-            typeCheckExpression(symbols, tern.condition.*);
-            typeCheckExpression(symbols, tern.thenStmt.*);
-            typeCheckExpression(symbols, tern.elseStmt.*);
+        .Ternary => |*tern| {
+            // TODO: Fix Ternary names (thenStmt -> thenExpr)
+            const ifType = typeCheckExpression(symbols, tern.condition);
+            const thenType = typeCheckExpression(symbols, tern.thenStmt);
+            const elseType = typeCheckExpression(symbols, tern.elseStmt);
+
+            var commonType = getCommonType(ifType, thenType);
+            commonType = getCommonType(commonType, elseType);
+
+            tern.type = commonType;
+            tern.condition.* = castTo(tern.condition.*, commonType);
+            tern.thenStmt.* = castTo(tern.thenStmt.*, commonType);
+            tern.elseStmt.* = castTo(tern.elseStmt.*, commonType);
+
+            return tern.type.?;
         },
-        .Unary => |un| typeCheckExpression(symbols, un.operand.*),
-        .Var => |v| {
+        .Unary => |*un| {
+            const operandType = typeCheckExpression(symbols, un.operand);
+            un.type = switch (un.operator) {
+                .Not => .Int,
+                else => operandType,
+            };
+
+            return un.type.?;
+        },
+        .Var => |*v| {
             const symbol = symbols.get(v.name) orelse unreachable;
             if (symbol.type == .FunType) {
-                ErrorReporter.report(.VarUsedAsFunction, v.lineIndex, v.name);
+                ErrorReporter.report(.FunctionUsedAsVariable, v.lineIndex, v.name);
             }
+
+            v.type = symbol.type;
+            return v.type.?;
         },
     }
+}
+
+fn castTo(exp: Expression, toType: Type) Expression {
+    return switch (getType(exp)) {
+        .Int => switch (toType) {
+            .Int => exp,
+            else => .{ .Cast = .to(&exp, toType) },
+        },
+        .Long => switch (toType) {
+            .Long => return exp,
+            else => .{ .Cast = .to(&exp, toType) },
+        },
+        .FunType => exp,
+    };
+}
+
+fn getCommonType(type1: Type, type2: Type) Type {
+    return switch (type1) {
+        .Long => .Long,
+        else => switch (type2) {
+            .Int => .Int,
+            else => type2,
+        },
+    };
+}
+
+fn getType(exp: Expression) Type {
+    return switch (exp) {
+        .Assignment => exp.Assignment.type.?,
+        .Binary => exp.Binary.type.?,
+        .Cast => exp.Cast.target.type.?,
+        .Constant => switch (exp.Constant) {
+            .int => .Int,
+            .long => .Long,
+        },
+        .FunctionCall => exp.FunctionCall.type.?,
+        .Ternary => exp.Ternary.type.?,
+        .Unary => exp.Unary.type.?,
+        .Var => exp.Var.type.?,
+    };
 }
 
 pub fn allocError() noreturn {

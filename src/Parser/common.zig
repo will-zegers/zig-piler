@@ -50,6 +50,23 @@ pub const Type = union(TypeTag) {
         log.err("Invalid type specifier '{any} {any}'", .{ types[0].?, types[1].? });
         return ParsingError.InvalidType;
     }
+
+    pub fn equals(self: Type, other: Type) bool {
+        return switch (self) {
+            .Int => switch (other) {
+                .Int => true,
+                else => false,
+            },
+            .Long => switch (other) {
+                .Long => true,
+                else => false,
+            },
+            .FunType => switch (other) {
+                .FunType => true,
+                else => false,
+            },
+        };
+    }
 };
 
 pub const StorageClass = enum { Extern, Static };

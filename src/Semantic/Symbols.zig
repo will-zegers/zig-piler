@@ -7,7 +7,7 @@ const Type = Parser.Type;
 pub const Static = struct {
     const InitialValueTag = enum { Initial, Tentative, None };
     pub const InitialValue = union(InitialValueTag) {
-        Initial: Parser.Constant,
+        Initial: Parser.Constant, // TODO: decouple this from Parser.Constant when they diverge
         Tentative: void,
         None: void,
     };
