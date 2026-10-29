@@ -12,6 +12,7 @@ pub const ParsingError = error{
     InvalidType,
     InvalidStorageClass,
     Lvalue,
+    MaxCaseCount,
     NonConstExpr,
     Syntax,
     Token,

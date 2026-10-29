@@ -2,6 +2,7 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const StringHashMap = std.StringHashMap;
 const process = std.process;
+const mem = std.mem;
 
 const Parser = @import("../Parser.zig");
 const AST = Parser.AST;
@@ -254,6 +255,24 @@ fn typeCheckStatement(symbols: *Symbols.Table, stmt: *Statement) void {
             typeCheckStatement(symbols, swtch.body);
         },
         .Case => |*case| {
+            if (case.cond) |*cond| {
+                _ = typeCheckExpression(symbols, cond);
+                const parentType = getType(case.parent.?.cond);
+                case.cond = castTo(cond.*, parentType);
+
+                // Tag the case statement with its parent tag and condition constant
+                _ = switch (cond.Constant) {
+                    .int => |int| mem.print(&case.tag, "{s}.{d}", .{ case.parent.?.tag.?, int }),
+                    .long => |long| mem.print(&case.tag, "{s}.{d}", .{ case.parent.?.tag.?, long }),
+                } catch unreachable;
+            } else {
+                _ = mem.print(&case.tag, "{s}.default", .{case.parent.?.tag.?}) catch unreachable;
+            }
+
+            case.parent.?.addCase(case) catch {
+                ErrorReporter.report(.CaseDuplicate, case.lineIndex, null);
+            };
+
             if (case.body) |body| typeCheckStatement(symbols, body);
         },
         .Break, .Continue, .Goto, .Null => {},
@@ -354,6 +373,23 @@ fn typeCheckExpression(symbols: *Symbols.Table, expr: *Expression) Type {
 }
 
 fn castTo(exp: Expression, toType: Type) Expression {
+    // For constant expression, handle the cast (and possible truncation)
+    // here during type checking
+    if (exp == .Constant) {
+        return switch (toType) {
+            .Int => switch (exp.Constant) {
+                .int => exp,
+                .long => |long| .{ .Constant = .{ .int = @truncate(long) } },
+            },
+            .Long => switch (exp.Constant) {
+                .int => |int| .{ .Constant = .{ .long = int } },
+                .long => exp,
+            },
+            .FunType => return exp, // Error, but will be caught when type-checking Var types
+        };
+    }
+
+    // For all other expressions, wrap the inner expression in a Cast
     return switch (getType(exp)) {
         .Int => switch (toType) {
             .Int => exp,

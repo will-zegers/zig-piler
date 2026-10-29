@@ -72,7 +72,7 @@ pub fn funCallToAssembly(allocator: Allocator, funCall: TAC.FunCall) ![]Instruct
         i -= 1;
         switch (funCall.args[i]) {
             .Constant => |arg| {
-                try assembly.append(allocator, .{ .Push = .{ .operand = .{ .Imm = arg } } });
+                try assembly.append(allocator, .{ .Push = .{ .operand = .{ .Imm = arg.int } } });
             },
             .Var => |arg| {
                 try assembly.appendSlice(allocator, &.{
@@ -87,7 +87,7 @@ pub fn funCallToAssembly(allocator: Allocator, funCall: TAC.FunCall) ![]Instruct
         i -= 1;
         switch (funCall.args[i]) {
             .Constant => |arg| {
-                try assembly.append(allocator, .{ .Mov = .{ .src = .{ .Imm = arg }, .dst = .{ .Reg = ARG_REGISTERS[i] } } });
+                try assembly.append(allocator, .{ .Mov = .{ .src = .{ .Imm = arg.int }, .dst = .{ .Reg = ARG_REGISTERS[i] } } });
             },
             .Var => |arg| {
                 try assembly.append(allocator, .{ .Mov = .{ .src = .{ .Pseudo = arg }, .dst = .{ .Reg = ARG_REGISTERS[i] } } });
@@ -117,11 +117,11 @@ pub const Mov = struct {
 
     pub fn toAssembly(allocator: Allocator, copy: TAC.Copy) []Instruction {
         const src: Operand = switch (copy.src) {
-            .Constant => |constant| .{ .Imm = constant },
+            .Constant => |constant| .{ .Imm = constant.int },
             .Var => |pseudo| .{ .Pseudo = pseudo },
         };
         const dst: Operand = switch (copy.dst) {
-            .Constant => |constant| .{ .Imm = constant },
+            .Constant => |constant| .{ .Imm = constant.int },
             .Var => |pseudo| .{ .Pseudo = pseudo },
         };
         return allocator.dupe(Instruction, &.{.{ .Mov = .{ .src = src, .dst = dst } }}) catch allocError();
@@ -139,7 +139,7 @@ pub const Call = struct {
 pub const Ret = struct {
     pub fn toAssembly(allocator: Allocator, ret: TAC.Return) []Instruction {
         const val: Operand = switch (ret.val) {
-            .Constant => |constant| .{ .Imm = constant },
+            .Constant => |constant| .{ .Imm = constant.int },
             .Var => |pseudo| .{ .Pseudo = pseudo },
         };
 
@@ -158,7 +158,7 @@ pub const Unary = struct {
 
     pub fn toAssembly(allocator: Allocator, unary: TAC.Unary) []Instruction {
         const src: Operand = switch (unary.src) {
-            .Constant => |constant| .{ .Imm = constant },
+            .Constant => |constant| .{ .Imm = constant.int },
             .Var => |pseudo| .{ .Pseudo = pseudo },
         };
         const dst: Operand = .{ .Pseudo = unary.dst.Var };
@@ -200,11 +200,11 @@ pub const Binary = struct {
 
     pub fn toAssembly(allocator: Allocator, binary: TAC.Binary) []Instruction {
         const src1: Operand = switch (binary.src1) {
-            .Constant => |constant| .{ .Imm = constant },
+            .Constant => |constant| .{ .Imm = constant.int },
             .Var => |pseudo| .{ .Pseudo = pseudo },
         };
         const src2: Operand = switch (binary.src2) {
-            .Constant => |constant| .{ .Imm = constant },
+            .Constant => |constant| .{ .Imm = constant.int },
             .Var => |pseudo| .{ .Pseudo = pseudo },
         };
         const dst: Operand = .{ .Pseudo = binary.dst.Var };
@@ -275,7 +275,7 @@ pub const JmpCC = struct {
         return switch (jmpInstr) {
             .JumpIfZero => |jz| blk: {
                 const arg2: Operand = switch (jz.condition) {
-                    .Constant => |constant| .{ .Imm = constant },
+                    .Constant => |constant| .{ .Imm = constant.int },
                     .Var => |pseudo| .{ .Pseudo = pseudo },
                 };
                 break :blk allocator.dupe(Instruction, &.{
@@ -285,7 +285,7 @@ pub const JmpCC = struct {
             },
             .JumpIfNotZero => |jnz| blk: {
                 const arg2: Operand = switch (jnz.condition) {
-                    .Constant => |constant| .{ .Imm = constant },
+                    .Constant => |constant| .{ .Imm = constant.int },
                     .Var => |pseudo| .{ .Pseudo = pseudo },
                 };
                 break :blk allocator.dupe(Instruction, &.{
@@ -316,7 +316,7 @@ const OperandTag = enum {
     Data,
 };
 pub const Operand = union(OperandTag) {
-    Imm: usize,
+    Imm: i32,
     Reg: Reg,
     Pseudo: []const u8,
     Stack: isize,

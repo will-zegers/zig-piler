@@ -51,7 +51,7 @@ pub const Function = struct {
 pub const StaticVariable = struct {
     identifier: []const u8,
     global: bool,
-    int: usize,
+    int: i32,
 };
 
 const TopLevelTag = enum { Function, StaticVariable };
@@ -108,7 +108,7 @@ fn emitFunDecl(allocator: Allocator, funDecl: Parser.FunDecl) Function {
         emitBlock(allocator, &context, &instructions, body) catch allocError();
     }
 
-    instructions.append(allocator, .{ .Return = .{ .val = .{ .Constant = 0 } } }) catch allocError();
+    instructions.append(allocator, .{ .Return = .{ .val = .{ .Constant = .{ .int = 0 } } } }) catch allocError();
 
     const body = instructions.toOwnedSlice(allocator) catch allocError();
     const entry = SymbolTable.get(funDecl.name) orelse {
@@ -220,7 +220,7 @@ fn emitStatement(allocator: Allocator, context: *Context, instructions: *Instruc
                 const e = emitExpression(allocator, context, instructions, cond);
                 try instructions.append(allocator, .{ .JumpIfZero = .{ .condition = e, .target = breakLabel } });
             } else {
-                try instructions.append(allocator, .{ .JumpIfZero = .{ .condition = .{ .Constant = 1 }, .target = breakLabel } });
+                try instructions.append(allocator, .{ .JumpIfZero = .{ .condition = .{ .Constant = .{ .int = 1 } }, .target = breakLabel } });
             }
 
             try emitStatement(allocator, context, instructions, f.body.*);
@@ -243,7 +243,7 @@ fn emitStatement(allocator: Allocator, context: *Context, instructions: *Instruc
                 if (case.cond) |cond| { // ignore 'default' for now
                     const e = emitExpression(allocator, context, instructions, cond);
                     try instructions.append(allocator, .{ .Binary = .{ .operator = .Eq, .src1 = c, .src2 = e, .dst = dst } });
-                    try instructions.append(allocator, .{ .JumpIfNotZero = .{ .condition = dst, .target = case.tag.? } });
+                    try instructions.append(allocator, .{ .JumpIfNotZero = .{ .condition = dst, .target = &case.tag } });
                 }
             }
             // jump to the default statement if one exists, else to the end of the switch statement
@@ -258,7 +258,7 @@ fn emitStatement(allocator: Allocator, context: *Context, instructions: *Instruc
             try instructions.append(allocator, .{ .Label = .{ .identifier = switchBreak } });
         },
         .Case => |case| {
-            try instructions.append(allocator, .{ .Label = .{ .identifier = case.tag.? } });
+            try instructions.append(allocator, .{ .Label = .{ .identifier = &case.tag } });
             if (case.body) |body| try emitStatement(allocator, context, instructions, body.*);
         },
     }
@@ -266,7 +266,8 @@ fn emitStatement(allocator: Allocator, context: *Context, instructions: *Instruc
 
 fn emitExpression(allocator: Allocator, context: *Context, instructions: *Instructions, expr: Parser.Expression) Val {
     return switch (expr) {
-        .Constant => .{ .Constant = expr.Constant },
+        .Cast => unreachable,
+        .Constant => .{ .Constant = .{ .int = expr.Constant.int } },
         .Var => .{ .Var = expr.Var.name },
         .Unary => |unary| emitUnary(allocator, context, instructions, unary) catch allocError(),
         .Binary => |binary| emitBinary(allocator, context, instructions, binary) catch allocError(),
@@ -282,7 +283,7 @@ fn emitUnary(allocator: Allocator, context: *Context, instructions: *Instruction
     const dst: Val = .{ .Var = nextTag(allocator, context) };
     switch (unary.operator) {
         .Inc, .Dec => {
-            try instructions.appendSlice(allocator, switch (unary.type) {
+            try instructions.appendSlice(allocator, switch (unary.order) {
                 .Pre => &.{
                     .{ .Unary = .{ .operator = unary.operator, .src = src, .dst = src } },
                     .{ .Copy = .{ .src = src, .dst = dst } },
@@ -314,10 +315,10 @@ fn emitBinary(allocator: Allocator, context: *Context, instructions: *Instructio
 
             const dst: Val = .{ .Var = nextTag(allocator, context) };
             try instructions.appendSlice(allocator, &.{
-                .{ .Copy = .{ .src = .{ .Constant = 1 }, .dst = dst } },
+                .{ .Copy = .{ .src = .{ .Constant = .{ .int = 1 } }, .dst = dst } },
                 .{ .Jump = .{ .target = endLabel } },
                 .{ .Label = .{ .identifier = falseLabel } },
-                .{ .Copy = .{ .src = .{ .Constant = 0 }, .dst = dst } },
+                .{ .Copy = .{ .src = .{ .Constant = .{ .int = 0 } }, .dst = dst } },
                 .{ .Label = .{ .identifier = endLabel } },
             });
             return dst;
@@ -334,10 +335,10 @@ fn emitBinary(allocator: Allocator, context: *Context, instructions: *Instructio
 
             const dst: Val = .{ .Var = nextTag(allocator, context) };
             try instructions.appendSlice(allocator, &.{
-                .{ .Copy = .{ .src = .{ .Constant = 0 }, .dst = dst } },
+                .{ .Copy = .{ .src = .{ .Constant = .{ .int = 0 } }, .dst = dst } },
                 .{ .Jump = .{ .target = endLabel } },
                 .{ .Label = .{ .identifier = trueLabel } },
-                .{ .Copy = .{ .src = .{ .Constant = 1 }, .dst = dst } },
+                .{ .Copy = .{ .src = .{ .Constant = .{ .int = 1 } }, .dst = dst } },
                 .{ .Label = .{ .identifier = endLabel } },
             });
             return dst;

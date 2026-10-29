@@ -41,7 +41,7 @@ allocator: Allocator,
 err: *Error.Reporter,
 labels: IdentifierMap,
 scopeStack: ArrayList(Scope),
-switches: std.StringHashMap(*Switch),
+switches: ArrayList(*Switch) = .empty,
 function: ?[]const u8 = null, // TODO: use scope instead
 counter: usize = 0,
 
@@ -58,7 +58,6 @@ pub fn init(allocator: Allocator, errorReporter: *Error.Reporter) Context {
         .err = errorReporter,
         .labels = .init(allocator),
         .scopeStack = scopeStack,
-        .switches = .init(allocator)
     };
 }
 
@@ -74,7 +73,7 @@ pub fn deinit(self: *Context) void {
     self.labels.deinit();
 
     self.scopeStack.deinit(self.allocator);
-    self.switches.deinit();
+    self.switches.deinit(self.allocator);
 }
 
 pub fn getScope(self: Context) *Scope {

@@ -63,7 +63,7 @@ pub const Function = struct {
 pub const StaticVariable = struct {
     name: []const u8,
     global: bool,
-    int: usize,
+    int: i32,
 };
 
 const TopLevelTag = enum { Function, StaticVariable };
@@ -148,8 +148,8 @@ pub fn assembleFunction(allocator: Allocator, function: TAC.Function, defined: *
     setupStack(allocator, &instructionList, &pseudoMap);
 
     // Find illegal instructions (see specifications in the Patcher module)
-    var instructions = instructionList.toOwnedSlice(allocator) catch allocError();
-    instructions = Patcher.patchInstructions(allocator, instructions);
+    const instructions = instructionList.toOwnedSlice(allocator) catch allocError();
+    // instructions = Patcher.patchInstructions(allocator, instructions);
 
     return .{
         .allocator = allocator,

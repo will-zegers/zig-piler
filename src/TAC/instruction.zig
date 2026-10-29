@@ -69,6 +69,6 @@ pub const Val = union(ValTag) {
     Var: Var,
 };
 
-pub const Constant = usize;
+pub const Constant = Parser.Constant;
 
 const Var = []const u8;

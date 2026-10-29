@@ -1,6 +1,7 @@
 const std = @import("std");
 const mem = std.mem;
 const Allocator = mem.Allocator;
+const fmt = std.fmt;
 
 const Parser = @import("../Parser.zig");
 const Declaration = Parser.Declaration;
@@ -194,41 +195,26 @@ fn resolveStatementIdentifiers(allocator: Allocator, context: *Context, statemen
             resolveStatementIdentifiers(allocator, context, f.body);
         },
         .Goto, .Null => {}, // gotos are resolved on the second pass
-        .Switch => |*swtch| {
-            resolveExpression(allocator, context, &swtch.cond);
+        .Switch => |*sw| {
+            resolveExpression(allocator, context, &sw.cond);
 
-            swtch.tag = generateUnique(allocator, context, "switch");
+            sw.tag = generateUnique(allocator, context, "switch");
 
-            context.pushScope(.Switch, swtch.tag.?);
+            context.switches.append(allocator, sw) catch allocError();
+            defer _ = context.switches.pop();
+
+            context.pushScope(.Switch, sw.tag.?);
             defer context.popScope();
 
-            context.switches.put(swtch.tag.?, swtch) catch allocError();
-
-            resolveStatementIdentifiers(allocator, context, swtch.body);
+            resolveStatementIdentifiers(allocator, context, sw.body);
         },
         .Case => |*case| {
-            if (context.getSwitchTag()) |switchTag| {
-                if (case.cond) |cond| {
-                    switch (cond.Constant) {
-                        .int => |int| {
-                            case.tag = allocator.print("{s}.{d}", .{ switchTag, int }) catch allocError();
-                        },
-                        .long => |long| {
-                            case.tag = allocator.print("{s}.{d}", .{ switchTag, long }) catch allocError();
-                        },
-                    }
-                } else {
-                    case.tag = allocator.print("{s}.default", .{switchTag}) catch allocError();
-                }
-
-                const parentSwitch = context.switches.get(switchTag) orelse unreachable;
-                parentSwitch.addCase(allocator, case) catch {
-                    context.err.report(.CaseDuplicate, case.lineIndex, null);
-                };
+            if (context.switches.last()) |parentSwitch| {
+                case.parent = parentSwitch;
 
                 if (case.body) |body| resolveStatementIdentifiers(allocator, context, body);
             } else {
-                context.err.report(.CaseOutside, case.lineIndex, null);
+                context.err.report(.OrphanCase, case.lineIndex, null);
             }
         },
     }

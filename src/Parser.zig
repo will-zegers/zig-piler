@@ -357,52 +357,6 @@ pub const Break = struct {
     // no deinit needed since the tag is owned by the enclosing loop/switch
 };
 
-pub const Case = struct {
-    lineIndex: usize,
-    tag: ?[]const u8 = null,
-    cond: ?Expression,
-    body: ?*Statement,
-
-    pub fn parse(allocator: Allocator, tokens: *TokenIterator) ParsingError!Case {
-        var nextToken = tokens.next();
-        const cond: ?Expression = switch (nextToken.type) {
-            .Case => try Expression.parse(allocator, tokens, 0),
-            .Default => null, // 'default' is just treated as special "case" with no cond expr
-            else => unreachable, // the statement parser already guards against other cases
-        };
-
-        // No current support for chars or the 'const' keyword, so only expect null or literal constants
-        if (cond != null and cond.? != .Constant) {
-            std.log.err("Non-constant expression", .{});
-            return ParsingError.NonConstExpr;
-        }
-        const lineIndex = nextToken.lineIndex;
-        try expect(.Colon, tokens.next());
-
-        var body: ?*Statement = null;
-        nextToken = tokens.peek();
-        if (nextToken.type != .Case and nextToken.type != .Default) {
-            body = allocator.create(Statement) catch allocError();
-            body.?.* = try Statement.parse(allocator, tokens);
-        }
-
-        return .{ .lineIndex = lineIndex, .cond = cond, .body = body };
-    }
-
-    pub fn deinit(self: *Case, allocator: Allocator) void {
-        if (self.tag) |tag| allocator.free(tag);
-
-        if (self.cond) |*cond| {
-            Expression.deinit(cond, allocator);
-        }
-
-        if (self.body) |body| {
-            Statement.deinit(body, allocator);
-            allocator.destroy(body);
-        }
-    }
-};
-
 pub const Continue = struct {
     lineIndex: usize,
     tag: ?[]const u8 = null, // this will get set during semantic analysis
@@ -614,10 +568,12 @@ pub const Return = struct {
 };
 
 pub const Switch = struct {
+    const MAX_CASE_COUNT: usize = 128;
+
     tag: ?[]const u8 = null,
     cond: Expression,
     body: *Statement,
-    cases: ArrayList(*Case) = .empty,
+    cases: ArrayList(*Case),
     defaultTag: ?[]const u8 = null,
 
     pub fn parse(allocator: Allocator, tokens: *TokenIterator) ParsingError!Switch {
@@ -629,18 +585,22 @@ pub const Switch = struct {
         const body = allocator.create(Statement) catch allocError();
         body.* = try Statement.parse(allocator, tokens);
 
-        return .{ .cond = cond, .body = body };
+        const cases = ArrayList(*Case).initCapacity(allocator, MAX_CASE_COUNT) catch allocError();
+        return .{ .cond = cond, .body = body, .cases = cases };
     }
 
-    pub fn addCase(self: *Switch, allocator: Allocator, case: *Case) ParsingError!void {
+    pub fn addCase(self: *Switch, case: *Case) ParsingError!void {
         for (self.cases.items) |child| { // ensure this is not a duplicate case
-            if (mem.eql(u8, child.tag.?, case.tag.?)) return ParsingError.DuplicateCase;
+            if (mem.eql(u8, &child.tag, &case.tag)) return ParsingError.DuplicateCase;
         }
 
         // a case with no conditional signifies a default statement
-        if (case.cond == null) self.defaultTag = case.tag;
+        if (case.cond == null) self.defaultTag = &case.tag;
 
-        self.cases.append(allocator, case) catch allocError();
+        self.cases.appendBounded(case) catch {
+            log.err("Max case count of {d} exceeded", .{MAX_CASE_COUNT});
+            return ParsingError.MaxCaseCount;
+        };
     }
 
     pub fn deinit(self: *Switch, allocator: Allocator) void {
@@ -653,6 +613,51 @@ pub const Switch = struct {
 
         // Case statement entries in '.cases' already delloc'd in the body dealloc
         self.cases.deinit(allocator);
+    }
+};
+
+pub const Case = struct {
+    lineIndex: usize,
+    tag: [64:0]u8 = @splat(0),
+    cond: ?Expression,
+    body: ?*Statement,
+    parent: ?*Switch = null,
+
+    pub fn parse(allocator: Allocator, tokens: *TokenIterator) ParsingError!Case {
+        var nextToken = tokens.next();
+        const cond: ?Expression = switch (nextToken.type) {
+            .Case => try Expression.parse(allocator, tokens, 0),
+            .Default => null, // 'default' is just treated as special "case" with no cond expr
+            else => unreachable, // the statement parser already guards against other cases
+        };
+
+        // No current support for chars or the 'const' keyword, so only expect null or literal constants
+        if (cond != null and cond.? != .Constant) {
+            std.log.err("Non-constant expression", .{});
+            return ParsingError.NonConstExpr;
+        }
+        const lineIndex = nextToken.lineIndex;
+        try expect(.Colon, tokens.next());
+
+        var body: ?*Statement = null;
+        nextToken = tokens.peek();
+        if (nextToken.type != .Case and nextToken.type != .Default) {
+            body = allocator.create(Statement) catch allocError();
+            body.?.* = try Statement.parse(allocator, tokens);
+        }
+
+        return .{ .lineIndex = lineIndex, .cond = cond, .body = body };
+    }
+
+    pub fn deinit(self: *Case, allocator: Allocator) void {
+        if (self.cond) |*cond| {
+            Expression.deinit(cond, allocator);
+        }
+
+        if (self.body) |body| {
+            Statement.deinit(body, allocator);
+            allocator.destroy(body);
+        }
     }
 };
 
