@@ -132,7 +132,7 @@ pub const FunDecl = struct {
         };
 
         var paramTypes = ArrayList(*const Type).initCapacity(allocator, params.len) catch allocError();
-        for (params) |param| {
+        for (params) |*param| {
             paramTypes.appendAssumeCapacity(&param.type);
         }
         const ret = allocator.create(Type) catch allocError();

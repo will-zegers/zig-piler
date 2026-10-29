@@ -202,7 +202,7 @@ fn resolveStatementIdentifiers(allocator: Allocator, context: *Context, statemen
             context.pushScope(.Switch, swtch.tag.?);
             defer context.popScope();
 
-            context.switchTags.put(swtch.tag.?, swtch) catch allocError();
+            context.switches.put(swtch.tag.?, swtch) catch allocError();
 
             resolveStatementIdentifiers(allocator, context, swtch.body);
         },
@@ -221,7 +221,7 @@ fn resolveStatementIdentifiers(allocator: Allocator, context: *Context, statemen
                     case.tag = allocator.print("{s}.default", .{switchTag}) catch allocError();
                 }
 
-                const parentSwitch = context.switchTags.get(switchTag) orelse unreachable;
+                const parentSwitch = context.switches.get(switchTag) orelse unreachable;
                 parentSwitch.addCase(allocator, case) catch {
                     context.err.report(.CaseDuplicate, case.lineIndex, null);
                 };

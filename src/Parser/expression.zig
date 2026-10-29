@@ -258,7 +258,7 @@ pub const Constant = union(ConstantTag) {
             return ParsingError.Token;
         };
 
-        if (longValue < math.pow(i64, 2, 31) - 1) {
+        if (longValue < math.maxInt(i32)) {
             const intValue = std.fmt.parseInt(i32, num, 10) catch unreachable;
             return .{ .int = intValue };
         }
