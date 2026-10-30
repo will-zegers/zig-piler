@@ -11,6 +11,8 @@ if [ ! -z $2 ]; then
   stage="--$2"
 fi
 
+out_file="results.txt"
+
 passed=0
 total=0
 function test_directory {
@@ -26,8 +28,14 @@ function test_directory {
     elif [[ $file =~ \.c$ ]]; then
       total=$((total + 1))
 
-      zig-out/bin/zig-piler $stage "$file" &> /dev/null
+      zig-out/bin/zig-piler $stage "$file" &> results.txt
       res=$?
+
+      grep "error(SafeAllocator): leaked" results.txt &> /dev/null
+      leak=$?
+      if [ $leak -eq 0 ]; then
+        echo "  [!] $file shows a memory leak"
+      fi
 
       if [ $res -ne 0 ] && $expect_fail; then   # fail-expect-fail
         passed=$((passed + 1))
@@ -36,7 +44,9 @@ function test_directory {
       elif [ $res -ne 0 ]; then                 # fail-expect-pass
         echo "Failed to compile $file"
       else                                      # pass-expect-pass
-        passed=$((passed + 1))
+        if [ $leak -ne 0 ]; then
+          passed=$((passed + 1))
+        fi
       fi
     fi
   done
