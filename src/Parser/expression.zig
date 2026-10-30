@@ -86,6 +86,22 @@ pub const Expression = union(ExpressionTag) {
         return left;
     }
 
+    pub fn getType(self: Expression) Type {
+        return switch (self) {
+            .Assignment => self.Assignment.type.?,
+            .Binary => self.Binary.type.?,
+            .Cast => self.Cast.target.type.?,
+            .Constant => switch (self.Constant) {
+                .int => .Int,
+                .long => .Long,
+            },
+            .FunctionCall => self.FunctionCall.type.?,
+            .Ternary => self.Ternary.type.?,
+            .Unary => self.Unary.type.?,
+            .Var => self.Var.type.?,
+        };
+    }
+
     pub fn deinit(expr: *Expression, allocator: Allocator) void {
         switch (expr.*) {
             .Assignment => expr.Assignment.deinit(allocator),
@@ -216,7 +232,7 @@ pub const Binary = struct {
 pub const Cast = struct {
     lineIndex: usize = 0,
     target: Specifiers, // This will get type-checked during semantic analysis, which will forbid storage classes
-    exp: *Expression,
+    exp: *const Expression,
     needsDealloc: bool = false,
 
     pub fn parse(allocator: Allocator, tokens: *Token.Iterator) ParsingError!Cast {

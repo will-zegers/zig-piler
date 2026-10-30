@@ -18,7 +18,7 @@ const Parser = @import("Parser.zig");
 
 pub const AST = struct {
     tree: Parser.AST,
-    symbols: StringHashMap(Symbols.Entry),
+    symbols: Symbols.Table,
 
     pub fn deinit(self: *AST) void {
         self.symbols.deinit();
@@ -37,7 +37,7 @@ pub fn run(allocator: Allocator, tree: *Parser.AST, textLines: [][]const u8) AST
     LoopLabeler.run(allocator, &context, tree);
     if (reporter.errorFlag) process.exit(1);
 
-    var symbols: StringHashMap(Symbols.Entry) = .init(allocator);
+    var symbols: Symbols.Table = .init(allocator);
     TypeChecker.run(&symbols, &reporter, tree);
     if (reporter.errorFlag) process.exit(1);
 

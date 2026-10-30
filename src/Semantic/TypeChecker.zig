@@ -213,8 +213,8 @@ fn typeCheckStatement(symbols: *Symbols.Table, stmt: *Statement) void {
         .Compound => |*compound| typeCheckBlock(symbols, compound),
         .Return => |*ret| {
             _ = typeCheckExpression(symbols, &ret.expr);
-            const symbol = symbols.get(FunctionName.?) orelse unreachable;
-            ret.expr = castTo(ret.expr, symbol.type.FunType.ret.*);
+            // const symbol = symbols.get(FunctionName.?) orelse unreachable;
+            // ret.expr = castTo(&ret.expr, symbol.type.FunType.ret.*);
         },
         .Expression => |*expr| _ = typeCheckExpression(symbols, expr),
         .If => |*ifStmt| {
@@ -257,8 +257,8 @@ fn typeCheckStatement(symbols: *Symbols.Table, stmt: *Statement) void {
         .Case => |*case| {
             if (case.cond) |*cond| {
                 _ = typeCheckExpression(symbols, cond);
-                const parentType = getType(case.parent.?.cond);
-                case.cond = castTo(cond.*, parentType);
+                const parentType = case.parent.?.cond.getType();
+                case.cond = castTo(cond, parentType);
 
                 // Tag the case statement with its parent tag and condition constant
                 _ = switch (cond.Constant) {
@@ -287,7 +287,7 @@ fn typeCheckExpression(symbols: *Symbols.Table, expr: *Expression) Type {
             _ = typeCheckExpression(symbols, assign.rhs);
 
             assign.type = lType;
-            assign.rhs.* = castTo(assign.rhs.*, lType);
+            assign.rhs.* = castTo(assign.rhs, lType);
 
             return assign.type.?;
         },
@@ -297,8 +297,8 @@ fn typeCheckExpression(symbols: *Symbols.Table, expr: *Expression) Type {
             const commonType = getCommonType(lType, rType);
 
             bin.type = commonType;
-            bin.left.* = castTo(bin.left.*, lType);
-            bin.right.* = castTo(bin.right.*, lType);
+            bin.left.* = castTo(bin.left, lType);
+            bin.right.* = castTo(bin.right, lType);
 
             return bin.type.?;
         },
@@ -345,9 +345,9 @@ fn typeCheckExpression(symbols: *Symbols.Table, expr: *Expression) Type {
             commonType = getCommonType(commonType, elseType);
 
             tern.type = commonType;
-            tern.condition.* = castTo(tern.condition.*, commonType);
-            tern.thenStmt.* = castTo(tern.thenStmt.*, commonType);
-            tern.elseStmt.* = castTo(tern.elseStmt.*, commonType);
+            tern.condition.* = castTo(tern.condition, commonType);
+            tern.thenStmt.* = castTo(tern.thenStmt, commonType);
+            tern.elseStmt.* = castTo(tern.elseStmt, commonType);
 
             return tern.type.?;
         },
@@ -372,34 +372,34 @@ fn typeCheckExpression(symbols: *Symbols.Table, expr: *Expression) Type {
     }
 }
 
-fn castTo(exp: Expression, toType: Type) Expression {
+fn castTo(exp: *const Expression, toType: Type) Expression {
     // For constant expression, handle the cast (and possible truncation)
     // here during type checking
-    if (exp == .Constant) {
+    if (exp.* == .Constant) {
         return switch (toType) {
-            .Int => switch (exp.Constant) {
-                .int => exp,
+            .Int => switch (exp.*.Constant) {
+                .int => exp.*,
                 .long => |long| .{ .Constant = .{ .int = @truncate(long) } },
             },
-            .Long => switch (exp.Constant) {
+            .Long => switch (exp.*.Constant) {
                 .int => |int| .{ .Constant = .{ .long = int } },
-                .long => exp,
+                .long => exp.*,
             },
-            .FunType => return exp, // Error, but will be caught when type-checking Var types
+            .FunType => return exp.*, // Error, but will be caught when type-checking Var types
         };
     }
 
     // For all other expressions, wrap the inner expression in a Cast
-    return switch (getType(exp)) {
+    return switch (exp.getType()) {
         .Int => switch (toType) {
-            .Int => exp,
-            else => .{ .Cast = .to(&exp, toType) },
+            .Int => exp.*,
+            else => .{ .Cast = .to(exp, toType) },
         },
         .Long => switch (toType) {
-            .Long => return exp,
-            else => .{ .Cast = .to(&exp, toType) },
+            .Long => return exp.*,
+            else => .{ .Cast = .to(exp, toType) },
         },
-        .FunType => exp,
+        .FunType => exp.*,
     };
 }
 
@@ -410,22 +410,6 @@ fn getCommonType(type1: Type, type2: Type) Type {
             .Int => .Int,
             else => type2,
         },
-    };
-}
-
-fn getType(exp: Expression) Type {
-    return switch (exp) {
-        .Assignment => exp.Assignment.type.?,
-        .Binary => exp.Binary.type.?,
-        .Cast => exp.Cast.target.type.?,
-        .Constant => switch (exp.Constant) {
-            .int => .Int,
-            .long => .Long,
-        },
-        .FunctionCall => exp.FunctionCall.type.?,
-        .Ternary => exp.Ternary.type.?,
-        .Unary => exp.Unary.type.?,
-        .Var => exp.Var.type.?,
     };
 }
 

@@ -2,37 +2,29 @@ const Parser = @import("../Parser.zig");
 
 const InstructionTag = enum {
     Binary,
-    Return,
-    Unary,
     Copy,
-    Jump,
-    JumpIfZero,
-    JumpIfNotZero,
-    Label,
     FunCall,
+    Jump,
+    JumpIfNotZero,
+    JumpIfZero,
+    Label,
+    Return,
+    SignExtend,
+    Truncate,
+    Unary,
 };
 pub const Instruction = union(InstructionTag) {
     Binary: Binary,
-    Return: Return,
-    Unary: Unary,
     Copy: Copy,
-    Jump: Jump,
-    JumpIfZero: JumpIfZero,
-    JumpIfNotZero: JumpIfNotZero,
-    Label: Label,
     FunCall: FunCall,
-};
-
-pub const Return = struct {
-    val: Val,
-};
-
-pub const Unary = struct {
-    pub const Operator = Parser.Unary.Operator;
-
-    operator: Operator,
-    src: Val,
-    dst: Val,
+    Jump: Jump,
+    JumpIfNotZero: JumpIfNotZero,
+    JumpIfZero: JumpIfZero,
+    Label: Label,
+    Return: Return,
+    SignExtend: SignExtend,
+    Truncate: Truncate,
+    Unary: Unary,
 };
 
 pub const Binary = struct {
@@ -44,31 +36,35 @@ pub const Binary = struct {
     dst: Val,
 };
 
-pub const Copy = struct {
+pub const Constant = Parser.Constant;
+
+pub const Copy = struct { src: Val, dst: Val };
+
+pub const FunCall = struct { name: []const u8, args: []Val, dst: Val };
+
+pub const Jump = struct { target: []const u8 };
+
+pub const JumpIfNotZero = struct { condition: Val, target: []const u8 };
+
+pub const JumpIfZero = struct { condition: Val, target: []const u8 };
+
+pub const Label = struct { identifier: []const u8 };
+
+pub const Return = struct { val: Val };
+
+pub const SignExtend = struct { src: Val, dst: Val };
+
+pub const Truncate = struct { src: Val, dst: Val };
+
+pub const Unary = struct {
+    pub const Operator = Parser.Unary.Operator;
+
+    operator: Operator,
     src: Val,
     dst: Val,
 };
 
-pub const Jump = struct { target: []const u8 };
-
-pub const JumpIfZero = struct { condition: Val, target: []const u8 };
-
-pub const JumpIfNotZero = struct { condition: Val, target: []const u8 };
-
-pub const Label = struct { identifier: []const u8 };
-
-pub const FunCall = struct {
-    name: []const u8,
-    args: []Val,
-    dst: Val,
-};
-
 const ValTag = enum { Constant, Var };
-pub const Val = union(ValTag) {
-    Constant: Constant,
-    Var: Var,
-};
-
-pub const Constant = Parser.Constant;
+pub const Val = union(ValTag) { Constant: Constant, Var: Var };
 
 const Var = []const u8;
