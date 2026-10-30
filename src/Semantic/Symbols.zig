@@ -55,8 +55,6 @@ pub const Table2 = struct {
     }
 
     pub fn put(self: *Table, key: []const u8, entry: Entry) !void {
-        std.debug.print("{s} {any}\n", .{ key, entry });
-        std.debug.print("{any}\n", .{self.map});
         try self.map.put(key, entry);
     }
 

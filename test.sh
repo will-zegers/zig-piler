@@ -38,7 +38,9 @@ function test_directory {
       fi
 
       if [ $res -ne 0 ] && $expect_fail; then   # fail-expect-fail
-        passed=$((passed + 1))
+        if [ $leak -ne 0 ]; then
+          passed=$((passed + 1))
+        fi
       elif [ $res -eq 0 ] && $expect_fail; then # pass-expect-fail
         echo "Error not caught in $file"
       elif [ $res -ne 0 ]; then                 # fail-expect-pass

@@ -234,30 +234,8 @@ fn resolveExpression(allocator: Allocator, context: *Context, expr: *Expression)
             resolveExpression(allocator, context, binary.left);
             resolveExpression(allocator, context, binary.right);
         },
-        .Var => |*v| {
-            if (context.getScope().identifiers.get(v.name)) |entry| {
-                v.name = entry.unique;
-            } else {
-                context.err.report(.UndeclaredIdentifier, v.lineIndex, v.name);
-            }
-        },
-        .Unary => |unary| {
-            switch (unary.operator) {
-                .Inc, .Dec => {
-                    if (unary.operand.* != .Var) {
-                        context.err.report(.NotAssignable, unary.lineIndex, null);
-                    }
-                },
-                else => {},
-            }
-            resolveExpression(allocator, context, unary.operand);
-        },
         .Constant => {},
-        .Ternary => |*ternary| {
-            resolveExpression(allocator, context, ternary.condition);
-            resolveExpression(allocator, context, ternary.thenStmt);
-            resolveExpression(allocator, context, ternary.elseStmt);
-        },
+        .Cast => |*cast| resolveExpression(allocator, context, cast.exp),
         .FunctionCall => |*func| {
             const scope = context.getScope();
             if (scope.identifiers.get(func.name)) |*entry| {
@@ -274,7 +252,29 @@ fn resolveExpression(allocator: Allocator, context: *Context, expr: *Expression)
                 context.err.report(.UndeclaredIdentifier, func.lineIndex, func.name);
             }
         },
-        .Cast => {},
+        .Ternary => |*ternary| {
+            resolveExpression(allocator, context, ternary.condition);
+            resolveExpression(allocator, context, ternary.thenStmt);
+            resolveExpression(allocator, context, ternary.elseStmt);
+        },
+        .Unary => |unary| {
+            switch (unary.operator) {
+                .Inc, .Dec => {
+                    if (unary.operand.* != .Var) {
+                        context.err.report(.NotAssignable, unary.lineIndex, null);
+                    }
+                },
+                else => {},
+            }
+            resolveExpression(allocator, context, unary.operand);
+        },
+        .Var => |*v| {
+            if (context.getScope().identifiers.get(v.name)) |entry| {
+                v.name = entry.unique;
+            } else {
+                context.err.report(.UndeclaredIdentifier, v.lineIndex, v.name);
+            }
+        },
     }
 }
 

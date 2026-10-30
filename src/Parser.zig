@@ -357,6 +357,94 @@ pub const Break = struct {
     // no deinit needed since the tag is owned by the enclosing loop/switch
 };
 
+pub const Case = struct {
+    lineIndex: usize,
+    tag: [64:0]u8 = @splat(0),
+    cond: ?Expression,
+    body: ?*Statement,
+    parent: ?*Switch = null,
+
+    pub fn parse(allocator: Allocator, tokens: *TokenIterator) ParsingError!Case {
+        var nextToken = tokens.next();
+        const cond: ?Expression = switch (nextToken.type) {
+            .Case => try Expression.parse(allocator, tokens, 0),
+            .Default => null, // 'default' is just treated as special "case" with no cond expr
+            else => unreachable, // the statement parser already guards against other cases
+        };
+
+        // No current support for chars or the 'const' keyword, so only expect null or literal constants
+        if (cond != null and cond.? != .Constant) {
+            std.log.err("Non-constant expression", .{});
+            return ParsingError.NonConstExpr;
+        }
+        const lineIndex = nextToken.lineIndex;
+        try expect(.Colon, tokens.next());
+
+        var body: ?*Statement = null;
+        nextToken = tokens.peek();
+        if (nextToken.type != .Case and nextToken.type != .Default) {
+            body = allocator.create(Statement) catch allocError();
+            body.?.* = try Statement.parse(allocator, tokens);
+        }
+
+        return .{ .lineIndex = lineIndex, .cond = cond, .body = body };
+    }
+
+    pub fn registerToParentSwitch(self: *Case) ParsingError!void {
+        _ = self.generateTag();
+        return self.parent.?.addCase(self);
+    }
+
+    // Generate a tag with parent tag and condition constant
+    // In addition, assure we're comparing like-types between case condition
+    // and switch cond types, truncating case conditions if need be
+    pub fn generateTag(self: *Case) []const u8 {
+        std.debug.assert(self.parent != null); // This shouldn't occur, since we catch orphan case before tagging
+
+        if (self.cond) |cond| {
+            const value = switch (cond) {
+                .Constant => cond.Constant,
+                .Cast => cond.Cast.exp.Constant,
+                else => unreachable,
+            };
+
+            const parentType = self.parent.?.cond.getType();
+            switch (parentType) {
+                .Int => {
+                    // Note: actual number truncation will be handled by assembly instructions, here
+                    // we just need to make sure truncation will not generate a duplicate case
+                    const int: i32 = switch (value) {
+                        .int => value.int,
+                        .long => @truncate(value.long),
+                    };
+                    return mem.print(&self.tag, "{s}.{d}", .{ self.parent.?.tag.?, int }) catch allocError();
+                },
+                .Long => {
+                    const long: i64 = switch (value) {
+                        .int => value.int,
+                        .long => value.long,
+                    };
+                    return mem.print(&self.tag, "{s}.{d}", .{ self.parent.?.tag.?, long }) catch allocError();
+                },
+                else => unreachable,
+            }
+        } else {
+            return mem.print(&self.tag, "{s}.default", .{self.parent.?.tag.?}) catch unreachable;
+        }
+    }
+
+    pub fn deinit(self: *Case, allocator: Allocator) void {
+        if (self.cond) |*cond| {
+            Expression.deinit(cond, allocator);
+        }
+
+        if (self.body) |body| {
+            Statement.deinit(body, allocator);
+            allocator.destroy(body);
+        }
+    }
+};
+
 pub const Continue = struct {
     lineIndex: usize,
     tag: ?[]const u8 = null, // this will get set during semantic analysis
@@ -613,51 +701,6 @@ pub const Switch = struct {
 
         // Case statement entries in '.cases' already delloc'd in the body dealloc
         self.cases.deinit(allocator);
-    }
-};
-
-pub const Case = struct {
-    lineIndex: usize,
-    tag: [64:0]u8 = @splat(0),
-    cond: ?Expression,
-    body: ?*Statement,
-    parent: ?*Switch = null,
-
-    pub fn parse(allocator: Allocator, tokens: *TokenIterator) ParsingError!Case {
-        var nextToken = tokens.next();
-        const cond: ?Expression = switch (nextToken.type) {
-            .Case => try Expression.parse(allocator, tokens, 0),
-            .Default => null, // 'default' is just treated as special "case" with no cond expr
-            else => unreachable, // the statement parser already guards against other cases
-        };
-
-        // No current support for chars or the 'const' keyword, so only expect null or literal constants
-        if (cond != null and cond.? != .Constant) {
-            std.log.err("Non-constant expression", .{});
-            return ParsingError.NonConstExpr;
-        }
-        const lineIndex = nextToken.lineIndex;
-        try expect(.Colon, tokens.next());
-
-        var body: ?*Statement = null;
-        nextToken = tokens.peek();
-        if (nextToken.type != .Case and nextToken.type != .Default) {
-            body = allocator.create(Statement) catch allocError();
-            body.?.* = try Statement.parse(allocator, tokens);
-        }
-
-        return .{ .lineIndex = lineIndex, .cond = cond, .body = body };
-    }
-
-    pub fn deinit(self: *Case, allocator: Allocator) void {
-        if (self.cond) |*cond| {
-            Expression.deinit(cond, allocator);
-        }
-
-        if (self.body) |body| {
-            Statement.deinit(body, allocator);
-            allocator.destroy(body);
-        }
     }
 };
 

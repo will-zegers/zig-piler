@@ -38,7 +38,7 @@ pub fn run(allocator: Allocator, tree: *Parser.AST, textLines: [][]const u8) AST
     if (reporter.errorFlag) process.exit(1);
 
     var symbols: Symbols.Table = .init(allocator);
-    TypeChecker.run(&symbols, &reporter, tree);
+    TypeChecker.run(allocator, &symbols, &reporter, tree);
     if (reporter.errorFlag) process.exit(1);
 
     return .{ .tree = tree.*, .symbols = symbols };

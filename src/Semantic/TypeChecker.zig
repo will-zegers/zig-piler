@@ -26,25 +26,25 @@ var FunctionName: ?[]const u8 = null;
 
 const TypeChecker = @This();
 
-pub fn run(symbols: *Symbols.Table, errorReporter: *Error.Reporter, tree: *AST) void {
+pub fn run(allocator: Allocator, symbols: *Symbols.Table, errorReporter: *Error.Reporter, tree: *AST) void {
     ErrorReporter = errorReporter;
 
     for (tree.declarations) |*decl| {
         switch (decl.*) {
-            .FunDecl => |*funDecl| typeCheckFunDecl(symbols, funDecl),
+            .FunDecl => |*funDecl| typeCheckFunDecl(allocator, symbols, funDecl),
             .VarDecl => |*varDecl| typeCheckFileScopeVarDecl(symbols, varDecl),
         }
     }
 }
 
-fn typeCheckLocalDeclaration(symbols: *Symbols.Table, decl: *Declaration) void {
+fn typeCheckLocalDeclaration(allocator: Allocator, symbols: *Symbols.Table, decl: *Declaration) void {
     switch (decl.*) {
-        .FunDecl => |*funDecl| typeCheckFunDecl(symbols, funDecl),
-        .VarDecl => |*varDecl| typeCheckLocalVarDecl(symbols, varDecl),
+        .FunDecl => |*funDecl| typeCheckFunDecl(allocator, symbols, funDecl),
+        .VarDecl => |*varDecl| typeCheckLocalVarDecl(allocator, symbols, varDecl),
     }
 }
 
-fn typeCheckFunDecl(symbols: *Symbols.Table, decl: *FunDecl) void {
+fn typeCheckFunDecl(allocator: Allocator, symbols: *Symbols.Table, decl: *FunDecl) void {
     var isDefined: bool = decl.body != null;
     var isGlobal: bool = decl.storageClass != .Static;
 
@@ -55,7 +55,6 @@ fn typeCheckFunDecl(symbols: *Symbols.Table, decl: *FunDecl) void {
         }
 
         for (decl.params, entry.type.FunType.params) |p, t| {
-            std.debug.print("{any} {any}\n", .{ p.type, t.* });
             if (!p.type.equals(t.*)) {
                 ErrorReporter.report(.ConflictingFunctions, decl.lineIndex, decl.name);
                 return;
@@ -101,7 +100,7 @@ fn typeCheckFunDecl(symbols: *Symbols.Table, decl: *FunDecl) void {
             symbols.put(param.unique.?, .{ .type = param.type, .attrs = .Local }) catch allocError();
         }
         FunctionName = decl.name;
-        typeCheckBlock(symbols, body);
+        typeCheckBlock(allocator, symbols, body);
         FunctionName = null;
     }
 }
@@ -160,7 +159,7 @@ fn typeCheckFileScopeVarDecl(symbols: *Symbols.Table, decl: *VarDecl) void {
     symbols.put(decl.name, .{ .type = decl.type, .attrs = attrs }) catch allocError();
 }
 
-fn typeCheckLocalVarDecl(symbols: *Symbols.Table, decl: *VarDecl) void {
+fn typeCheckLocalVarDecl(allocator: Allocator, symbols: *Symbols.Table, decl: *VarDecl) void {
     if (decl.storageClass == .Extern) {
         if (decl.init) |_| {
             ErrorReporter.report(.LocalExternDefined, decl.lineIndex, decl.name);
@@ -194,42 +193,43 @@ fn typeCheckLocalVarDecl(symbols: *Symbols.Table, decl: *VarDecl) void {
     } else { // automatic (local scope) storage class
         symbols.put(decl.unique.?, .{ .type = decl.type, .attrs = .Local }) catch allocError();
         if (decl.init) |*init| {
-            _ = typeCheckExpression(symbols, init);
+            _ = typeCheckExpression(allocator, symbols, init);
         }
     }
 }
 
-fn typeCheckBlock(symbols: *Symbols.Table, block: *Block) void {
+fn typeCheckBlock(allocator: Allocator, symbols: *Symbols.Table, block: *Block) void {
     for (block.items) |*item| {
         switch (item.*) {
-            .Declaration => |*decl| typeCheckLocalDeclaration(symbols, decl),
-            .Statement => |*stmt| typeCheckStatement(symbols, stmt),
+            .Declaration => |*decl| typeCheckLocalDeclaration(allocator, symbols, decl),
+            .Statement => |*stmt| typeCheckStatement(allocator, symbols, stmt),
         }
     }
 }
 
-fn typeCheckStatement(symbols: *Symbols.Table, stmt: *Statement) void {
+fn typeCheckStatement(allocator: Allocator, symbols: *Symbols.Table, stmt: *Statement) void {
     switch (stmt.*) {
-        .Compound => |*compound| typeCheckBlock(symbols, compound),
+        .Compound => |*compound| typeCheckBlock(allocator, symbols, compound),
         .Return => |*ret| {
-            _ = typeCheckExpression(symbols, &ret.expr);
-            // const symbol = symbols.get(FunctionName.?) orelse unreachable;
-            // ret.expr = castTo(&ret.expr, symbol.type.FunType.ret.*);
+            _ = typeCheckExpression(allocator, symbols, &ret.expr);
+
+            const symbol = symbols.get(FunctionName.?) orelse unreachable;
+            ret.expr = castTo(allocator, &ret.expr, symbol.type.FunType.ret.*);
         },
-        .Expression => |*expr| _ = typeCheckExpression(symbols, expr),
+        .Expression => |*expr| _ = typeCheckExpression(allocator, symbols, expr),
         .If => |*ifStmt| {
-            _ = typeCheckExpression(symbols, &ifStmt.condition);
-            typeCheckStatement(symbols, ifStmt.thenStmt);
-            if (ifStmt.elseStmt) |els| typeCheckStatement(symbols, els);
+            _ = typeCheckExpression(allocator, symbols, &ifStmt.condition);
+            typeCheckStatement(allocator, symbols, ifStmt.thenStmt);
+            if (ifStmt.elseStmt) |els| typeCheckStatement(allocator, symbols, els);
         },
-        .Label => |*lbl| typeCheckStatement(symbols, lbl.body),
+        .Label => |*lbl| typeCheckStatement(allocator, symbols, lbl.body),
         .DoWhile => |*doWhl| {
-            typeCheckStatement(symbols, doWhl.body);
-            _ = typeCheckExpression(symbols, &doWhl.cond);
+            typeCheckStatement(allocator, symbols, doWhl.body);
+            _ = typeCheckExpression(allocator, symbols, &doWhl.cond);
         },
         .While => |*whl| {
-            _ = typeCheckExpression(symbols, &whl.cond);
-            typeCheckStatement(symbols, whl.body);
+            _ = typeCheckExpression(allocator, symbols, &whl.cond);
+            typeCheckStatement(allocator, symbols, whl.body);
         },
         .For => |*f| {
             switch (f.init) {
@@ -242,63 +242,55 @@ fn typeCheckStatement(symbols: *Symbols.Table, stmt: *Statement) void {
                         ErrorReporter.report(.ForLoopStorageClassDecl, decl.VarDecl.lineIndex, decl.VarDecl.name);
                         return;
                     }
-                    typeCheckLocalDeclaration(symbols, decl);
+                    typeCheckLocalDeclaration(allocator, symbols, decl);
                 },
-                .Expression => |*expr| _ = if (expr.*) |*e| typeCheckExpression(symbols, e) else null,
+                .Expression => |*expr| _ = if (expr.*) |*e| typeCheckExpression(allocator, symbols, e) else null,
             }
-            if (f.cond) |*cond| _ = typeCheckExpression(symbols, cond);
-            if (f.post) |*post| _ = typeCheckExpression(symbols, post);
-            typeCheckStatement(symbols, f.body);
+            if (f.cond) |*cond| _ = typeCheckExpression(allocator, symbols, cond);
+            if (f.post) |*post| _ = typeCheckExpression(allocator, symbols, post);
+            typeCheckStatement(allocator, symbols, f.body);
         },
         .Switch => |*swtch| {
-            _ = typeCheckExpression(symbols, &swtch.cond);
-            typeCheckStatement(symbols, swtch.body);
+            _ = typeCheckExpression(allocator, symbols, &swtch.cond);
+            typeCheckStatement(allocator, symbols, swtch.body);
         },
         .Case => |*case| {
             if (case.cond) |*cond| {
-                _ = typeCheckExpression(symbols, cond);
+                _ = typeCheckExpression(allocator, symbols, cond);
                 const parentType = case.parent.?.cond.getType();
-                case.cond = castTo(cond, parentType);
-
-                // Tag the case statement with its parent tag and condition constant
-                _ = switch (cond.Constant) {
-                    .int => |int| mem.print(&case.tag, "{s}.{d}", .{ case.parent.?.tag.?, int }),
-                    .long => |long| mem.print(&case.tag, "{s}.{d}", .{ case.parent.?.tag.?, long }),
-                } catch unreachable;
-            } else {
-                _ = mem.print(&case.tag, "{s}.default", .{case.parent.?.tag.?}) catch unreachable;
+                case.cond = castTo(allocator, cond, parentType);
             }
 
-            case.parent.?.addCase(case) catch {
+            case.registerToParentSwitch() catch {
                 ErrorReporter.report(.CaseDuplicate, case.lineIndex, null);
             };
 
-            if (case.body) |body| typeCheckStatement(symbols, body);
+            if (case.body) |body| typeCheckStatement(allocator, symbols, body);
         },
         .Break, .Continue, .Goto, .Null => {},
     }
 }
 
 // TODO: use constCast to make this the only function that needs mutable
-fn typeCheckExpression(symbols: *Symbols.Table, expr: *Expression) Type {
+fn typeCheckExpression(allocator: Allocator, symbols: *Symbols.Table, expr: *Expression) Type {
     switch (expr.*) {
         .Assignment => |*assign| {
-            const lType = typeCheckExpression(symbols, assign.lhs);
-            _ = typeCheckExpression(symbols, assign.rhs);
+            const lType = typeCheckExpression(allocator, symbols, assign.lhs);
+            _ = typeCheckExpression(allocator, symbols, assign.rhs);
 
             assign.type = lType;
-            assign.rhs.* = castTo(assign.rhs, lType);
+            assign.rhs.* = castTo(allocator, assign.rhs, lType);
 
             return assign.type.?;
         },
         .Binary => |*bin| {
-            const lType = typeCheckExpression(symbols, bin.left);
-            const rType = typeCheckExpression(symbols, bin.right);
+            const lType = typeCheckExpression(allocator, symbols, bin.left);
+            const rType = typeCheckExpression(allocator, symbols, bin.right);
             const commonType = getCommonType(lType, rType);
 
             bin.type = commonType;
-            bin.left.* = castTo(bin.left, lType);
-            bin.right.* = castTo(bin.right, lType);
+            bin.left.* = castTo(allocator, bin.left, lType);
+            bin.right.* = castTo(allocator, bin.right, lType);
 
             return bin.type.?;
         },
@@ -307,6 +299,7 @@ fn typeCheckExpression(symbols: *Symbols.Table, expr: *Expression) Type {
                 ErrorReporter.report(.InvalidStorageClass, cast.lineIndex, null);
             }
 
+            _ = typeCheckExpression(allocator, symbols, cast.exp);
             return cast.target.type.?;
         },
         .Constant => return switch (expr.Constant) {
@@ -330,29 +323,30 @@ fn typeCheckExpression(symbols: *Symbols.Table, expr: *Expression) Type {
 
             fcall.type = symbol.type.FunType.ret.*;
             for (fcall.args) |*arg| {
-                _ = typeCheckExpression(symbols, arg);
+                _ = typeCheckExpression(allocator, symbols, arg);
             }
 
             return fcall.type.?;
         },
         .Ternary => |*tern| {
             // TODO: Fix Ternary names (thenStmt -> thenExpr)
-            const ifType = typeCheckExpression(symbols, tern.condition);
-            const thenType = typeCheckExpression(symbols, tern.thenStmt);
-            const elseType = typeCheckExpression(symbols, tern.elseStmt);
+            const ifType = typeCheckExpression(allocator, symbols, tern.condition);
+            const thenType = typeCheckExpression(allocator, symbols, tern.thenStmt);
+            const elseType = typeCheckExpression(allocator, symbols, tern.elseStmt);
 
             var commonType = getCommonType(ifType, thenType);
             commonType = getCommonType(commonType, elseType);
 
             tern.type = commonType;
-            tern.condition.* = castTo(tern.condition, commonType);
-            tern.thenStmt.* = castTo(tern.thenStmt, commonType);
-            tern.elseStmt.* = castTo(tern.elseStmt, commonType);
+            tern.condition.* = castTo(allocator, tern.condition, commonType);
+            tern.thenStmt.* = castTo(allocator, tern.thenStmt, commonType);
+            tern.elseStmt.* = castTo(allocator, tern.elseStmt, commonType);
 
             return tern.type.?;
         },
         .Unary => |*un| {
-            const operandType = typeCheckExpression(symbols, un.operand);
+            const operandType = typeCheckExpression(allocator, symbols, un.operand);
+            // std.process.exit(1);
             un.type = switch (un.operator) {
                 .Not => .Int,
                 else => operandType,
@@ -372,35 +366,19 @@ fn typeCheckExpression(symbols: *Symbols.Table, expr: *Expression) Type {
     }
 }
 
-fn castTo(exp: *const Expression, toType: Type) Expression {
-    // For constant expression, handle the cast (and possible truncation)
-    // here during type checking
-    if (exp.* == .Constant) {
-        return switch (toType) {
-            .Int => switch (exp.*.Constant) {
-                .int => exp.*,
-                .long => |long| .{ .Constant = .{ .int = @truncate(long) } },
-            },
-            .Long => switch (exp.*.Constant) {
-                .int => |int| .{ .Constant = .{ .long = int } },
-                .long => exp.*,
-            },
-            .FunType => return exp.*, // Error, but will be caught when type-checking Var types
-        };
-    }
-
-    // For all other expressions, wrap the inner expression in a Cast
-    return switch (exp.getType()) {
+fn castTo(allocator: Allocator, exp: *const Expression, toType: Type) Expression {
+    const newExp: Expression = switch (exp.getType()) {
         .Int => switch (toType) {
             .Int => exp.*,
-            else => .{ .Cast = .to(exp, toType) },
+            else => .{ .Cast = .to(allocator, exp, toType) },
         },
         .Long => switch (toType) {
-            .Long => return exp.*,
-            else => .{ .Cast = .to(exp, toType) },
+            .Long => exp.*,
+            else => .{ .Cast = .to(allocator, exp, toType) },
         },
         .FunType => exp.*,
     };
+    return newExp;
 }
 
 fn getCommonType(type1: Type, type2: Type) Type {

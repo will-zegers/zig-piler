@@ -232,8 +232,7 @@ pub const Binary = struct {
 pub const Cast = struct {
     lineIndex: usize = 0,
     target: Specifiers, // This will get type-checked during semantic analysis, which will forbid storage classes
-    exp: *const Expression,
-    needsDealloc: bool = false,
+    exp: *Expression,
 
     pub fn parse(allocator: Allocator, tokens: *Token.Iterator) ParsingError!Cast {
         try expect(.OpenParenthesis, tokens.next());
@@ -243,19 +242,25 @@ pub const Cast = struct {
         const exp = allocator.create(Expression) catch allocError();
         exp.* = try parseFactor(allocator, tokens);
 
-        return .{ .lineIndex = target.lineIndex, .target = target, .exp = exp, .needsDealloc = true };
+        return .{ .lineIndex = target.lineIndex, .target = target, .exp = exp };
     }
 
-    pub fn to(exp: *const Expression, toType: Type) Cast {
-        return .{
+    pub fn to(allocator: Allocator, exp: *const Expression, toType: Type) Cast {
+        const inner = allocator.create(Expression) catch allocError();
+        inner.* = exp.*;
+
+        const out: Cast = .{
             .lineIndex = 0,
             .target = .{ .lineIndex = 0, .type = toType },
-            .exp = @constCast(exp),
+            .exp = inner,
         };
+
+        return out;
     }
 
     pub fn deinit(self: *Cast, allocator: Allocator) void {
-        if (self.needsDealloc) allocator.destroy(self.exp);
+        self.exp.deinit(allocator);
+        allocator.destroy(self.exp);
     }
 };
 
@@ -274,7 +279,7 @@ pub const Constant = union(ConstantTag) {
             return ParsingError.Token;
         };
 
-        if (longValue < math.maxInt(i32)) {
+        if (longValue <= math.maxInt(i32)) {
             const intValue = std.fmt.parseInt(i32, num, 10) catch unreachable;
             return .{ .int = intValue };
         }
