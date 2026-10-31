@@ -20,14 +20,14 @@ pub const Static = struct {
     global: bool,
 };
 
-const AttrsTag = enum { Fun, Static, Local };
+const AttrsTag = enum { Fun, Local, Static };
 pub const Attrs = union(AttrsTag) {
     Fun: struct {
         defined: bool,
         global: bool,
     },
-    Static: Static,
     Local: void,
+    Static: Static,
 };
 
 pub const Entry = struct {

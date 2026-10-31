@@ -5,13 +5,15 @@ const ArrayList = std.ArrayList;
 const Parser = @import("../Parser.zig");
 const TAC = @import("../TAC.zig");
 
+const Symbol = @import("../Semantic.zig").Symbol;
+
 pub const InstructionList = ArrayList(Instruction);
 
 pub const ARG_REGISTERS = [_]Reg{ .di, .si, .dx, .cx, .r8, .r9 };
 pub const LONGWORD_BYTES: isize = 4;
 pub const QUADWORD_BYTES: isize = 8;
 
-pub fn funCallToAssembly(allocator: Allocator, funCall: TAC.FunCall) ![]Instruction {
+fn funCallToAssembly(allocator: Allocator, symbols: Symbol.Table, funCall: TAC.FunCall) ![]Instruction {
     var assembly: ArrayList(Instruction) = .empty;
 
     // Define and check how much we need to allocate initially to the stack to make sure it's
@@ -38,9 +40,12 @@ pub fn funCallToAssembly(allocator: Allocator, funCall: TAC.FunCall) ![]Instruct
         i -= 1;
         switch (funCall.args[i]) {
             .Constant => |arg| {
-                try assembly.append(allocator, .{ .Push = .{ .operand = .{ .Imm = arg.int } } });
+                const imm: i64 = Operand.constantToImm(arg);
+                try assembly.append(allocator, .{ .Push = .{ .operand = .{ .Imm = imm } } });
             },
             .Var => |arg| {
+                const t = symbols.get(arg).?.type;
+                _ = t;
                 try assembly.appendSlice(allocator, &.{
                     .{ .Mov = .{ .src = .{ .Pseudo = arg }, .dst = .{ .Reg = .ax } } },
                     .{ .Push = .{ .operand = .{ .Reg = .ax } } },
@@ -53,7 +58,8 @@ pub fn funCallToAssembly(allocator: Allocator, funCall: TAC.FunCall) ![]Instruct
         i -= 1;
         switch (funCall.args[i]) {
             .Constant => |arg| {
-                try assembly.append(allocator, .{ .Mov = .{ .src = .{ .Imm = arg.int }, .dst = .{ .Reg = ARG_REGISTERS[i] } } });
+                const imm: i64 = Operand.constantToImm(arg);
+                try assembly.append(allocator, .{ .Mov = .{ .src = .{ .Imm = imm }, .dst = .{ .Reg = ARG_REGISTERS[i] } } });
             },
             .Var => |arg| {
                 try assembly.append(allocator, .{ .Mov = .{ .src = .{ .Pseudo = arg }, .dst = .{ .Reg = ARG_REGISTERS[i] } } });
@@ -75,6 +81,20 @@ pub fn funCallToAssembly(allocator: Allocator, funCall: TAC.FunCall) ![]Instruct
     }
 
     return try assembly.toOwnedSlice(allocator);
+}
+
+fn signExtend(allocator: Allocator, se: TAC.SignExtend) []Instruction {
+    const src: Operand = .fromVal(se.src);
+    const dst: Operand = .fromVal(se.dst);
+
+    return allocator.dupe(Instruction, &.{.{ .Movsx = .{ .src = src, .dst = dst } }}) catch allocError();
+}
+
+fn truncate(allocator: Allocator, tr: TAC.Truncate) []Instruction {
+    const src: Operand = .fromVal(tr.src);
+    const dst: Operand = .fromVal(tr.dst);
+
+    return allocator.dupe(Instruction, &.{.{ .Mov = .{ .src = src, .dst = dst } }}) catch allocError();
 }
 
 const InstructionTag = enum {
@@ -112,6 +132,21 @@ pub const Instruction = union(InstructionTag) {
     Ret: Ret,
     SetCC: SetCC,
     Unary: Unary,
+
+    pub fn assemble(allocator: Allocator, symbols: Symbol.Table, instruction: TAC.Instruction) []Instruction {
+        return switch (instruction) {
+            .Binary => Binary.toAssembly(allocator, instruction.Binary),
+            .Copy => Mov.toAssembly(allocator, instruction.Copy),
+            .FunCall => funCallToAssembly(allocator, symbols, instruction.FunCall) catch allocError(),
+            .Jump => Jmp.toAssembly(allocator, instruction.Jump),
+            .JumpIfZero, .JumpIfNotZero => JmpCC.toAssembly(allocator, instruction),
+            .Label => Label.toAssembly(allocator, instruction.Label),
+            .Return => Ret.toAssembly(allocator, instruction.Return),
+            .SignExtend => signExtend(allocator, instruction.SignExtend),
+            .Truncate => truncate(allocator, instruction.Truncate),
+            .Unary => Unary.toAssembly(allocator, instruction.Unary),
+        };
+    }
 };
 
 pub const AllocateStack = struct {
@@ -122,6 +157,133 @@ pub const AllocateStack = struct {
     }
 };
 
+fn assertTypes2(symbols: Symbol.Table, op1: Operand, op2: Operand) ?Type {
+    std.debug.assert(op1 != null and op2 != null);
+
+    if (op1 == null) {
+        return switch (op2.?) {
+            .Data => symbols.get(op2.Data).?.type,
+            .Pseudo => symbols.get(op2.Data).?.type,
+            .Imm, .Reg, .Stack => null,
+        };
+    } else if (op2 == null) {
+        return switch (op1.?) {
+            .Data => symbols.get(op1.?.Data).?.type,
+            .Pseudo => symbols.get(op1.?.Data).?.type,
+            .Imm, .Reg, .Stack => null,
+        };
+    }
+
+    switch (op1) {
+        .Data => {
+            const op1Type = symbols.get(op1.?.Data).?.type;
+            switch (op2.?) {
+                .Data => {
+                    const op2Type = symbols.get(op2.?.Data).?.type;
+                    std.debug.assert(op1Type.equals(op2Type));
+                    return op1Type;
+                },
+                .Pseudo => {
+                    const op2Type = symbols.get(op2.?.Pseudo).?.type;
+                    std.debug.assert(op1Type.equals(op2Type));
+                    return op1Type;
+                },
+                .Imm, .Reg, .Stack => return op1Type,
+            }
+        },
+        .Pseudo => {
+            const op1Type = symbols.get(op1.?.Data).?.type;
+            switch (op2.?) {
+                .Data => {
+                    const op2Type = symbols.get(op2.?.Data).?.type;
+                    std.debug.assert(op1Type.equals(op2Type));
+                    return op1Type;
+                },
+                .Pseudo => {
+                    const op2Type = symbols.get(op2.?.Pseudo).?.type;
+                    std.debug.assert(op1Type.equals(op2Type));
+                    return op1Type;
+                },
+                .Imm, .Reg, .Stack => return op1Type,
+            }
+        },
+        .Imm, .Reg, .Stack => return switch (op2.?) {
+            .Data => symbols.get(op2.?.Data).?.type,
+            .Pseudo => symbols.get(op2.?.Pseudo).?.type,
+            .Imm, .Reg, .Stack => null,
+        },
+    }
+}
+
+fn assertTypes3(op1: Operand, op2: Operand, op3: Operand) Type {
+    return assertTypes2(assertTypes2(op1, op2).?, op3).?;
+}
+
+fn getType(symbolTable: Symbol.Table, op1: TAC.Val, op2: TAC.Val) Type {
+    return blk: switch (op1) {
+        .Constant => switch (op1.Constant) {
+            .int => switch (op2) {
+                .Constant => switch (op2.Constant) {
+                    .int => break :blk .Long,
+                    else => unreachable,
+                },
+                .Var => {
+                    const t2 = symbolTable.get(op2.Var).?.type;
+                    switch (t2) {
+                        .Int => break :blk .Long,
+                        else => unreachable,
+                    }
+                },
+            },
+            .long => switch (op2) {
+                .Constant => switch (op2.Constant) {
+                    .long => break :blk .Quad,
+                    else => unreachable,
+                },
+                .Var => {
+                    const t2 = symbolTable.get(op2.Var).?.type;
+                    switch (t2) {
+                        .Long => break :blk .Quad,
+                        else => unreachable,
+                    }
+                },
+            },
+        },
+        .Var => {
+            const t1 = symbolTable.get(op1.Var).?.type;
+            switch (t1) {
+                .Int => switch (op2) {
+                    .Constant => switch (op2.Constant) {
+                        .int => break :blk .Long,
+                        else => unreachable,
+                    },
+                    .Var => {
+                        const t2 = symbolTable.get(op2.Var).?.type;
+                        switch (t2) {
+                            .Int => break :blk .Long,
+                            else => unreachable,
+                        }
+                    },
+                },
+                .Long => switch (op2) {
+                    .Constant => switch (op2.Constant) {
+                        .long => break :blk .Quad,
+                        else => unreachable,
+                    },
+                    .Var => {
+                        const t2 = symbolTable.get(op2.Var).?.type;
+                        switch (t2) {
+                            .Long => break :blk .Quad,
+                            else => unreachable,
+                        }
+                    },
+                },
+                .FunType => unreachable,
+            }
+        },
+    };
+}
+
 pub const Binary = struct {
     const Operator = TAC.Binary.Operator;
 
@@ -130,20 +292,12 @@ pub const Binary = struct {
     dst: Operand,
 
     pub fn toAssembly(allocator: Allocator, binary: TAC.Binary) []Instruction {
-        const src1: Operand = switch (binary.src1) {
-            .Constant => |constant| .{ .Imm = constant.int },
-            .Var => |pseudo| .{ .Pseudo = pseudo },
-        };
-        const src2: Operand = switch (binary.src2) {
-            .Constant => |constant| .{ .Imm = constant.int },
-            .Var => |pseudo| .{ .Pseudo = pseudo },
-        };
+        const src1: Operand = .fromVal(binary.src1);
+        const src2: Operand = .fromVal(binary.src2);
         const dst: Operand = .{ .Pseudo = binary.dst.Var };
 
         return switch (binary.operator) {
-            .Div,
-            .Mod,
-            => blk: {
+            .Div, .Mod => blk: {
                 const sourceReg: Operand = switch (binary.operator) {
                     .Div => .{ .Reg = .ax },
                     .Mod => .{ .Reg = .dx },
@@ -206,20 +360,14 @@ pub const JmpCC = struct {
     pub fn toAssembly(allocator: Allocator, jmpInstr: TAC.Instruction) []Instruction {
         return switch (jmpInstr) {
             .JumpIfZero => |jz| blk: {
-                const arg2: Operand = switch (jz.condition) {
-                    .Constant => |constant| .{ .Imm = constant.int },
-                    .Var => |pseudo| .{ .Pseudo = pseudo },
-                };
+                const arg2: Operand = .fromVal(jz.condition);
                 break :blk allocator.dupe(Instruction, &.{
                     .{ .Cmp = .{ .arg1 = .{ .Imm = 0 }, .arg2 = arg2 } },
                     .{ .JmpCC = .{ .condition = .E, .target = jz.target } },
                 }) catch allocError();
             },
             .JumpIfNotZero => |jnz| blk: {
-                const arg2: Operand = switch (jnz.condition) {
-                    .Constant => |constant| .{ .Imm = constant.int },
-                    .Var => |pseudo| .{ .Pseudo = pseudo },
-                };
+                const arg2: Operand = .fromVal(jnz.condition);
                 break :blk allocator.dupe(Instruction, &.{
                     .{ .Cmp = .{ .arg1 = .{ .Imm = 0 }, .arg2 = arg2 } },
                     .{ .JmpCC = .{ .condition = .NE, .target = jnz.target } },
@@ -243,14 +391,9 @@ pub const Mov = struct {
     dst: Operand,
 
     pub fn toAssembly(allocator: Allocator, copy: TAC.Copy) []Instruction {
-        const src: Operand = switch (copy.src) {
-            .Constant => |constant| .{ .Imm = constant.int },
-            .Var => |pseudo| .{ .Pseudo = pseudo },
-        };
-        const dst: Operand = switch (copy.dst) {
-            .Constant => |constant| .{ .Imm = constant.int },
-            .Var => |pseudo| .{ .Pseudo = pseudo },
-        };
+        const src: Operand = .fromVal(copy.src);
+        const dst: Operand = .fromVal(copy.dst);
+
         return allocator.dupe(Instruction, &.{.{ .Mov = .{ .src = src, .dst = dst } }}) catch allocError();
     }
 };
@@ -262,11 +405,7 @@ pub const Push = struct { operand: Operand };
 
 pub const Ret = struct {
     pub fn toAssembly(allocator: Allocator, ret: TAC.Return) []Instruction {
-        const val: Operand = switch (ret.val) {
-            .Constant => |constant| .{ .Imm = constant.int },
-            .Var => |pseudo| .{ .Pseudo = pseudo },
-        };
-
+        const val: Operand = .fromVal(ret.val);
         return allocator.dupe(Instruction, &.{
             .{ .Mov = .{ .src = val, .dst = .{ .Reg = .ax } } },
             .{ .Ret = .{} },
@@ -284,11 +423,9 @@ pub const Unary = struct {
     operand: Operand,
 
     pub fn toAssembly(allocator: Allocator, unary: TAC.Unary) []Instruction {
-        const src: Operand = switch (unary.src) {
-            .Constant => |constant| .{ .Imm = constant.int },
-            .Var => |pseudo| .{ .Pseudo = pseudo },
-        };
+        const src: Operand = .fromVal(unary.src);
         const dst: Operand = .{ .Pseudo = unary.dst.Var };
+
         return allocator.dupe(Instruction, switch (unary.operator) {
             .Not => &.{
                 .{ .Cmp = .{ .arg1 = .{ .Imm = 0 }, .arg2 = src } },
@@ -308,20 +445,33 @@ pub const Unary = struct {
 
 const OperandTag = enum { Imm, Reg, Pseudo, Stack, Data };
 pub const Operand = union(OperandTag) {
-    Imm: i32,
+    Imm: i64,
     Reg: Reg,
     Pseudo: []const u8,
     Stack: isize,
     Data: []const u8,
+
+    pub fn fromVal(val: TAC.Val) Operand {
+        return switch (val) {
+            .Constant => |constant| .{ .Imm = switch (constant) {
+                .int => constant.int,
+                .long => constant.long,
+            } },
+            .Var => |pseudo| .{ .Pseudo = pseudo },
+        };
+    }
+
+    pub fn constantToImm(constant: TAC.Constant) i64 {
+        return switch (constant) {
+            .int => constant.int,
+            .long => constant.long,
+        };
+    }
 };
 
 pub const Reg = enum { ax, cx, cl, dx, di, si, r8, r9, r10, r11 };
 
-const TypeTag = enum { Long, Quad };
-const Type = union(TypeTag) {
-    Long: i32,
-    Quad: i64,
-};
+const Type = enum { Long, Quad };
 
 pub fn allocError() noreturn {
     std.log.err("Memory allocation error", .{});

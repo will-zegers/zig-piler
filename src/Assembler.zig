@@ -31,8 +31,6 @@ const Assembler = @This();
 
 pub const Assembly = Program;
 
-var SymbolTable: Symbol.Table = undefined;
-
 const Program = struct {
     allocator: Allocator,
     topLevel: []TopLevel,
@@ -77,12 +75,11 @@ const TopLevel = union(TopLevelTag) {
 pub fn assemble(allocator: Allocator, symbols: Symbol.Table, tree: TAC.Program) Assembly {
     var topLevelList: ArrayList(TopLevel) = .empty;
     var defined: StringHashMap(bool) = .init(allocator);
-    SymbolTable = symbols;
 
     for (tree.topLevel) |topLevel| {
         switch (topLevel) {
             .Function => {
-                const assembly = assembleFunction(allocator, topLevel.Function, &defined);
+                const assembly = assembleFunction(allocator, symbols, topLevel.Function, &defined);
                 topLevelList.append(allocator, .{ .Function = assembly }) catch allocError();
             },
             .StaticVariable => |staticVar| {
@@ -104,7 +101,8 @@ pub fn assemble(allocator: Allocator, symbols: Symbol.Table, tree: TAC.Program) 
     };
 }
 
-pub fn assembleFunction(allocator: Allocator, function: TAC.Function, defined: *StringHashMap(bool)) Function {
+// TODO: break this function up
+pub fn assembleFunction(allocator: Allocator, symbols: Symbol.Table, function: TAC.Function, defined: *StringHashMap(bool)) Function {
     var instructionList: InstructionList = .empty;
     var pseudoMap: std.StringHashMap(isize) = .init(allocator);
     defer pseudoMap.deinit();
@@ -133,73 +131,62 @@ pub fn assembleFunction(allocator: Allocator, function: TAC.Function, defined: *
 
     // First pass to build Assembly AST
     for (function.body) |instr| {
-        const assembly = switch (instr) {
-            .Binary => Binary.toAssembly(allocator, instr.Binary),
-            .Copy => Mov.toAssembly(allocator, instr.Copy),
-            .FunCall => instruction.funCallToAssembly(allocator, instr.FunCall) catch allocError(),
-            .Jump => Jmp.toAssembly(allocator, instr.Jump),
-            .JumpIfZero, .JumpIfNotZero => JmpCC.toAssembly(allocator, instr),
-            .Label => Label.toAssembly(allocator, instr.Label),
-            .Return => Ret.toAssembly(allocator, instr.Return),
-            .SignExtend => unreachable,
-            .Truncate => unreachable,
-            .Unary => Unary.toAssembly(allocator, instr.Unary),
-        };
+        // TODO: try to eliminate the slice allocation
+        const assembly = Instruction.assemble(allocator, symbols, instr);
         defer allocator.free(assembly);
 
         instructionList.appendSlice(allocator, assembly) catch allocError();
     }
 
     // Second pass, replace Pseudo registers with stack locations and prepend the prelude
-    setupStack(allocator, &instructionList, &pseudoMap);
+    setupStack(allocator, symbols, &instructionList, &pseudoMap);
 
     // Find illegal instructions (see specifications in the Patcher module)
     const instructions = instructionList.toOwnedSlice(allocator) catch allocError();
-    // instructions = Patcher.patchInstructions(allocator, instructions);
 
     return .{
         .allocator = allocator,
         .name = function.name,
-        .global = SymbolTable.get(function.name).?.attrs.Fun.global,
+        .global = symbols.get(function.name).?.attrs.Fun.global,
         .instructions = instructions,
     };
 }
 
-fn setupStack(allocator: Allocator, instructions: *InstructionList, pseudoMap: *StringHashMap(isize)) void{
+fn setupStack(allocator: Allocator, symbols: Symbol.Table, instructions: *InstructionList, pseudoMap: *StringHashMap(isize)) void{
     var localStack: isize = 0;
 
     for (instructions.items) |*instr| {
         switch (instr.*) {
             .Mov => |*mov| {
-                replaceIfPseudo(pseudoMap, &localStack, &mov.src);
-                replaceIfPseudo(pseudoMap, &localStack, &mov.dst);
+                replaceIfPseudo(symbols, pseudoMap, &localStack, &mov.src);
+                replaceIfPseudo(symbols, pseudoMap, &localStack, &mov.dst);
             },
             .Unary => |*unary| {
-                replaceIfPseudo(pseudoMap, &localStack, &unary.operand);
+                replaceIfPseudo(symbols, pseudoMap, &localStack, &unary.operand);
             },
             .Binary => |*binary| {
-                replaceIfPseudo(pseudoMap, &localStack, &binary.src);
-                replaceIfPseudo(pseudoMap, &localStack, &binary.dst);
+                replaceIfPseudo(symbols, pseudoMap, &localStack, &binary.src);
+                replaceIfPseudo(symbols, pseudoMap, &localStack, &binary.dst);
             },
             .Idiv => |*idiv| {
-                replaceIfPseudo(pseudoMap, &localStack, &idiv.operand);
+                replaceIfPseudo(symbols, pseudoMap, &localStack, &idiv.operand);
             },
             .Cmp => |*cmp| {
-                replaceIfPseudo(pseudoMap, &localStack, &cmp.arg1);
-                replaceIfPseudo(pseudoMap, &localStack, &cmp.arg2);
+                replaceIfPseudo(symbols, pseudoMap, &localStack, &cmp.arg1);
+                replaceIfPseudo(symbols, pseudoMap, &localStack, &cmp.arg2);
             },
             .SetCC => |*setcc| {
-                replaceIfPseudo(pseudoMap, &localStack, &setcc.operand);
+                replaceIfPseudo(symbols, pseudoMap, &localStack, &setcc.operand);
             },
             .Push => |*push| {
-                replaceIfPseudo(pseudoMap, &localStack, &push.operand);
+                replaceIfPseudo(symbols, pseudoMap, &localStack, &push.operand);
             },
             else => {},
         }
     }
 
     // Make sure the stack is 16-byte aligned
-    const stackSpace = 16 * @divCeil(@abs(localStack), 16);
+    const stackSpace = 2 * 16 * @divCeil(@abs(localStack), 2 * 16);
 
     // Prepend the instructions with stack space allocation based on the number of
     // pseudo registers (i.e. local variables) replaced with memory
@@ -208,12 +195,12 @@ fn setupStack(allocator: Allocator, instructions: *InstructionList, pseudoMap: *
 
 /// Replace 'Psuedo' registers generated in the first pass with memory locations
 /// on the stack
-fn replaceIfPseudo(map: *std.StringHashMap(isize), stackPointer: *isize, operand: *Operand) void {
+fn replaceIfPseudo(symbols: Symbol.Table, map: *std.StringHashMap(isize), stackPointer: *isize, operand: *Operand) void {
     if (operand.* == .Pseudo) {
         const key = operand.Pseudo;
         // If the pseudo register has not been mapped to a location on the stack,
         // map it to the location in the local stack space
-        if (SymbolTable.get(key)) |entry| {
+        if (symbols.get(key)) |entry| {
             if (entry.attrs == .Static) {
                 operand.* = . { .Data = key };
                 return;
