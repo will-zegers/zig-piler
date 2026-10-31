@@ -2,6 +2,8 @@ const std = @import("std");
 const print = std.debug.print;
 
 const Parser = @import("Parser.zig");
+const Semantic = @import("Semantic.zig");
+const Symbol = Semantic.Symbol;
 const Assembler = @import("Assembler.zig");
 const TAC = @import("TAC.zig");
 const Token = @import("Lexer.zig").Token;
@@ -14,7 +16,7 @@ pub fn printLexerTokens(tokens: *TokenIterator) void {
     }
 }
 
-pub fn printParserAST(tree: Parser.AST) void {
+pub fn printParserAST(tree: Parser.AST, symbolTable: ?Symbol.Table) void {
     const declarations = tree.declarations;
     print("{any}(\n", .{@TypeOf(tree)});
     for (declarations) |declaration| {
@@ -22,6 +24,8 @@ pub fn printParserAST(tree: Parser.AST) void {
     }
     print("  )\n", .{});
     print(")\n", .{});
+
+    if (symbolTable) |table| printSymbolTable(table);
 }
 
 fn printBlockItem(blockItem: Parser.BlockItem, indent: usize) void {
@@ -43,13 +47,13 @@ fn printDeclaration(decl: Parser.Declaration, indent: usize) void {
         indentStr[i] = ' ';
     }
 
+    print("{s}{s} (", .{ indentStr, @tagName(decl) });
     switch (decl) {
         .VarDecl => |varDecl| {
-            print("{s}{any}(", .{ indentStr, @TypeOf(varDecl) });
             if (varDecl.storageClass) |sc| {
                 print("{any} ", .{sc});
             }
-            print("{any} {s}", .{ varDecl.type, varDecl.name });
+            print("{s} {s}", .{ @tagName(varDecl.type), varDecl.name });
             if (varDecl.init) |init| {
                 print("\n", .{});
                 printExpression(init, indent + 2);
@@ -59,11 +63,10 @@ fn printDeclaration(decl: Parser.Declaration, indent: usize) void {
             }
         },
         .FunDecl => |funDecl| {
-            print("{s}{any} ", .{ indentStr, @TypeOf(funDecl) });
             if (funDecl.storageClass) |sc| {
                 print("{any} ", .{sc});
             }
-            print("{any} {s}(", .{ funDecl.type, funDecl.name });
+            print("{s} {s}(", .{ @tagName(funDecl.type), funDecl.name });
             for (funDecl.params) |param| {
                 print("{s} ", .{param.name});
             }
@@ -199,27 +202,16 @@ fn printExpression(expr: Parser.Expression, indent: usize) void {
     }
     defer std.heap.page_allocator.free(indentStr);
 
-    print("{s}{s}(", .{ indentStr, @tagName(expr) });
+    print("{s}{s} (", .{ indentStr, @tagName(expr) });
     switch (expr) {
-        .Cast => |cast| {
-            print("{s}( {s} )", .{ indentStr, @tagName(cast.target.type.?) });
-            printExpression(cast.exp.*, indent + 4);
-            print("{s}\n", .{indentStr});
-        },
-        .Constant => |constant| switch (constant) {
-            .int => |int| print("int {d})\n", .{int}),
-            .long => |long| print("long {d})\n", .{long}),
-        },
-        .Var => print("{s})\n", .{expr.Var.name}),
-        .Unary => |unary| {
-            print("\n", .{});
-            print("\n{s}  operation: {s}", .{ indentStr, @tagName(unary.operator) });
-            print("\n{s}  factor:\n", .{indentStr});
-            printExpression(unary.operand.*, indent + 4);
+        .Assignment => |assign| {
+            std.debug.print("{s}  lhs:\n", .{indentStr});
+            printExpression(assign.lhs.*, indent + 4);
+            std.debug.print("{s}  rhs:\n", .{indentStr});
+            printExpression(assign.rhs.*, indent + 4);
             print("{s})\n", .{indentStr});
         },
         .Binary => |binary| {
-            print("\n", .{});
             print("{s}  left:\n", .{indentStr});
             printExpression(expr.Binary.left.*, indent + 4);
             print("{s}  operator: {s}\n", .{ indentStr, @tagName(binary.operator) });
@@ -227,23 +219,13 @@ fn printExpression(expr: Parser.Expression, indent: usize) void {
             printExpression(expr.Binary.right.*, indent + 4);
             print("{s})\n", .{indentStr});
         },
-        .Assignment => |assign| {
-            print("\n", .{});
-            std.debug.print("{s}  lhs:\n", .{indentStr});
-            printExpression(assign.lhs.*, indent + 4);
-            std.debug.print("{s}  rhs:\n", .{indentStr});
-            printExpression(assign.rhs.*, indent + 4);
-            print("{s})\n", .{indentStr});
+        .Cast => |cast| {
+            print("( {s} ) ", .{@tagName(cast.target.type.?)});
+            printExpression(cast.exp.*, 0);
         },
-        .Ternary => |ternary| {
-            print("\n", .{});
-            std.debug.print("{s}  condition:\n", .{indentStr});
-            printExpression(ternary.condition.*, indent + 4);
-            std.debug.print("{s}  thenStmt:\n", .{indentStr});
-            printExpression(ternary.thenStmt.*, indent + 4);
-            std.debug.print("{s}  elseStmt:\n", .{indentStr});
-            printExpression(ternary.elseStmt.*, indent + 4);
-            print("{s})\n", .{indentStr});
+        .Constant => |constant| switch (constant) {
+            .int => |int| print("int {d})\n", .{int}),
+            .long => |long| print("long {d})\n", .{long}),
         },
         .FunctionCall => |funCall| {
             print("\n  {s}{s}(\n", .{ indentStr, funCall.name });
@@ -253,10 +235,73 @@ fn printExpression(expr: Parser.Expression, indent: usize) void {
             print("  {s})\n", .{indentStr});
             print("{s})\n", .{indentStr});
         },
+        .Ternary => |ternary| {
+            std.debug.print("{s}  condition:\n", .{indentStr});
+            printExpression(ternary.condition.*, indent + 4);
+            std.debug.print("{s}  thenStmt:\n", .{indentStr});
+            printExpression(ternary.thenStmt.*, indent + 4);
+            std.debug.print("{s}  elseStmt:\n", .{indentStr});
+            printExpression(ternary.elseStmt.*, indent + 4);
+            print("{s})\n", .{indentStr});
+        },
+        .Unary => |unary| {
+            print("\n{s}  operation: {s}", .{ indentStr, @tagName(unary.operator) });
+            print("\n{s}  factor:\n", .{indentStr});
+            printExpression(unary.operand.*, indent + 4);
+            print("{s})\n", .{indentStr});
+        },
+        .Var => print("{s})\n", .{expr.Var.name}),
     }
 }
 
-pub fn printTAC(ir: TAC.Program) void {
+fn printSymbolTable(symbolTable: Symbol.Table) void {
+    std.debug.print("-------Symbol Table-------\n", .{});
+    var it = symbolTable.iterator();
+    while (it.next()) |entry| {
+        const t = entry.value_ptr.*.type;
+        const attrs = entry.value_ptr.*.attrs;
+        std.debug.print("{s}:\n", .{entry.key_ptr.*});
+        std.debug.print("  type: {s}\n", .{@tagName(t)});
+        switch (t) {
+            .FunType => {
+                if (t.FunType.params.len > 0) {
+                    std.debug.print("    params:", .{});
+                    for (t.FunType.params) |param| {
+                        std.debug.print(" {s}", .{@tagName(param.*)});
+                    }
+                    std.debug.print("\n", .{});
+                }
+                std.debug.print("    ret: {s}\n", .{@tagName(t.FunType.ret.*)});
+            },
+            .Int, .Long => {},
+        }
+        std.debug.print("  attrs: {s}\n", .{@tagName(attrs)});
+        switch (attrs) {
+            .Fun => |fun| {
+                std.debug.print("  global: {any}\n", .{fun.global});
+                std.debug.print("  defined: {any}\n", .{fun.defined});
+            },
+            .Static => |static| {
+                std.debug.print("  global: {any}\n", .{static.global});
+                std.debug.print("  initialValue:", .{});
+                switch (static.initialValue) {
+                    .Tentative, .None => std.debug.print("{any}\n", .{@tagName(static.initialValue)}),
+                    .Initial => |init| switch (init) {
+                        .int => |int| {
+                            std.debug.print("{any}: {d}", .{ @tagName(static.initialValue), int });
+                        },
+                        .long => |long| {
+                            std.debug.print("{any}: {d}", .{ @tagName(static.initialValue), long });
+                        },
+                    },
+                }
+            },
+            .Local => {},
+        }
+    }
+}
+
+pub fn printTAC(ir: TAC.Program, symbolTable: Symbol.Table) void {
     const program = ir;
     print("{any} (\n", .{@TypeOf(program)});
     for (program.topLevel) |topLevel| {
@@ -266,6 +311,7 @@ pub fn printTAC(ir: TAC.Program) void {
         }
     }
     print(")\n", .{});
+    printSymbolTable(symbolTable);
 }
 
 fn printTACFunction(function: TAC.Function) void {
