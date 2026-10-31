@@ -2,48 +2,14 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const ArrayList = std.ArrayList;
 
+const Parser = @import("../Parser.zig");
 const TAC = @import("../TAC.zig");
 
 pub const InstructionList = ArrayList(Instruction);
 
 pub const ARG_REGISTERS = [_]Reg{ .di, .si, .dx, .cx, .r8, .r9 };
-pub const INT_SIZE_BYTES: isize = 4;
-pub const WORD_SIZE_BYTES: isize = 8;
-
-const InstructionTag = enum {
-    Mov,
-    Push,
-    Call,
-    Ret,
-    Unary,
-    AllocateStack,
-    DeallocateStack,
-    Binary,
-    Cdq,
-    Idiv,
-    Cmp,
-    Jmp,
-    JmpCC,
-    SetCC,
-    Label,
-};
-pub const Instruction = union(InstructionTag) {
-    Mov: Mov,
-    Push: Push,
-    Call: Call,
-    Ret: Ret,
-    Unary: Unary,
-    AllocateStack: AllocateStack,
-    DeallocateStack: DeallocateStack,
-    Binary: Binary,
-    Cdq: Cdq,
-    Idiv: Idiv,
-    Cmp: Cmp,
-    Jmp: Jmp,
-    JmpCC: JmpCC,
-    SetCC: SetCC,
-    Label: Label,
-};
+pub const LONGWORD_BYTES: isize = 4;
+pub const QUADWORD_BYTES: isize = 8;
 
 pub fn funCallToAssembly(allocator: Allocator, funCall: TAC.FunCall) ![]Instruction {
     var assembly: ArrayList(Instruction) = .empty;
@@ -60,7 +26,7 @@ pub fn funCallToAssembly(allocator: Allocator, funCall: TAC.FunCall) ![]Instruct
         if ((funCall.args.len - ARG_REGISTERS.len) % 2 == 0) {
             allocatedStack = 0;
         } else {
-            allocatedStack = WORD_SIZE_BYTES;
+            allocatedStack = QUADWORD_BYTES;
             try assembly.append(allocator, .{ .AllocateStack = .{ .stackSpace = allocatedStack } });
         }
     }
@@ -81,7 +47,7 @@ pub fn funCallToAssembly(allocator: Allocator, funCall: TAC.FunCall) ![]Instruct
                 });
             },
         }
-        allocatedStack += WORD_SIZE_BYTES;
+        allocatedStack += QUADWORD_BYTES;
     }
     while (i > 0) { // Move arguments in corresponding stack registers
         i -= 1;
@@ -111,72 +77,41 @@ pub fn funCallToAssembly(allocator: Allocator, funCall: TAC.FunCall) ![]Instruct
     return try assembly.toOwnedSlice(allocator);
 }
 
-pub const Mov = struct {
-    src: Operand,
-    dst: Operand,
-
-    pub fn toAssembly(allocator: Allocator, copy: TAC.Copy) []Instruction {
-        const src: Operand = switch (copy.src) {
-            .Constant => |constant| .{ .Imm = constant.int },
-            .Var => |pseudo| .{ .Pseudo = pseudo },
-        };
-        const dst: Operand = switch (copy.dst) {
-            .Constant => |constant| .{ .Imm = constant.int },
-            .Var => |pseudo| .{ .Pseudo = pseudo },
-        };
-        return allocator.dupe(Instruction, &.{.{ .Mov = .{ .src = src, .dst = dst } }}) catch allocError();
-    }
+const InstructionTag = enum {
+    AllocateStack,
+    Binary,
+    Call,
+    Cdq,
+    Cmp,
+    DeallocateStack,
+    Idiv,
+    Jmp,
+    JmpCC,
+    Label,
+    Mov,
+    Movsx,
+    Push,
+    Ret,
+    SetCC,
+    Unary,
 };
-
-pub const Push = struct {
-    operand: Operand,
-};
-
-pub const Call = struct {
-    identifier: Identifier,
-};
-
-pub const Ret = struct {
-    pub fn toAssembly(allocator: Allocator, ret: TAC.Return) []Instruction {
-        const val: Operand = switch (ret.val) {
-            .Constant => |constant| .{ .Imm = constant.int },
-            .Var => |pseudo| .{ .Pseudo = pseudo },
-        };
-
-        return allocator.dupe(Instruction, &.{
-            .{ .Mov = .{ .src = val, .dst = .{ .Reg = .ax } } },
-            .{ .Ret = .{} },
-        }) catch allocError();
-    }
-};
-
-pub const Unary = struct {
-    pub const Operator = TAC.Unary.Operator;
-
-    operator: Operator,
-    operand: Operand,
-
-    pub fn toAssembly(allocator: Allocator, unary: TAC.Unary) []Instruction {
-        const src: Operand = switch (unary.src) {
-            .Constant => |constant| .{ .Imm = constant.int },
-            .Var => |pseudo| .{ .Pseudo = pseudo },
-        };
-        const dst: Operand = .{ .Pseudo = unary.dst.Var };
-        return allocator.dupe(Instruction, switch (unary.operator) {
-            .Not => &.{
-                .{ .Cmp = .{ .arg1 = .{ .Imm = 0 }, .arg2 = src } },
-                .{ .Mov = .{ .src = .{ .Imm = 0 }, .dst = dst } },
-                .{ .SetCC = .{ .condition = .E, .operand = dst } },
-            },
-            .Negate, .Complement => &.{
-                .{ .Mov = .{ .src = src, .dst = .{ .Pseudo = unary.dst.Var } } },
-                .{ .Unary = .{ .operator = unary.operator, .operand = dst } },
-            },
-            .Dec, .Inc => &.{
-                .{ .Unary = .{ .operator = unary.operator, .operand = src } },
-            },
-        }) catch allocError();
-    }
+pub const Instruction = union(InstructionTag) {
+    AllocateStack: AllocateStack,
+    Binary: Binary,
+    Call: Call,
+    Cdq: Cdq,
+    Cmp: Cmp,
+    DeallocateStack: DeallocateStack,
+    Idiv: Idiv,
+    Jmp: Jmp,
+    JmpCC: JmpCC,
+    Label: Label,
+    Mov: Mov,
+    Movsx: Movsx,
+    Push: Push,
+    Ret: Ret,
+    SetCC: SetCC,
+    Unary: Unary,
 };
 
 pub const AllocateStack = struct {
@@ -185,10 +120,6 @@ pub const AllocateStack = struct {
     pub fn prepend(allocator: Allocator, stackSpace: isize) []Instruction {
         return allocator.dupe(Instruction, .{.{ .AllocateStack = .{ .stackSpace = stackSpace } }}) catch std.process.exit(0);
     }
-};
-
-pub const DeallocateStack = struct {
-    int: usize,
 };
 
 pub const Binary = struct {
@@ -250,17 +181,18 @@ pub const Binary = struct {
     }
 };
 
+pub const Call = struct { identifier: []const u8 };
+
 pub const Cdq = struct {}; // EDX:EAX:= sign-extend of EAX.
+
+pub const Cmp = struct { arg1: Operand, arg2: Operand };
+
+pub const DeallocateStack = struct { int: usize };
 
 pub const Idiv = struct { operand: Operand };
 
-pub const Cmp = struct {
-    arg1: Operand,
-    arg2: Operand,
-};
-
 pub const Jmp = struct {
-    target: Identifier,
+    target: []const u8,
 
     pub fn toAssembly(allocator: Allocator, jmp: TAC.Jump) []Instruction {
         return allocator.dupe(Instruction, &.{.{ .Jmp = .{ .target = jmp.target } }}) catch allocError();
@@ -269,7 +201,7 @@ pub const Jmp = struct {
 
 pub const JmpCC = struct {
     condition: ConditionCode,
-    target: Identifier,
+    target: []const u8,
 
     pub fn toAssembly(allocator: Allocator, jmpInstr: TAC.Instruction) []Instruction {
         return switch (jmpInstr) {
@@ -298,23 +230,83 @@ pub const JmpCC = struct {
     }
 };
 
-pub const SetCC = struct { condition: ConditionCode, operand: Operand };
-
 pub const Label = struct {
-    id: Identifier,
+    id: []const u8,
 
     pub fn toAssembly(allocator: Allocator, label: TAC.Label) []Instruction {
         return allocator.dupe(Instruction, &.{.{ .Label = .{ .id = label.identifier } }}) catch allocError();
     }
 };
 
-const OperandTag = enum {
-    Imm,
-    Reg,
-    Pseudo,
-    Stack,
-    Data,
+pub const Mov = struct {
+    src: Operand,
+    dst: Operand,
+
+    pub fn toAssembly(allocator: Allocator, copy: TAC.Copy) []Instruction {
+        const src: Operand = switch (copy.src) {
+            .Constant => |constant| .{ .Imm = constant.int },
+            .Var => |pseudo| .{ .Pseudo = pseudo },
+        };
+        const dst: Operand = switch (copy.dst) {
+            .Constant => |constant| .{ .Imm = constant.int },
+            .Var => |pseudo| .{ .Pseudo = pseudo },
+        };
+        return allocator.dupe(Instruction, &.{.{ .Mov = .{ .src = src, .dst = dst } }}) catch allocError();
+    }
 };
+
+/// Sign-extended move (cast 4-byte to 8-byte)
+pub const Movsx = struct { src: Operand, dst: Operand };
+
+pub const Push = struct { operand: Operand };
+
+pub const Ret = struct {
+    pub fn toAssembly(allocator: Allocator, ret: TAC.Return) []Instruction {
+        const val: Operand = switch (ret.val) {
+            .Constant => |constant| .{ .Imm = constant.int },
+            .Var => |pseudo| .{ .Pseudo = pseudo },
+        };
+
+        return allocator.dupe(Instruction, &.{
+            .{ .Mov = .{ .src = val, .dst = .{ .Reg = .ax } } },
+            .{ .Ret = .{} },
+        }) catch allocError();
+    }
+};
+
+const ConditionCode = enum { E, G, GE, L, LE, NE };
+pub const SetCC = struct { condition: ConditionCode, operand: Operand };
+
+pub const Unary = struct {
+    pub const Operator = TAC.Unary.Operator;
+
+    operator: Operator,
+    operand: Operand,
+
+    pub fn toAssembly(allocator: Allocator, unary: TAC.Unary) []Instruction {
+        const src: Operand = switch (unary.src) {
+            .Constant => |constant| .{ .Imm = constant.int },
+            .Var => |pseudo| .{ .Pseudo = pseudo },
+        };
+        const dst: Operand = .{ .Pseudo = unary.dst.Var };
+        return allocator.dupe(Instruction, switch (unary.operator) {
+            .Not => &.{
+                .{ .Cmp = .{ .arg1 = .{ .Imm = 0 }, .arg2 = src } },
+                .{ .Mov = .{ .src = .{ .Imm = 0 }, .dst = dst } },
+                .{ .SetCC = .{ .condition = .E, .operand = dst } },
+            },
+            .Negate, .Complement => &.{
+                .{ .Mov = .{ .src = src, .dst = .{ .Pseudo = unary.dst.Var } } },
+                .{ .Unary = .{ .operator = unary.operator, .operand = dst } },
+            },
+            .Dec, .Inc => &.{
+                .{ .Unary = .{ .operator = unary.operator, .operand = src } },
+            },
+        }) catch allocError();
+    }
+};
+
+const OperandTag = enum { Imm, Reg, Pseudo, Stack, Data };
 pub const Operand = union(OperandTag) {
     Imm: i32,
     Reg: Reg,
@@ -323,28 +315,12 @@ pub const Operand = union(OperandTag) {
     Data: []const u8,
 };
 
-pub const Reg = enum {
-    ax,
-    cx,
-    cl,
-    dx,
-    di,
-    si,
-    r8,
-    r9,
-    r10,
-    r11,
-};
+pub const Reg = enum { ax, cx, cl, dx, di, si, r8, r9, r10, r11 };
 
-const Identifier = []const u8;
-
-const ConditionCode = enum {
-    E,
-    G,
-    GE,
-    L,
-    LE,
-    NE,
+const TypeTag = enum { Long, Quad };
+const Type = union(TypeTag) {
+    Long: i32,
+    Quad: i64,
 };
 
 pub fn allocError() noreturn {

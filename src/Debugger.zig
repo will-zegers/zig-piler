@@ -393,75 +393,23 @@ pub fn printAssemblerAST(ast: Assembler.Assembly) void {
 fn printAssemblerFunction(instr: Assembler.Instruction) void {
     print("      {s} (", .{@tagName(instr)});
     switch (instr) {
-        .Push => |push| {
-            switch (push.operand) {
-                .Imm => |imm| print("src: Imm({d}) ", .{imm}),
-                .Pseudo => |reg| print("src: Pseudo({s}) ", .{reg}),
-                .Reg => |reg| print("src: Reg({s}) ", .{@tagName(reg)}),
-                .Stack => |stack| print("src: Stack({d}) ", .{stack}),
-                .Data => |data| print("src: Data({s}) ", .{data}),
-            }
-        },
-        .Call => |call| print("name: {s}", .{call.identifier}),
-        .DeallocateStack => |deall| print("int: {d}", .{deall.int}),
-        .Ret, .Cdq => {},
-        .Mov => |mov| {
-            switch (mov.src) {
-                .Imm => |imm| print("src: Imm({d}) ", .{imm}),
-                .Pseudo => |reg| print("src: Pseudo({s}) ", .{reg}),
-                .Reg => |reg| print("src: Reg({s}) ", .{@tagName(reg)}),
-                .Stack => |stack| print("src: Stack({d}) ", .{stack}),
-                .Data => |data| print("src: Data({s}) ", .{data}),
-            }
-            switch (mov.dst) {
-                .Imm => |imm| print("dst: Imm({d})", .{imm}),
-                .Pseudo => |reg| print("dst: Pseudo({s})", .{reg}),
-                .Reg => |reg| print("dst: Reg({s})", .{@tagName(reg)}),
-                .Stack => |stack| print("dst: Stack({d})", .{stack}),
-                .Data => |data| print("dst: Data({s}) ", .{data}),
-            }
-        },
-        .Unary => |unary| {
-            print("operator={s} ", .{@tagName(unary.operator)});
-            switch (unary.operand) {
-                .Imm => |imm| print("dst: Imm({d})", .{imm}),
-                .Pseudo => |reg| print("dst: Pseudo({s})", .{reg}),
-                .Reg => |reg| print("dst: Reg({s})", .{@tagName(reg)}),
-                .Stack => |stack| print("dst: Stack({d})", .{stack}),
-                .Data => |data| print("dst: Data({s}) ", .{data}),
-            }
-        },
         .AllocateStack => |allocStack| {
             print("int: {d}", .{allocStack.stackSpace});
         },
         .Binary => |binary| {
             print("operator: {s} ", .{@tagName(binary.operator)});
-            switch (binary.src) {
-                .Imm => |imm| print("src: Imm({d}) ", .{imm}),
-                .Pseudo => |reg| print("src: Pseudo({s}) ", .{reg}),
-                .Reg => |reg| print("src: Reg({s}) ", .{@tagName(reg)}),
-                .Stack => |stack| print("src: Stack({d}) ", .{stack}),
-                .Data => |data| print("src: Data({s}) ", .{data}),
-            }
-            switch (binary.dst) {
-                .Imm => |imm| print("dst: Imm({d})", .{imm}),
-                .Pseudo => |reg| print("dst: Pseudo({s})", .{reg}),
-                .Reg => |reg| print("dst: Reg({s})", .{@tagName(reg)}),
-                .Stack => |stack| print("dst: Stack({d})", .{stack}),
-                .Data => |data| print("dst: Data({s}) ", .{data}),
-            }
+            printOperand("src: ", binary.src);
+            printOperand("dst: ", binary.dst);
         },
-        .Idiv => |idiv| {
-            switch (idiv.operand) {
-                .Imm => |imm| print("src: Imm({d})", .{imm}),
-                .Pseudo => |reg| print("src: Pseudo({s})", .{reg}),
-                .Reg => |reg| print("src: Reg({s})", .{@tagName(reg)}),
-                .Stack => |stack| print("src: Stack({d})", .{stack}),
-                .Data => |data| print("src: Data({s}) ", .{data}),
-            }
-        },
+        .Call => |call| print("name: {s}", .{call.identifier}),
         .Cmp => |cmp| {
             std.debug.print("arg1: {any}, arg2: {any}", .{ cmp.arg1, cmp.arg2 });
+        },
+        .DeallocateStack => |deall| {
+            print("int: {d}", .{deall.int});
+        },
+        .Idiv => |idiv| {
+            printOperand("src: ", idiv.operand);
         },
         .Jmp => |jmp| {
             std.debug.print("target: {s}", .{jmp.target});
@@ -469,20 +417,41 @@ fn printAssemblerFunction(instr: Assembler.Instruction) void {
         .JmpCC => |jmp| {
             std.debug.print("condition: {s}, target: {s}", .{ @tagName(jmp.condition), jmp.target });
         },
-        .SetCC => |set| {
-            switch (set.operand) {
-                .Imm => std.debug.print("condition: {s}, target: Imm({d})", .{ @tagName(set.condition), set.operand.Imm }),
-                .Pseudo => std.debug.print("condition: {s}, target: Pseudo({s})", .{ @tagName(set.condition), set.operand.Pseudo }),
-                .Reg => std.debug.print("condition: {s}, target: Reg({s})", .{ @tagName(set.condition), @tagName(set.operand.Reg) }),
-                .Stack => std.debug.print("condition: {s}, target: Stack({d})", .{ @tagName(set.condition), set.operand.Stack }),
-                .Data => std.debug.print("condition: {s}, target: Data({s})", .{ @tagName(set.condition), set.operand.Data }),
-            }
-        },
         .Label => |label| {
             std.debug.print("id: {s}", .{label.id});
         },
+        .Mov => |mov| {
+            printOperand("src: ", mov.src);
+            printOperand("dst: ", mov.dst);
+        },
+        .Push => |push| {
+            printOperand("src: ", push.operand);
+        },
+        .Movsx => |movsx| {
+            printOperand("src: ", movsx.src);
+            printOperand("dst: ", movsx.dst);
+        },
+        .Ret, .Cdq => {},
+        .SetCC => |set| {
+            std.debug.print("condition: {s}, ", .{@tagName(set.condition)});
+            printOperand("target: ", set.operand);
+        },
+        .Unary => |unary| {
+            print("operator: {s} ", .{@tagName(unary.operator)});
+            printOperand("dst: ", unary.operand);
+        },
     }
     print(")\n", .{});
+}
+
+fn printOperand(prefix: []const u8, operand: Assembler.Operand) void {
+    switch (operand) {
+        .Imm => print("{s}Imm({d})", .{ prefix, operand.Imm }),
+        .Pseudo => print("{s}Pseudo({s})", .{ prefix, operand.Pseudo }),
+        .Reg => print("{s}Reg({s})", .{ prefix, @tagName(operand.Reg) }),
+        .Stack => print("{s}Stack({d})", .{ prefix, operand.Stack }),
+        .Data => print("{s}Data({s}) ", .{ prefix, operand.Data }),
+    }
 }
 
 pub fn allocError() noreturn {

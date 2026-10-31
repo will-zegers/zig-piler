@@ -4,6 +4,7 @@ const Allocator = std.mem.Allocator;
 const ArrayList = std.ArrayList;
 const StringHashMap = std.StringHashMap;
 
+const Parser = @import("Parser.zig");
 const Symbol = @import("Semantic/Symbols.zig");
 const TAC = @import("TAC.zig");
 
@@ -13,8 +14,8 @@ pub const Instruction = instruction.Instruction;
 pub const Operand = instruction.Operand;
 pub const Reg = instruction.Reg;
 const ARG_REGISTERS = instruction.ARG_REGISTERS;
-const INT_SIZE_BYTES = instruction.INT_SIZE_BYTES;
-const WORD_SIZE_BYTES = instruction.WORD_SIZE_BYTES;
+const LONGWORD_BYTES = instruction.LONGWORD_BYTES;
+const QUADWORD_BYTES = instruction.QUADWORD_BYTES;
 const Unary = instruction.Unary;
 const Ret = instruction.Ret;
 const Binary = instruction.Binary;
@@ -61,9 +62,10 @@ pub const Function = struct {
 };
 
 pub const StaticVariable = struct {
+    type: Parser.Type,
     name: []const u8,
     global: bool,
-    init: TAC.Constant,
+    init: Symbol.StaticInit,
 };
 
 const TopLevelTag = enum { Function, StaticVariable };
@@ -84,10 +86,12 @@ pub fn assemble(allocator: Allocator, symbols: Symbol.Table, tree: TAC.Program) 
                 topLevelList.append(allocator, .{ .Function = assembly }) catch allocError();
             },
             .StaticVariable => |staticVar| {
+                const entry = symbols.get(staticVar.identifier).?;
                 topLevelList.append(allocator, .{ .StaticVariable = .{
+                    .type = entry.type,
                     .name = staticVar.identifier,
                     .global = staticVar.global,
-                    .init = staticVar.init.Initial,
+                    .init = staticVar.init,
                 } }) catch allocError();
             },
         }
@@ -119,12 +123,12 @@ pub fn assembleFunction(allocator: Allocator, function: TAC.Function, defined: *
 
     // Since the stack args already exist in memory, add an entry to the pseudo
     // table for the already existing stack offsets
-    var stackPointerOffset: isize = 2 * WORD_SIZE_BYTES; // return-address + caller base-pointer
+    var stackPointerOffset: isize = 2 * QUADWORD_BYTES; // return-address + caller base-pointer
     while (i < function.params.len) {
         pseudoMap.put(function.params[i].unique.?, stackPointerOffset) catch allocError();
 
         i += 1;
-        stackPointerOffset += WORD_SIZE_BYTES;
+        stackPointerOffset += QUADWORD_BYTES;
     }
 
     // First pass to build Assembly AST
@@ -217,7 +221,7 @@ fn replaceIfPseudo(map: *std.StringHashMap(isize), stackPointer: *isize, operand
         }
 
         if (map.get(key) == null) {
-            stackPointer.* -= INT_SIZE_BYTES;
+            stackPointer.* -= LONGWORD_BYTES;
             map.put(key, stackPointer.*) catch allocError();
         }
         const value = map.get(key).?;
