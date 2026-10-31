@@ -63,7 +63,7 @@ pub const Function = struct {
 pub const StaticVariable = struct {
     name: []const u8,
     global: bool,
-    int: i32,
+    init: TAC.Constant,
 };
 
 const TopLevelTag = enum { Function, StaticVariable };
@@ -72,10 +72,10 @@ const TopLevel = union(TopLevelTag) {
     StaticVariable: StaticVariable,
 };
 
-pub fn assemble(allocator: Allocator, tree: TAC.Program) Assembly {
+pub fn assemble(allocator: Allocator, symbols: Symbol.Table, tree: TAC.Program) Assembly {
     var topLevelList: ArrayList(TopLevel) = .empty;
     var defined: StringHashMap(bool) = .init(allocator);
-    SymbolTable = tree.symbols;
+    SymbolTable = symbols;
 
     for (tree.topLevel) |topLevel| {
         switch (topLevel) {
@@ -87,7 +87,7 @@ pub fn assemble(allocator: Allocator, tree: TAC.Program) Assembly {
                 topLevelList.append(allocator, .{ .StaticVariable = .{
                     .name = staticVar.identifier,
                     .global = staticVar.global,
-                    .int = staticVar.int,
+                    .init = staticVar.init.Initial,
                 } }) catch allocError();
             },
         }
@@ -130,14 +130,16 @@ pub fn assembleFunction(allocator: Allocator, function: TAC.Function, defined: *
     // First pass to build Assembly AST
     for (function.body) |instr| {
         const assembly = switch (instr) {
-            .Unary => Unary.toAssembly(allocator, instr.Unary),
-            .Return => Ret.toAssembly(allocator, instr.Return),
             .Binary => Binary.toAssembly(allocator, instr.Binary),
             .Copy => Mov.toAssembly(allocator, instr.Copy),
+            .FunCall => instruction.funCallToAssembly(allocator, instr.FunCall) catch allocError(),
             .Jump => Jmp.toAssembly(allocator, instr.Jump),
             .JumpIfZero, .JumpIfNotZero => JmpCC.toAssembly(allocator, instr),
             .Label => Label.toAssembly(allocator, instr.Label),
-            .FunCall => instruction.funCallToAssembly(allocator, instr.FunCall) catch allocError(),
+            .Return => Ret.toAssembly(allocator, instr.Return),
+            .SignExtend => unreachable,
+            .Truncate => unreachable,
+            .Unary => Unary.toAssembly(allocator, instr.Unary),
         };
         defer allocator.free(assembly);
 

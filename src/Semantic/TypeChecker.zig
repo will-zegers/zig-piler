@@ -16,7 +16,7 @@ const Type = Parser.Type;
 const VarDecl = Parser.VarDecl;
 
 const Error = @import("Error.zig");
-const Symbols = @import("Symbols.zig");
+const Symbol = @import("Symbols.zig");
 
 // Rather than pass around an entire Context, to keep things simple the error
 // reporting will be handled by a global object. TODO: maybe revisit for a better
@@ -26,7 +26,7 @@ var FunctionName: ?[]const u8 = null;
 
 const TypeChecker = @This();
 
-pub fn run(allocator: Allocator, symbols: *Symbols.Table, errorReporter: *Error.Reporter, tree: *AST) void {
+pub fn run(allocator: Allocator, symbols: *Symbol.Table, errorReporter: *Error.Reporter, tree: *AST) void {
     ErrorReporter = errorReporter;
 
     for (tree.declarations) |*decl| {
@@ -37,14 +37,14 @@ pub fn run(allocator: Allocator, symbols: *Symbols.Table, errorReporter: *Error.
     }
 }
 
-fn typeCheckLocalDeclaration(allocator: Allocator, symbols: *Symbols.Table, decl: *Declaration) void {
+fn typeCheckLocalDeclaration(allocator: Allocator, symbols: *Symbol.Table, decl: *Declaration) void {
     switch (decl.*) {
         .FunDecl => |*funDecl| typeCheckFunDecl(allocator, symbols, funDecl),
         .VarDecl => |*varDecl| typeCheckLocalVarDecl(allocator, symbols, varDecl),
     }
 }
 
-fn typeCheckFunDecl(allocator: Allocator, symbols: *Symbols.Table, decl: *FunDecl) void {
+fn typeCheckFunDecl(allocator: Allocator, symbols: *Symbol.Table, decl: *FunDecl) void {
     var isDefined: bool = decl.body != null;
     var isGlobal: bool = decl.storageClass != .Static;
 
@@ -74,7 +74,7 @@ fn typeCheckFunDecl(allocator: Allocator, symbols: *Symbols.Table, decl: *FunDec
         }
     }
 
-    const attrs: Symbols.Attrs = .{ .Fun = .{
+    const attrs: Symbol.Attrs = .{ .Fun = .{
         .defined = isDefined or decl.body != null,
         .global = isGlobal,
     } };
@@ -105,8 +105,8 @@ fn typeCheckFunDecl(allocator: Allocator, symbols: *Symbols.Table, decl: *FunDec
     }
 }
 
-fn typeCheckFileScopeVarDecl(symbols: *Symbols.Table, decl: *VarDecl) void {
-    var initialValue: Symbols.Static.InitialValue = undefined;
+fn typeCheckFileScopeVarDecl(symbols: *Symbol.Table, decl: *VarDecl) void {
+    var initialValue: Symbol.Static.InitialValue = undefined;
     if (decl.init) |init| {
         // TODO: extend initialize to use constant binary and unary expressions
         if (init.Assignment.rhs.* == .Constant) {
@@ -155,11 +155,11 @@ fn typeCheckFileScopeVarDecl(symbols: *Symbols.Table, decl: *VarDecl) void {
         }
     }
 
-    const attrs: Symbols.Attrs = .{ .Static = .{ .initialValue = initialValue, .global = isGlobal } };
+    const attrs: Symbol.Attrs = .{ .Static = .{ .initialValue = initialValue, .global = isGlobal } };
     symbols.put(decl.name, .{ .type = decl.type, .attrs = attrs }) catch allocError();
 }
 
-fn typeCheckLocalVarDecl(allocator: Allocator, symbols: *Symbols.Table, decl: *VarDecl) void {
+fn typeCheckLocalVarDecl(allocator: Allocator, symbols: *Symbol.Table, decl: *VarDecl) void {
     if (decl.storageClass == .Extern) {
         if (decl.init) |_| {
             ErrorReporter.report(.LocalExternDefined, decl.lineIndex, decl.name);
@@ -170,11 +170,11 @@ fn typeCheckLocalVarDecl(allocator: Allocator, symbols: *Symbols.Table, decl: *V
                 return;
             }
         } else {
-            const attrs: Symbols.Attrs = .{ .Static = .{ .initialValue = .None, .global = true } };
+            const attrs: Symbol.Attrs = .{ .Static = .{ .initialValue = .None, .global = true } };
             symbols.put(decl.name, .{ .type = decl.type, .attrs = attrs }) catch allocError();
         }
     } else if (decl.storageClass == .Static) {
-        var initialValue: Symbols.Static.InitialValue = switch (decl.type) {
+        var initialValue: Symbol.Static.InitialValue = switch (decl.type) {
             .Int => .{ .Initial = .{ .int = 0 } },
             .Long => .{ .Initial = .{ .long = 0 } },
             .FunType => unreachable,
@@ -188,7 +188,7 @@ fn typeCheckLocalVarDecl(allocator: Allocator, symbols: *Symbols.Table, decl: *V
             }
         }
 
-        const attrs: Symbols.Attrs = .{ .Static = .{ .initialValue = initialValue, .global = true } };
+        const attrs: Symbol.Attrs = .{ .Static = .{ .initialValue = initialValue, .global = true } };
         symbols.put(decl.unique.?, .{ .type = decl.type, .attrs = attrs }) catch allocError();
     } else { // automatic (local scope) storage class
         symbols.put(decl.unique.?, .{ .type = decl.type, .attrs = .Local }) catch allocError();
@@ -198,7 +198,7 @@ fn typeCheckLocalVarDecl(allocator: Allocator, symbols: *Symbols.Table, decl: *V
     }
 }
 
-fn typeCheckBlock(allocator: Allocator, symbols: *Symbols.Table, block: *Block) void {
+fn typeCheckBlock(allocator: Allocator, symbols: *Symbol.Table, block: *Block) void {
     for (block.items) |*item| {
         switch (item.*) {
             .Declaration => |*decl| typeCheckLocalDeclaration(allocator, symbols, decl),
@@ -207,7 +207,7 @@ fn typeCheckBlock(allocator: Allocator, symbols: *Symbols.Table, block: *Block) 
     }
 }
 
-fn typeCheckStatement(allocator: Allocator, symbols: *Symbols.Table, stmt: *Statement) void {
+fn typeCheckStatement(allocator: Allocator, symbols: *Symbol.Table, stmt: *Statement) void {
     switch (stmt.*) {
         .Compound => |*compound| typeCheckBlock(allocator, symbols, compound),
         .Return => |*ret| {
@@ -272,7 +272,7 @@ fn typeCheckStatement(allocator: Allocator, symbols: *Symbols.Table, stmt: *Stat
 }
 
 // TODO: use constCast to make this the only function that needs mutable
-fn typeCheckExpression(allocator: Allocator, symbols: *Symbols.Table, expr: *Expression) Type {
+fn typeCheckExpression(allocator: Allocator, symbols: *Symbol.Table, expr: *Expression) Type {
     switch (expr.*) {
         .Assignment => |*assign| {
             const lType = typeCheckExpression(allocator, symbols, assign.lhs);

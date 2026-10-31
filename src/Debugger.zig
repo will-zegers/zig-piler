@@ -207,8 +207,8 @@ fn printExpression(expr: Parser.Expression, indent: usize) void {
             print("{s}\n", .{indentStr});
         },
         .Constant => |constant| switch (constant) {
-            .int => |int| print("{d})\n", .{int}),
-            .long => |long| print("{d})\n", .{long}),
+            .int => |int| print("int {d})\n", .{int}),
+            .long => |long| print("long {d})\n", .{long}),
         },
         .Var => print("{s})\n", .{expr.Var.name}),
         .Unary => |unary| {
@@ -284,43 +284,22 @@ fn printTACFunction(function: TAC.Function) void {
         switch (instr) {
             .Binary => |binary| {
                 print("operator={any}, ", .{binary.operator});
-                switch (binary.src1) {
-                    .Constant => |src1| print("src1: {d} ", .{src1.int}),
-                    .Var => |src1| print("src1: {s} ", .{src1}),
-                }
-                switch (binary.src2) {
-                    .Constant => |src2| print("src2: {d} ", .{src2.int}),
-                    .Var => |src2| print("src2: {s} ", .{src2}),
-                }
-                switch (binary.dst) {
-                    .Constant => |dst| print("dst: {d}", .{dst.int}),
-                    .Var => |dst| print("dst: {s}", .{dst}),
-                }
+                printVal("src1: ", binary.src1, ", ");
+                printVal("src2: ", binary.src2, ", ");
+                printVal("dst: ", binary.dst, "");
                 print(")\n", .{});
             },
             .Copy => |copy| {
-                switch (copy.src) {
-                    .Constant => |src| print("src: {d} ", .{src.int}),
-                    .Var => |src| print("src: {s} ", .{src}),
-                }
-                switch (copy.dst) {
-                    .Constant => |dst| print("dst: {d}", .{dst.int}),
-                    .Var => |dst| print("dst: {s}", .{dst}),
-                }
+                printVal("src: ", copy.src, ", ");
+                printVal("dst: ", copy.dst, "");
                 print(")\n", .{});
             },
             .FunCall => |funCall| {
                 print("{s}(", .{funCall.name});
                 if (funCall.args.len > 0) {
-                    switch (funCall.args[0]) {
-                        .Constant => |c| print("{d}", .{c.int}),
-                        .Var => |v| print("{s}", .{v}),
-                    }
-                    for (1..funCall.args.len) |i| {
-                        switch (funCall.args[i]) {
-                            .Constant => |c| print(", {d}", .{c.int}),
-                            .Var => |v| print(", {s}", .{v}),
-                        }
+                    printVal("", funCall.args[0], "");
+                    for (funCall.args) |arg| {
+                        printVal(", ", arg, "");
                     }
                 }
                 std.debug.print(")", .{});
@@ -333,43 +312,47 @@ fn printTACFunction(function: TAC.Function) void {
                 print("label: {s})\n", .{jump.target});
             },
             .JumpIfNotZero => |jump| {
-                switch (jump.condition) {
-                    .Constant => |cond| print("cond: {any}({d}) ", .{ @TypeOf(cond), cond.int }),
-                    .Var => |cond| print("cond: {s} ", .{cond}),
-                }
+                printVal("cond: ", jump.condition, ", ");
                 print("label: {s})\n", .{jump.target});
             },
             .JumpIfZero => |jump| {
-                switch (jump.condition) {
-                    .Constant => |cond| print("cond: {any}({d}) ", .{ @TypeOf(cond), cond.int }),
-                    .Var => |cond| print("cond: {s} ", .{cond}),
-                }
-                print("label={s})\n", .{jump.target});
+                printVal("cond: ", jump.condition, ", ");
+                print("label: {s})\n", .{jump.target});
             },
             .Return => |ret| {
-                switch (ret.val) {
-                    .Constant => |factor| print("val: {any}({d}))\n", .{ @TypeOf(factor), factor.int }),
-                    .Var => |name| print("val: {s})\n", .{name}),
-                }
+                printVal("val: ", ret.val, "");
+                print(")\n", .{});
             },
-            .SignExtend => {},
-            .Truncate => {},
+            .SignExtend => |se| {
+                printVal("src: ", se.src, ", ");
+                printVal("dst: ", se.dst, "");
+                print(")\n", .{});
+            },
+            .Truncate => |tr| {
+                printVal("src: ", tr.src, ", ");
+                printVal("dst: ", tr.dst, "");
+                print(")\n", .{});
+            },
             .Unary => |unary| {
                 print("operator={any}, ", .{unary.operator});
-                switch (unary.src) {
-                    .Constant => |src| print("src: {any}({d}), ", .{ @TypeOf(src), src.int }),
-                    .Var => |src| print("src: {s}, ", .{src}),
-                }
-                switch (unary.dst) {
-                    .Constant => |dst| print("src: {any}({d})", .{ @TypeOf(dst), dst.int }),
-                    .Var => |dst| print("dst: {s}", .{dst}),
-                }
+                printVal("src: ", unary.src, ", ");
+                printVal("dst: ", unary.dst, "");
                 print(")\n", .{});
             },
         }
     }
     print("    )\n", .{});
     print("  )\n", .{});
+}
+
+fn printVal(prefix: []const u8, val: TAC.Val, suffix: []const u8) void {
+    switch (val) {
+        .Constant => switch (val.Constant) {
+            .int => print("{s}int {d}{s}", .{ prefix, val.Constant.int, suffix }),
+            .long => print("{s}long {d}{s}", .{ prefix, val.Constant.long, suffix }),
+        },
+        .Var => print("{s}{s}{s}", .{ prefix, val.Var, suffix }),
+    }
 }
 
 fn printTACStaticVariable(staticVar: TAC.StaticVariable) void {
@@ -396,7 +379,10 @@ pub fn printAssemblerAST(ast: Assembler.Assembly) void {
                 print("  {any} (\n", .{@TypeOf(staticVar)});
                 print("    identifier={s}\n", .{staticVar.name});
                 print("    global={any}\n", .{staticVar.global});
-                print("    int={d}\n", .{staticVar.int});
+                switch (staticVar.init) {
+                    .int => print("    int: {d}\n", .{staticVar.init.int}),
+                    .long => print("    long: {d}\n", .{staticVar.init.long}),
+                }
                 print("  )\n", .{});
             },
         }

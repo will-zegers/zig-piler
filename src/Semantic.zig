@@ -10,22 +10,13 @@ const LoopLabeler = @import("Semantic/LoopLabeler.zig");
 const TypeChecker = @import("Semantic/TypeChecker.zig");
 const Error = @import("Semantic/Error.zig");
 
+pub const Symbol = @import("Semantic/Symbols.zig");
 const Context = @import("Semantic/Context.zig");
 const IdentifierMap = Context.IdentifierMap;
-const Symbols = @import("Semantic/Symbols.zig");
 
 const Parser = @import("Parser.zig");
 
-pub const AST = struct {
-    tree: Parser.AST,
-    symbols: Symbols.Table,
-
-    pub fn deinit(self: *AST) void {
-        self.symbols.deinit();
-    }
-};
-
-pub fn run(allocator: Allocator, tree: *Parser.AST, textLines: [][]const u8) AST {
+pub fn run(allocator: Allocator, tree: *Parser.AST, textLines: [][]const u8) Symbol.Table {
     var reporter = Error.Reporter.init(textLines);
 
     var context: Context = .init(allocator, &reporter);
@@ -37,9 +28,9 @@ pub fn run(allocator: Allocator, tree: *Parser.AST, textLines: [][]const u8) AST
     LoopLabeler.run(allocator, &context, tree);
     if (reporter.errorFlag) process.exit(1);
 
-    var symbols: Symbols.Table = .init(allocator);
-    TypeChecker.run(allocator, &symbols, &reporter, tree);
+    var symbolTable: Symbol.Table = .init(allocator);
+    TypeChecker.run(allocator, &symbolTable, &reporter, tree);
     if (reporter.errorFlag) process.exit(1);
 
-    return .{ .tree = tree.*, .symbols = symbols };
+    return symbolTable;
 }
