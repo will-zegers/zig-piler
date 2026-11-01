@@ -8,7 +8,7 @@ const Parser = @import("Parser.zig");
 const Symbol = @import("Semantic/Symbols.zig");
 const TAC = @import("TAC.zig");
 
-// const Patcher = @import("Assembler/Patcher.zig");
+const Patcher = @import("Assembler/Patcher.zig");
 const instruction = @import("Assembler/instruction.zig");
 pub const Instruction = instruction.Instruction;
 pub const Operand = instruction.Operand;
@@ -30,10 +30,16 @@ const Assembler = @This();
 
 pub const Assembly = Program;
 
+const EntryTag = enum {Obj, Fun};
+const Entry = union(EntryTag) {
+    Obj: struct { type: Type, isStatic: bool },
+     Fun: struct { defined: bool },
+};
+
 const Program = struct {
     allocator: Allocator,
     topLevel: []TopLevel,
-    defined: StringHashMap(bool),
+    symbols: StringHashMap(Entry),
 
     pub fn deinit(self: *Assembly) void {
         for (self.topLevel) |*topLevel| {
@@ -43,7 +49,7 @@ const Program = struct {
             }
         }
         self.allocator.free(self.topLevel);
-        self.defined.deinit();
+        self.symbols.deinit();
     }
 };
 
@@ -75,6 +81,7 @@ const TopLevel = union(TopLevelTag) {
 pub fn assemble(allocator: Allocator, symbols: Symbol.Table, tree: TAC.Program) Assembly {
     var topLevelList: ArrayList(TopLevel) = .empty;
     var defined: StringHashMap(bool) = .init(allocator);
+    defer defined.deinit();
 
     for (tree.topLevel) |topLevel| {
         switch (topLevel) {
@@ -99,10 +106,31 @@ pub fn assemble(allocator: Allocator, symbols: Symbol.Table, tree: TAC.Program) 
         }
     }
 
+    var backendSymbols: StringHashMap(Entry) = .init(allocator);
+    var it = symbols.iterator();
+    while (it.next()) |entry| {
+        const key = entry.key_ptr.*;
+        const value = entry.value_ptr.*;
+
+        backendSymbols.put(key, switch (value.type) {
+            .FunType =>  .{ .Fun = .{ .defined = defined.get(key) orelse false } },
+            .Int => switch (value.attrs) {
+                .Static => .{ .Obj = .{ .type = .Long, .isStatic = true } },
+                .Local => .{ .Obj = .{ .type = .Long, .isStatic = false } },
+                .Fun => unreachable,
+            },
+            .Long => switch (value.attrs) {
+                .Static => .{ .Obj = .{ .type = .Quad, .isStatic = true } },
+                .Local => .{ .Obj = .{ .type = .Quad, .isStatic = false } },
+                .Fun => unreachable,
+            }
+        }) catch allocError();
+    }
+
     return .{
         .allocator = allocator,
         .topLevel = topLevelList.toOwnedSlice(allocator) catch allocError(),
-        .defined = defined,
+        .symbols = backendSymbols,
     };
 }
 
@@ -149,7 +177,9 @@ pub fn assembleFunction(allocator: Allocator, symbols: Symbol.Table, function: T
     setupStack(allocator, symbols, &instructionList, &pseudoMap);
 
     // Find illegal instructions (see specifications in the Patcher module)
-    const instructions = instructionList.toOwnedSlice(allocator) catch allocError();
+    var instructions = instructionList.toOwnedSlice(allocator) catch allocError();
+    instructions = Patcher.patchInstructions(allocator, instructions);
+
 
     return .{
         .allocator = allocator,
@@ -193,7 +223,7 @@ fn setupStack(allocator: Allocator, symbols: Symbol.Table, instructions: *Instru
     }
 
     // Make sure the stack is 16-byte aligned
-    const stackSpace = 2 * 16 * @divCeil(@abs(localStack), 2 * 16);
+    const stackSpace = 16 * @divCeil(@abs(localStack), 16);
 
     // Prepend the instructions with stack space allocation based on the number of
     // pseudo registers (i.e. local variables) replaced with memory
@@ -210,17 +240,30 @@ fn setupStack(allocator: Allocator, symbols: Symbol.Table, instructions: *Instru
 fn replaceIfPseudo(symbols: Symbol.Table, map: *std.StringHashMap(isize), stackPointer: *isize, operand: *Operand) void {
     if (operand.* == .Pseudo) {
         const key = operand.Pseudo;
-        // If the pseudo register has not been mapped to a location on the stack,
-        // map it to the location in the local stack space
-        if (symbols.get(key)) |entry| {
-            if (entry.attrs == .Static) {
-                operand.* = . { .Data = key };
-                return;
-            }
+        const entry = symbols.get(key).?;
+
+        // Map static variables to .Data segment
+        if (entry.attrs == .Static) {
+            operand.* = .{ .Data = key };
+            return;
         }
 
+        // If the pseudo register has not been mapped to a location on the stack,
+        // map it to the location in the local stack space
         if (map.get(key) == null) {
-            stackPointer.* -= LONGWORD_BYTES;
+            switch (entry.type) {
+                .Int => {
+                    stackPointer.* -= LONGWORD_BYTES;
+                },
+                .Long => {
+                    stackPointer.* -= QUADWORD_BYTES;
+                    while (@rem(stackPointer.*, 8) != 0) {
+                        stackPointer.* -= 1;
+                    }
+                    // stackPointer.* = @divCeil(@abs(stackPointer.*), 8); // align to 8-bytes
+                },
+                .FunType => unreachable,
+            }
             map.put(key, stackPointer.*) catch allocError();
         }
         const value = map.get(key).?;

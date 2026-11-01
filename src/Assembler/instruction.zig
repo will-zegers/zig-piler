@@ -59,6 +59,19 @@ pub const Instruction = union(InstructionTag) {
             .Unary => Unary.toAssembly(allocator, symbols, instruction.Unary),
         };
     }
+
+    pub fn getType(self: Instruction) ?Type {
+        return switch (self) {
+            .Binary => self.Binary.type,
+            .Cdq => self.Cdq.type,
+            .Cmp => self.Cmp.type,
+            .Idiv => self.Idiv.type,
+            .Mov => self.Mov.type,
+            .Movsx => self.Movsx.type,
+            .Unary => self.Unary.type,
+            else => null,
+        };
+    }
 };
 
 pub const Binary = struct {
@@ -73,22 +86,22 @@ pub const Binary = struct {
         const src1: Operand = .fromVal(binary.src1);
         const src2: Operand = .fromVal(binary.src2);
         const dst: Operand = .{ .Pseudo = binary.dst.Var };
-        const dstType: Type = .fromVar(symbols, binary.dst.Var);
+        const t: Type = .fromVar(symbols, binary.dst.Var);
         assertTypes(symbols, src1, dst);
         assertTypes(symbols, src2, dst);
 
         return switch (binary.operator) {
             .Div, .Mod => blk: {
-                const sourceReg: Operand = switch (binary.operator) {
+                const result: Operand = switch (binary.operator) {
                     .Div => .{ .Reg = .ax },
                     .Mod => .{ .Reg = .dx },
                     else => unreachable,
                 };
                 break :blk allocator.dupe(Instruction, &.{
-                    .{ .Mov = .{ .type = dstType, .src = src1, .dst = .{ .Reg = .ax } } },
-                    .{ .Cdq = .{ .type = dstType } },
-                    .{ .Idiv = .{ .type = dstType, .operand = src2 } },
-                    .{ .Mov = .{ .type = dstType, .src = sourceReg, .dst = dst } },
+                    .{ .Mov = .{ .type = t, .src = src1, .dst = .{ .Reg = .ax } } },
+                    .{ .Cdq = .{ .type = t } },
+                    .{ .Idiv = .{ .type = t, .operand = src2 } },
+                    .{ .Mov = .{ .type = t, .src = result, .dst = dst } },
                 });
             },
             .Eq, .Gt, .Gte, .Lt, .Lte, .Neq => |op| blk: {
@@ -111,7 +124,7 @@ pub const Binary = struct {
             .AndL, .OrL => unreachable, // logical AND and OR have no binary instruction, already handled in TACky
             else => allocator.dupe(Instruction, &.{
                 .{ .Mov = .inferType(symbols, src1, dst) },
-                .{ .Binary = .{ .type = dstType, .operator = binary.operator, .src = src2, .dst = dst } },
+                .{ .Binary = .{ .type = t, .operator = binary.operator, .src = src2, .dst = dst } },
             }),
         } catch allocError();
     }
@@ -188,6 +201,7 @@ pub const Mov = struct {
         var t = dst.getType(symbols);
         if (t == null) t = src.getType(symbols);
 
+        std.debug.assert(t != null);
         return .{ .type = t.?, .src = src, .dst = dst };
     }
 };
@@ -340,8 +354,10 @@ fn assertTypes(symbols: Symbol.Table, op1: Operand, op2: Operand) void {
                 std.process.exit(1);
             }
         }
-    } else if (type1 != null and type2 != null) {
-        std.log.err("Missing types", .{});
+    } else if (type1 == null and type2 == null) {
+        std.log.err("Missing types\n", .{});
+        std.log.err("  {any}\n", .{op1});
+        std.log.err("  {any}\n", .{op2});
         std.process.exit(1);
     }
 }
@@ -376,19 +392,20 @@ fn funCallToAssembly(allocator: Allocator, symbols: Symbol.Table, funCall: TAC.F
     var i = funCall.args.len;
     while (i > ARG_REGISTERS.len) { // Push stack arguments (arguments 6 and on) first in reverse order
         i -= 1;
+        // TODO: try and squash this down, should only need one general push instruction
         switch (funCall.args[i]) {
-            .Constant => |arg| {
-                const imm = Operand.constantToImm(arg);
-                try assembly.append(allocator, .{ .Push = .{ .operand = .{ .Imm = imm } } });
-            },
+            .Constant => try assembly.append(allocator, .{ .Push = .{ .operand = .fromVal(funCall.args[i]) } }),
             .Var => |arg| {
                 switch (Type.fromVar(symbols, arg)) {
                     .Long => {
-                        try assembly.appendSlice(allocator, &.{ .{ .Mov = .inferType(symbols, .{ .Pseudo = arg }, .{ .Reg = .ax }) }, .{ .Push = .{ .operand = .{ .Reg = .ax } } } });
+                        // For long word vars, first move them into the lower bytes bytes of AX register,
+                        // then push rax (quadword register)
+                        try assembly.appendSlice(allocator, &.{
+                            .{ .Mov = .inferType(symbols, .{ .Pseudo = arg }, .{ .Reg = .ax }) },
+                            .{ .Push = .{ .operand = .{ .Reg = .ax } } },
+                        });
                     },
-                    .Quad => {
-                        try assembly.append(allocator, .{ .Push = .{ .operand = .{ .Pseudo = arg } } });
-                    },
+                    .Quad => try assembly.append(allocator, .{ .Push = .{ .operand = .fromVal(funCall.args[i]) } }),
                 }
             },
         }
@@ -396,28 +413,27 @@ fn funCallToAssembly(allocator: Allocator, symbols: Symbol.Table, funCall: TAC.F
     }
     while (i > 0) { // Move arguments in corresponding stack registers
         i -= 1;
-        switch (funCall.args[i]) {
-            .Constant => |arg| {
-                const imm = Operand.constantToImm(arg);
-                const t: Type = .fromConstant(arg);
-                try assembly.append(allocator, .{ .Mov = .{ .type = t, .src = .{ .Imm = imm }, .dst = .{ .Reg = ARG_REGISTERS[i] } } });
+        const arg = funCall.args[i];
+        try assembly.append(allocator, .{
+            .Mov = .{
+                .type = .fromVal(symbols, arg),
+                .src = .fromVal(arg),
+                .dst = .{ .Reg = ARG_REGISTERS[i] },
             },
-            .Var => |arg| {
-                const t: Type = .fromVar(symbols, arg);
-                try assembly.append(allocator, .{ .Mov = .{ .type = t, .src = .{ .Pseudo = arg }, .dst = .{ .Reg = ARG_REGISTERS[i] } } });
-            },
-        }
+        });
     }
 
     try assembly.append(allocator, .{ .Call = .{ .identifier = funCall.name } });
 
     if (allocatedStack > 0) {
-        try assembly.append(allocator, .{ .Binary = .{
-            .type = .Quad,
-            .operator = .Add,
-            .src = .{ .Imm = allocatedStack },
-            .dst = .{ .Reg = .sp },
-        } });
+        try assembly.append(allocator, .{
+            .Binary = .{
+                .type = .Quad,
+                .operator = .Add,
+                .src = .{ .Imm = allocatedStack },
+                .dst = .{ .Reg = .sp },
+            },
+        });
     }
 
     switch (funCall.dst) {
