@@ -289,8 +289,8 @@ fn typeCheckExpression(allocator: Allocator, symbols: *Symbol.Table, expr: *Expr
             const commonType = getCommonType(lType, rType);
 
             bin.type = commonType;
-            bin.left.* = castTo(allocator, bin.left, lType);
-            bin.right.* = castTo(allocator, bin.right, lType);
+            bin.left.* = castTo(allocator, bin.left, commonType);
+            bin.right.* = castTo(allocator, bin.right, commonType);
 
             return bin.type.?;
         },
@@ -346,7 +346,6 @@ fn typeCheckExpression(allocator: Allocator, symbols: *Symbol.Table, expr: *Expr
         },
         .Unary => |*un| {
             const operandType = typeCheckExpression(allocator, symbols, un.operand);
-            // std.process.exit(1);
             un.type = switch (un.operator) {
                 .Not => .Int,
                 else => operandType,

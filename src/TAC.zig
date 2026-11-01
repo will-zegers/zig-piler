@@ -23,6 +23,7 @@ pub const SignExtend = instr.SignExtend;
 pub const Truncate = instr.Truncate;
 pub const Unary = instr.Unary;
 pub const Val = instr.Val;
+pub const Var = instr.Var;
 
 pub const TAC = @This();
 

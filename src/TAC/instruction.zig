@@ -67,4 +67,4 @@ pub const Unary = struct {
 const ValTag = enum { Constant, Var };
 pub const Val = union(ValTag) { Constant: Constant, Var: Var };
 
-const Var = []const u8;
+pub const Var = []const u8;
