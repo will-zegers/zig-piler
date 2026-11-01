@@ -68,6 +68,7 @@ pub const Instruction = union(InstructionTag) {
             .Idiv => self.Idiv.type,
             .Mov => self.Mov.type,
             .Movsx => self.Movsx.type,
+            .Push => self.Push.type,
             .Unary => self.Unary.type,
             else => null,
         };
@@ -209,7 +210,7 @@ pub const Mov = struct {
 /// Sign-extended move (cast 4-byte to 8-byte)
 pub const Movsx = struct { type: Type, src: Operand, dst: Operand };
 
-pub const Push = struct { operand: Operand };
+pub const Push = struct { type: Type = .Quad, operand: Operand };
 
 pub const Ret = struct {
     pub fn toAssembly(allocator: Allocator, symbols: Symbol.Table, ret: TAC.Return) []Instruction {

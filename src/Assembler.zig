@@ -31,7 +31,7 @@ const Assembler = @This();
 pub const Assembly = Program;
 
 const EntryTag = enum {Obj, Fun};
-const Entry = union(EntryTag) {
+pub const Entry = union(EntryTag) {
     Obj: struct { type: Type, isStatic: bool },
      Fun: struct { defined: bool },
 };
@@ -194,29 +194,33 @@ fn setupStack(allocator: Allocator, symbols: Symbol.Table, instructions: *Instru
 
     for (instructions.items) |*instr| {
         switch (instr.*) {
-            .Mov => |*mov| {
-                replaceIfPseudo(symbols, pseudoMap, &localStack, &mov.src);
-                replaceIfPseudo(symbols, pseudoMap, &localStack, &mov.dst);
-            },
-            .Unary => |*unary| {
-                replaceIfPseudo(symbols, pseudoMap, &localStack, &unary.operand);
-            },
             .Binary => |*binary| {
                 replaceIfPseudo(symbols, pseudoMap, &localStack, &binary.src);
                 replaceIfPseudo(symbols, pseudoMap, &localStack, &binary.dst);
-            },
-            .Idiv => |*idiv| {
-                replaceIfPseudo(symbols, pseudoMap, &localStack, &idiv.operand);
             },
             .Cmp => |*cmp| {
                 replaceIfPseudo(symbols, pseudoMap, &localStack, &cmp.arg1);
                 replaceIfPseudo(symbols, pseudoMap, &localStack, &cmp.arg2);
             },
-            .SetCC => |*setcc| {
-                replaceIfPseudo(symbols, pseudoMap, &localStack, &setcc.operand);
+            .Idiv => |*idiv| {
+                replaceIfPseudo(symbols, pseudoMap, &localStack, &idiv.operand);
+            },
+            .Mov => |*mov| {
+                replaceIfPseudo(symbols, pseudoMap, &localStack, &mov.src);
+                replaceIfPseudo(symbols, pseudoMap, &localStack, &mov.dst);
+            },
+            .Movsx => |*movsx| {
+                replaceIfPseudo(symbols, pseudoMap, &localStack, &movsx.src);
+                replaceIfPseudo(symbols, pseudoMap, &localStack, &movsx.dst);
             },
             .Push => |*push| {
                 replaceIfPseudo(symbols, pseudoMap, &localStack, &push.operand);
+            },
+            .SetCC => |*setcc| {
+                replaceIfPseudo(symbols, pseudoMap, &localStack, &setcc.operand);
+            },
+            .Unary => |*unary| {
+                replaceIfPseudo(symbols, pseudoMap, &localStack, &unary.operand);
             },
             else => {},
         }

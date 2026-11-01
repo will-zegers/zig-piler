@@ -8,6 +8,7 @@ const process = std.process;
 
 const File = @import("File.zig");
 const Args = @import("Args.zig");
+const Symbol = @import("Semantic/Symbols.zig");
 
 const Debugger = @import("Debugger.zig");
 const Lexer = @import("Lexer.zig");
@@ -48,16 +49,16 @@ pub fn main(init: process.Init) !void {
         try sourceList.append(allocator, try allocator.dupe(u8, file.outputSrc));
 
         var tokens: Lexer.Token.Iterator = undefined;
-        var parserAST: Parser.AST = undefined;
-        var semanticAST: Semantic.AST = undefined;
+        var tree: Parser.AST = undefined;
+        var symbolTable: Symbol.Table = undefined;
         var tac: TAC.Program = undefined;
         var assembly: Assembler.Assembly = undefined;
-        defer {
-            if (stage.includes(.Lex)) tokens.deinit();
-            if (stage.includes(.Parse)) parserAST.deinit(allocator);
-            if (stage.includes(.Validate)) semanticAST.deinit();
-            if (stage.includes(.TACky)) tac.deinit();
+        defer { // FIFO deinit
             if (stage.includes(.CodeGen)) assembly.deinit();
+            if (stage.includes(.TACky)) tac.deinit();
+            if (stage.includes(.Validate)) symbolTable.deinit();
+            if (stage.includes(.Parse)) tree.deinit(allocator);
+            if (stage.includes(.Lex)) tokens.deinit();
         }
 
         if (stage.includes(.Lex)) {
@@ -76,7 +77,10 @@ pub fn main(init: process.Init) !void {
 
         if (stage.includes(.Parse)) {
             log.info("Running parser...", .{});
-            parserAST = Parser.parse(allocator, &tokens) catch {
+            tree = Parser.parse(allocator, &tokens) catch {
+                // TODO: can only catch and log one error at a time. Maybe try to
+                // make this more granular at the function/declaration level to
+                // catch more errors at once
                 const index = tokens.lineIndex;
                 log.err(" {d} | {s}\n", .{ index + 1, file.lines[index] });
                 process.exit(1);
@@ -84,33 +88,33 @@ pub fn main(init: process.Init) !void {
 
             if (debug) {
                 std.debug.print("-------parsed-------\n", .{});
-                Debugger.printParserAST(parserAST);
+                Debugger.printParserAST(tree, null);
             }
         } else return;
 
         if (stage.includes(.Validate)) {
             log.info("Running semantic analysis...", .{});
-            semanticAST = Semantic.run(allocator, &parserAST, file.lines);
+            symbolTable = Semantic.run(allocator, &tree, file.lines);
 
             if (debug) {
                 std.debug.print("-------parsed-------\n", .{});
-                Debugger.printParserAST(semanticAST.tree);
+                Debugger.printParserAST(tree, symbolTable);
             }
         } else return;
 
         if (stage.includes(.TACky)) {
             log.info("Generating Tacky...", .{});
-            tac = TAC.emit(allocator, semanticAST);
+            tac = TAC.emit(allocator, &symbolTable, tree);
 
             if (debug) {
                 std.debug.print("-------TAC-------\n", .{});
-                Debugger.printTAC(tac);
+                Debugger.printTAC(tac, symbolTable);
             }
         } else return;
 
         if (stage.includes(.CodeGen)) {
             log.info("Running assembler...", .{});
-            assembly = Assembler.assemble(allocator, tac);
+            assembly = Assembler.assemble(allocator, symbolTable, tac);
 
             if (debug) {
                 std.debug.print("------generated-------\n", .{});
