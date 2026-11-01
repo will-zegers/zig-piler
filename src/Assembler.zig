@@ -8,24 +8,23 @@ const Parser = @import("Parser.zig");
 const Symbol = @import("Semantic/Symbols.zig");
 const TAC = @import("TAC.zig");
 
-const Patcher = @import("Assembler/Patcher.zig");
+// const Patcher = @import("Assembler/Patcher.zig");
 const instruction = @import("Assembler/instruction.zig");
 pub const Instruction = instruction.Instruction;
 pub const Operand = instruction.Operand;
 pub const Reg = instruction.Reg;
+pub const Type = instruction.Type;
 const ARG_REGISTERS = instruction.ARG_REGISTERS;
 const LONGWORD_BYTES = instruction.LONGWORD_BYTES;
 const QUADWORD_BYTES = instruction.QUADWORD_BYTES;
-const Unary = instruction.Unary;
-const Ret = instruction.Ret;
 const Binary = instruction.Binary;
-const Mov = instruction.Mov;
+const InstructionList = instruction.InstructionList;
 const Jmp = instruction.Jmp;
 const JmpCC = instruction.JmpCC;
 const Label = instruction.Label;
-const AllocateStack = instruction.AllocateStack;
-const DeallocateStack = instruction.DeallocateStack;
-const InstructionList = instruction.InstructionList;
+const Mov = instruction.Mov;
+const Ret = instruction.Ret;
+const Unary = instruction.Unary;
 
 const Assembler = @This();
 
@@ -64,6 +63,7 @@ pub const StaticVariable = struct {
     name: []const u8,
     global: bool,
     init: Symbol.StaticInit,
+    alignment: usize,
 };
 
 const TopLevelTag = enum { Function, StaticVariable };
@@ -88,6 +88,11 @@ pub fn assemble(allocator: Allocator, symbols: Symbol.Table, tree: TAC.Program) 
                     .type = entry.type,
                     .name = staticVar.identifier,
                     .global = staticVar.global,
+                    .alignment = switch (entry.type) {
+                        .Int => 4,
+                        .Long => 8,
+                        .FunType => unreachable,
+                    },
                     .init = staticVar.init,
                 } }) catch allocError();
             },
@@ -112,9 +117,11 @@ pub fn assembleFunction(allocator: Allocator, symbols: Symbol.Table, function: T
     // Move register arguments into stack memory so as not to clobber callee-saved registers
     var i: usize = 0;
     while (i < function.params.len and i < ARG_REGISTERS.len) {
+        const name = function.params[i].unique.?;
         const src: Operand = .{ .Reg = ARG_REGISTERS[i] };
-        const dst: Operand = .{ .Pseudo = function.params[i].unique.? };
-        instructionList.append(allocator, .{ .Mov = .{ .src = src, .dst = dst } }) catch allocError();
+        const dst: Operand = .{ .Pseudo = name };
+        const t: Type = .fromVar(symbols, name);
+        instructionList.append(allocator, .{ .Mov = .{ .type = t, .src = src, .dst = dst } }) catch allocError();
 
         i += 1;
     }
@@ -190,7 +197,12 @@ fn setupStack(allocator: Allocator, symbols: Symbol.Table, instructions: *Instru
 
     // Prepend the instructions with stack space allocation based on the number of
     // pseudo registers (i.e. local variables) replaced with memory
-    instructions.insert(allocator, 0, .{ .AllocateStack = .{ .stackSpace = stackSpace } }) catch allocError();
+    instructions.insert(allocator, 0, .{ .Binary = .{
+        .type = .Quad,
+        .operator = .Sub,
+        .src = .{ .Imm = stackSpace },
+        .dst = .{ .Reg = .sp },
+    } }) catch allocError();
 }
 
 /// Replace 'Psuedo' registers generated in the first pass with memory locations

@@ -412,8 +412,8 @@ pub fn printAssemblerAST(ast: Assembler.Assembly) void {
         switch (topLevel) {
             .Function => |function| {
                 print("  {any} (\n", .{@TypeOf(function)});
-                print("    name={s}\n", .{function.name});
-                print("    instructions=[\n", .{});
+                print("    name: {s}\n", .{function.name});
+                print("    instructions: [\n", .{});
 
                 for (function.instructions) |instr| {
                     printAssemblerFunction(instr);
@@ -423,8 +423,8 @@ pub fn printAssemblerAST(ast: Assembler.Assembly) void {
             },
             .StaticVariable => |staticVar| {
                 print("  {any} (\n", .{@TypeOf(staticVar)});
-                print("    identifier={s}\n", .{staticVar.name});
-                print("    global={any}\n", .{staticVar.global});
+                print("    identifier: {s}\n", .{staticVar.name});
+                print("    global: {any}\n", .{staticVar.global});
                 switch (staticVar.init) {
                     .int => print("    int: {d}\n", .{staticVar.init.int}),
                     .long => print("    long: {d}\n", .{staticVar.init.long}),
@@ -439,23 +439,17 @@ pub fn printAssemblerAST(ast: Assembler.Assembly) void {
 fn printAssemblerFunction(instr: Assembler.Instruction) void {
     print("      {s} (", .{@tagName(instr)});
     switch (instr) {
-        .AllocateStack => |allocStack| {
-            print("int: {d}", .{allocStack.stackSpace});
-        },
         .Binary => |binary| {
             print("operator: {s} ", .{@tagName(binary.operator)});
-            printOperand("src: ", binary.src);
-            printOperand("dst: ", binary.dst);
+            printOperand("src: ", binary.src, ", ");
+            printOperand("dst: ", binary.dst, null);
         },
         .Call => |call| print("name: {s}", .{call.identifier}),
         .Cmp => |cmp| {
             std.debug.print("arg1: {any}, arg2: {any}", .{ cmp.arg1, cmp.arg2 });
         },
-        .DeallocateStack => |deall| {
-            print("int: {d}", .{deall.int});
-        },
         .Idiv => |idiv| {
-            printOperand("src: ", idiv.operand);
+            printOperand("src: ", idiv.operand, "");
         },
         .Jmp => |jmp| {
             std.debug.print("target: {s}", .{jmp.target});
@@ -467,36 +461,47 @@ fn printAssemblerFunction(instr: Assembler.Instruction) void {
             std.debug.print("id: {s}", .{label.id});
         },
         .Mov => |mov| {
-            printOperand("src: ", mov.src);
-            printOperand("dst: ", mov.dst);
+            printType(mov.type);
+            printOperand("src: ", mov.src, ", ");
+            printOperand("dst: ", mov.dst, null);
         },
         .Push => |push| {
-            printOperand("src: ", push.operand);
+            printOperand("src: ", push.operand, null);
         },
         .Movsx => |movsx| {
-            printOperand("src: ", movsx.src);
-            printOperand("dst: ", movsx.dst);
+            printOperand("src: ", movsx.src, ", ");
+            printOperand("dst: ", movsx.dst, null);
         },
         .Ret, .Cdq => {},
         .SetCC => |set| {
             std.debug.print("condition: {s}, ", .{@tagName(set.condition)});
-            printOperand("target: ", set.operand);
+            printOperand("target: ", set.operand, null);
         },
         .Unary => |unary| {
             print("operator: {s} ", .{@tagName(unary.operator)});
-            printOperand("dst: ", unary.operand);
+            printOperand("dst: ", unary.operand, null);
         },
     }
     print(")\n", .{});
 }
 
-fn printOperand(prefix: []const u8, operand: Assembler.Operand) void {
+fn printOperand(prefix: ?[]const u8, operand: Assembler.Operand, suffix: ?[]const u8) void {
+    if (prefix) |p| print("{s}", .{p});
     switch (operand) {
-        .Imm => print("{s}Imm({d})", .{ prefix, operand.Imm }),
-        .Pseudo => print("{s}Pseudo({s})", .{ prefix, operand.Pseudo }),
-        .Reg => print("{s}Reg({s})", .{ prefix, @tagName(operand.Reg) }),
-        .Stack => print("{s}Stack({d})", .{ prefix, operand.Stack }),
-        .Data => print("{s}Data({s}) ", .{ prefix, operand.Data }),
+        .Imm => print("Imm({d})", .{operand.Imm}),
+        .Pseudo => print("Pseudo({s})", .{operand.Pseudo}),
+        .Reg => print("Reg({s})", .{@tagName(operand.Reg)}),
+        .Stack => print("Stack({d})", .{operand.Stack}),
+        .Data => print("Data({s}) ", .{operand.Data}),
+    }
+    if (suffix) |s| print("{s}", .{s});
+}
+
+fn printType(t: Assembler.Type) void {
+    print("type: ", .{});
+    switch (t) {
+        .Long => print("long, ", .{}),
+        .Quad => print("quad, ", .{}),
     }
 }
 
