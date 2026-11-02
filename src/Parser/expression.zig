@@ -161,8 +161,8 @@ pub const Assignment = struct {
         defer allocator.destroy(self.rhs);
 
         // If this is a compound assignment, let the underlying binary expression clean up the lhs pointer
-        if (!self.isCompound) Expression.deinit(self.lhs, allocator);
-        Expression.deinit(self.rhs, allocator);
+        if (!self.isCompound) self.lhs.deinit(allocator);
+        self.rhs.deinit(allocator);
     }
 };
 
@@ -234,8 +234,8 @@ pub const Binary = struct {
         defer allocator.destroy(self.left);
         defer allocator.destroy(self.right);
 
-        Expression.deinit(self.left, allocator);
-        Expression.deinit(self.right, allocator);
+        self.left.deinit(allocator);
+        self.right.deinit(allocator);
     }
 };
 
@@ -354,7 +354,7 @@ pub const FunctionCall = struct {
 
     pub fn deinit(self: *FunctionCall, allocator: Allocator) void {
         for (self.args) |*arg| {
-            Expression.deinit(arg, allocator);
+            arg.deinit(allocator);
         }
         allocator.free(self.args);
     }
@@ -401,9 +401,9 @@ pub const Ternary = struct {
         defer allocator.destroy(self.thenExpr);
         defer allocator.destroy(self.elseExpr);
 
-        Expression.deinit(self.condition, allocator);
-        Expression.deinit(self.thenExpr, allocator);
-        Expression.deinit(self.elseExpr, allocator);
+        self.condition.deinit(allocator);
+        self.thenExpr.deinit(allocator);
+        self.elseExpr.deinit(allocator);
     }
 };
 
@@ -484,7 +484,7 @@ fn parseFactor(allocator: Allocator, tokens: *TokenIterator) ParsingError!Expres
                 tokens.rewind();
                 break :blk .{ .Cast = try Cast.parse(allocator, tokens) };
             } else {
-                const expr = try Expression.parse(allocator, tokens, 0);
+                const expr: Expression = try .parse(allocator, tokens, 0);
                 const next = tokens.next();
                 if (next.type != .CloseParenthesis) return unexpectedToken(token);
                 break :blk expr;
