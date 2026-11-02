@@ -254,8 +254,8 @@ fn resolveExpression(allocator: Allocator, context: *Context, expr: *Expression)
         },
         .Ternary => |*ternary| {
             resolveExpression(allocator, context, ternary.condition);
-            resolveExpression(allocator, context, ternary.thenStmt);
-            resolveExpression(allocator, context, ternary.elseStmt);
+            resolveExpression(allocator, context, ternary.thenExpr);
+            resolveExpression(allocator, context, ternary.elseExpr);
         },
         .Unary => |unary| {
             switch (unary.operator) {

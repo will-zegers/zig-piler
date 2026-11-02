@@ -166,7 +166,6 @@ pub fn assembleFunction(allocator: Allocator, symbols: Symbol.Table, function: T
 
     // First pass to build Assembly AST
     for (function.body) |instr| {
-        // TODO: try to eliminate the slice allocation
         const assembly = Instruction.assemble(allocator, symbols, instr);
         defer allocator.free(assembly);
 

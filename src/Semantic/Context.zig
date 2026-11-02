@@ -42,7 +42,7 @@ err: *Error.Reporter,
 labels: IdentifierMap,
 scopeStack: ArrayList(Scope),
 switches: ArrayList(*Switch) = .empty,
-function: ?[]const u8 = null, // TODO: use scope instead
+function: ?[]const u8 = null, // TODO: maybe move to scope
 counter: usize = 0,
 
 pub fn init(allocator: Allocator, errorReporter: *Error.Reporter) Context {

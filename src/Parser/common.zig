@@ -5,7 +5,6 @@ const Token = @import("../Lexer.zig").Token;
 
 pub const identifier = []const u8;
 
-// TODO: merge parsing and semantic errors
 pub const ParsingError = error{
     DuplicateCase,
     EOF,

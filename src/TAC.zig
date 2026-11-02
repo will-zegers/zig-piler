@@ -388,14 +388,14 @@ fn emitTernary(allocator: Allocator, context: *Context, instructions: *Instructi
     const c = emitExpression(allocator, context, instructions, tern.condition.*);
     try instructions.append(allocator, .{ .JumpIfZero = .{ .condition = c, .target = elseLabel } });
 
-    const e1 = emitExpression(allocator, context, instructions, tern.thenStmt.*);
+    const e1 = emitExpression(allocator, context, instructions, tern.thenExpr.*);
     try instructions.appendSlice(allocator, &.{
         .{ .Copy = .{ .src = e1, .dst = dst } },
         .{ .Jump = .{ .target = endLabel } },
         .{ .Label = .{ .identifier = elseLabel } },
     });
 
-    const e2 = emitExpression(allocator, context, instructions, tern.elseStmt.*);
+    const e2 = emitExpression(allocator, context, instructions, tern.elseExpr.*);
     try instructions.appendSlice(allocator, &.{
         .{ .Copy = .{ .src = e2, .dst = dst } },
         .{ .Label = .{ .identifier = endLabel } },

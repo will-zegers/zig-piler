@@ -271,7 +271,6 @@ fn typeCheckStatement(allocator: Allocator, symbols: *Symbol.Table, stmt: *State
     }
 }
 
-// TODO: use constCast to make this the only function that needs mutable
 fn typeCheckExpression(allocator: Allocator, symbols: *Symbol.Table, expr: *Expression) Type {
     switch (expr.*) {
         .Assignment => |*assign| {
@@ -333,18 +332,17 @@ fn typeCheckExpression(allocator: Allocator, symbols: *Symbol.Table, expr: *Expr
             return fcall.type.?;
         },
         .Ternary => |*tern| {
-            // TODO: Fix Ternary names (thenStmt -> thenExpr)
             const ifType = typeCheckExpression(allocator, symbols, tern.condition);
-            const thenType = typeCheckExpression(allocator, symbols, tern.thenStmt);
-            const elseType = typeCheckExpression(allocator, symbols, tern.elseStmt);
+            const thenType = typeCheckExpression(allocator, symbols, tern.thenExpr);
+            const elseType = typeCheckExpression(allocator, symbols, tern.elseExpr);
 
             var commonType = getCommonType(ifType, thenType);
             commonType = getCommonType(commonType, elseType);
 
             tern.type = commonType;
             tern.condition.* = castTo(allocator, tern.condition, commonType);
-            tern.thenStmt.* = castTo(allocator, tern.thenStmt, commonType);
-            tern.elseStmt.* = castTo(allocator, tern.elseStmt, commonType);
+            tern.thenExpr.* = castTo(allocator, tern.thenExpr, commonType);
+            tern.elseExpr.* = castTo(allocator, tern.elseExpr, commonType);
 
             return tern.type.?;
         },

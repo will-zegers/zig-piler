@@ -518,7 +518,6 @@ const ForInit = union(ForInitTag) {
 
     pub fn deinit(self: *ForInit, allocator: Allocator) void {
         switch (self.*) {
-            // TODO:
             .Expression => if (self.Expression) |*expr| Expression.deinit(expr, allocator),
             .Declaration => |*decl| Declaration.deinit(decl, allocator),
         }

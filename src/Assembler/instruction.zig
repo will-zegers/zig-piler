@@ -389,27 +389,26 @@ fn funCallToAssembly(allocator: Allocator, symbols: Symbol.Table, funCall: TAC.F
     }
 
     // This process in reverse of the Sys V ABI, pushing stack arguments (if any) first in their reverse
-    // order, and then register arguments (if any) in reverse of the specification (similar to GCC)
+    // order, and then register arguments (if any) (similar to GCC)
     var i = funCall.args.len;
     while (i > ARG_REGISTERS.len) { // Push stack arguments (arguments 6 and on) first in reverse order
         i -= 1;
-        // TODO: try and squash this down, should only need one general push instruction
-        switch (funCall.args[i]) {
-            .Constant => try assembly.append(allocator, .{ .Push = .{ .operand = .fromVal(funCall.args[i]) } }),
+        const operand: Operand = blk: switch (funCall.args[i]) {
+            .Constant => .fromVal(funCall.args[i]),
             .Var => |arg| {
                 switch (Type.fromVar(symbols, arg)) {
+                    .Quad => break :blk .fromVal(funCall.args[i]),
                     .Long => {
                         // For long word vars, first move them into the lower bytes bytes of AX register,
                         // then push rax (quadword register)
-                        try assembly.appendSlice(allocator, &.{
-                            .{ .Mov = .inferType(symbols, .{ .Pseudo = arg }, .{ .Reg = .ax }) },
-                            .{ .Push = .{ .operand = .{ .Reg = .ax } } },
-                        });
+                        try assembly.append(allocator, .{ .Mov = .inferType(symbols, .{ .Pseudo = arg }, .{ .Reg = .ax }) });
+                        break :blk .{ .Reg = .ax };
                     },
-                    .Quad => try assembly.append(allocator, .{ .Push = .{ .operand = .fromVal(funCall.args[i]) } }),
                 }
             },
-        }
+        };
+        try assembly.append(allocator, .{ .Push = .{ .operand = operand } });
+
         allocatedStack += QUADWORD_BYTES;
     }
     while (i > 0) { // Move arguments in corresponding stack registers

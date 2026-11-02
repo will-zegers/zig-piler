@@ -240,10 +240,10 @@ fn printExpression(expr: Parser.Expression, indent: usize) void {
         .Ternary => |ternary| {
             std.debug.print("{s}  condition:\n", .{indentStr});
             printExpression(ternary.condition.*, indent + 4);
-            std.debug.print("{s}  thenStmt:\n", .{indentStr});
-            printExpression(ternary.thenStmt.*, indent + 4);
-            std.debug.print("{s}  elseStmt:\n", .{indentStr});
-            printExpression(ternary.elseStmt.*, indent + 4);
+            std.debug.print("{s}  thenExpr:\n", .{indentStr});
+            printExpression(ternary.thenExpr.*, indent + 4);
+            std.debug.print("{s}  elseExpr:\n", .{indentStr});
+            printExpression(ternary.elseExpr.*, indent + 4);
             print("{s})\n", .{indentStr});
         },
         .Unary => |unary| {

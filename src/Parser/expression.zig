@@ -336,30 +336,30 @@ pub const FunctionCall = struct {
 pub const Ternary = struct {
     type: ?Type = null,
     condition: *Expression,
-    thenStmt: *Expression,
-    elseStmt: *Expression,
+    thenExpr: *Expression,
+    elseExpr: *Expression,
 
     pub fn parse(allocator: Allocator, left: Expression, middle: Expression, right: Expression) ParsingError!Ternary {
         const condition = allocator.create(Expression) catch allocError();
         condition.* = left;
 
-        const thenStmt = allocator.create(Expression) catch allocError();
-        thenStmt.* = middle;
+        const thenExpr = allocator.create(Expression) catch allocError();
+        thenExpr.* = middle;
 
-        const elseStmt = allocator.create(Expression) catch allocError();
-        elseStmt.* = right;
+        const elseExpr = allocator.create(Expression) catch allocError();
+        elseExpr.* = right;
 
-        return .{ .condition = condition, .thenStmt = thenStmt, .elseStmt = elseStmt };
+        return .{ .condition = condition, .thenExpr = thenExpr, .elseExpr = elseExpr };
     }
 
     pub fn deinit(self: *Ternary, allocator: Allocator) void {
         defer allocator.destroy(self.condition);
-        defer allocator.destroy(self.thenStmt);
-        defer allocator.destroy(self.elseStmt);
+        defer allocator.destroy(self.thenExpr);
+        defer allocator.destroy(self.elseExpr);
 
         Expression.deinit(self.condition, allocator);
-        Expression.deinit(self.thenStmt, allocator);
-        Expression.deinit(self.elseStmt, allocator);
+        Expression.deinit(self.thenExpr, allocator);
+        Expression.deinit(self.elseExpr, allocator);
     }
 };
 
