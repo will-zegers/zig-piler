@@ -178,6 +178,8 @@ fn typeCheckLocalVarDecl(allocator: Allocator, symbols: *Symbol.Table, decl: *Va
             .Int => .{ .Initial = .{ .int = 0 } },
             .Long => .{ .Initial = .{ .long = 0 } },
             .FunType => unreachable,
+            .UInt => .{ .Initial = .{ .uint = 0 } },
+            .ULong => .{ .Initial = .{ .ulong = 0 } },
         };
         if (decl.init) |init| {
             if (init.Assignment.rhs.* == .Constant) {
@@ -307,6 +309,8 @@ fn typeCheckExpression(allocator: Allocator, symbols: *Symbol.Table, expr: *Expr
         .Constant => return switch (expr.Constant) {
             .int => .Int,
             .long => .Long,
+            .uint => .UInt,
+            .ulong => .ULong,
         },
         .FunctionCall => |*fcall| {
             const symbol = symbols.get(fcall.name).?; // semantics already ensures the function has been defined
@@ -378,6 +382,14 @@ fn castTo(allocator: Allocator, exp: *const Expression, toType: Type) Expression
             else => .{ .Cast = .to(allocator, exp, toType) },
         },
         .FunType => exp.*,
+        .UInt => switch (toType) {
+            .UInt => exp.*,
+            else => .{ .Cast = .to(allocator, exp, toType) },
+        },
+        .ULong => switch (toType) {
+            .ULong => exp.*,
+            else => .{ .Cast = .to(allocator, exp, toType) },
+        },
     };
     return newExp;
 }

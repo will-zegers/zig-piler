@@ -94,6 +94,8 @@ pub const Expression = union(ExpressionTag) {
             .Constant => switch (self.Constant) {
                 .int => .Int,
                 .long => .Long,
+                .uint => .UInt,
+                .ulong => .ULong,
             },
             .FunctionCall => self.FunctionCall.type.?,
             .Ternary => self.Ternary.type.?,
@@ -266,29 +268,61 @@ pub const Cast = struct {
     }
 };
 
-const ConstantTag = enum { int, long };
+const ConstantTag = enum { int, long, uint, ulong };
 pub const Constant = union(ConstantTag) {
     int: i32,
     long: i64,
+    uint: u32,
+    ulong: u64,
 
     pub fn parse(token: Token) ParsingError!Constant {
-        const num = mem.trimEnd(u8, token.symbol, "Ll");
-        const isLong = num.len != token.symbol.len; // check for trimmed "L" or "l";
-
-        const longValue = std.fmt.parseInt(i64, num, 10) catch |err| {
-            switch (err) {
-                error.Overflow => log.err("Numeric constant '{s}' exceeds capacity of long", .{num}),
-                error.InvalidCharacter => log.err("Could not parse numeric constant '{s}'", .{token.symbol}),
+        var valueStr = mem.trimEnd(u8, token.symbol, "Ll"); // ...l?
+        if (valueStr.len != token.symbol.len) { // explicit 'long'
+            const longValueStr = mem.trimEnd(u8, valueStr, "Uu"); // ...ul?
+            if (longValueStr.len != valueStr.len) { // explicit 'long unsigned'
+                const ulong = std.fmt.parseInt(u64, longValueStr, 10) catch |err| return parseError(err, token.symbol);
+                return .{ .ulong = ulong };
+            } else { // explicit 'long', implicit 'signed'
+                const long = std.fmt.parseInt(i64, longValueStr, 10) catch |err| return parseError(err, token.symbol);
+                return .{ .long = long };
             }
-            return ParsingError.Token;
-        };
+        } else { // check for alternate ordering, i.e. 'ul', 'Ul, 'UL'
+            valueStr = mem.trimEnd(u8, token.symbol, "Uu"); // ...u?
+            if (valueStr.len != token.symbol.len) { // explicit 'unsigned'
+                const unsignedValueStr = mem.trimEnd(u8, valueStr, "Ll"); // ...lu?
+                if (valueStr.len != token.symbol.len) { // explicit 'unsigned long'
+                    const ulong = std.fmt.parseInt(u64, unsignedValueStr, 10) catch |err| return parseError(err, token.symbol);
+                    return .{ .ulong = ulong };
+                } else { // explicit 'unsigned', implicit 'long' unless it can fit into 'int'
+                    const ulong = std.fmt.parseInt(u64, valueStr, 10) catch |err| return parseError(err, token.symbol);
+                    if (ulong > math.maxInt(u32)) {
+                        return .{ .ulong = ulong };
+                    }
 
-        if (!isLong and longValue <= math.maxInt(i32)) {
-            const intValue = std.fmt.parseInt(i32, num, 10) catch unreachable;
-            return .{ .int = intValue };
+                    const uint: u32 = @intCast(ulong);
+                    return .{ .uint = uint };
+                }
+            } else { // 'implicit 'signed long' unless it will fit as 'unsigned int'
+                const signedValue = std.fmt.parseInt(i64, valueStr, 10) catch |err| return parseError(err, token.symbol);
+                if (signedValue > math.maxInt(i32)) {
+                    return .{ .long = signedValue };
+                }
+
+                const int: i32 = @intCast(signedValue);
+                return .{ .int = int };
+            }
         }
+    }
 
-        return .{ .long = longValue };
+    fn parseError(err: error{ InvalidCharacter, Overflow }, symbol: []const u8) ParsingError {
+        switch (err) {
+            error.Overflow => {
+                const value = mem.trim(u8, symbol, "LlUu");
+                log.err("Numeric constant '{s}' exceeds capacity of long", .{value});
+            },
+            error.InvalidCharacter => log.err("Could not parse numeric constant '{s}'", .{symbol}),
+        }
+        return ParsingError.Token;
     }
 };
 

@@ -418,6 +418,8 @@ pub const Case = struct {
                     const int: i32 = switch (value) {
                         .int => value.int,
                         .long => @truncate(value.long),
+                        .uint => unreachable,
+                        .ulong => unreachable,
                     };
                     return allocator.print("{s}.{d}", .{ self.parent.?.tag.?, @as(u32, @bitCast(int)) }) catch allocError();
                 },
@@ -425,6 +427,8 @@ pub const Case = struct {
                     const long: i64 = switch (value) {
                         .int => value.int,
                         .long => value.long,
+                        .uint => unreachable,
+                        .ulong => unreachable,
                     };
                     return allocator.print("{s}.{d}", .{ self.parent.?.tag.?, @as(u64, @bitCast(long)) }) catch allocError();
                 },

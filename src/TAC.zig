@@ -361,6 +361,8 @@ fn emitCast(allocator: Allocator, context: *Context, instructions: *Instructions
         .Int => try instructions.append(allocator, .{ .Truncate = .{ .src = expr, .dst = dst } }),
         .Long => try instructions.append(allocator, .{ .SignExtend = .{ .src = expr, .dst = dst } }),
         .FunType => unreachable,
+        .UInt => unreachable,
+        .ULong => unreachable,
     }
 
     return dst;

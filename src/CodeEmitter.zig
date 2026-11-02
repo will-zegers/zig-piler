@@ -53,7 +53,7 @@ pub fn  emitStaticVar(allocator: Allocator, staticVar: Assembler.StaticVariable)
 
     var code: []const u8 = undefined;
     switch (staticVar.init) {
-        .int => if (staticVar.init.int == 0) {
+        .int, .uint => if (staticVar.init.int == 0) {
             const template =
                 \\  .bss
                 \\  .align 4
@@ -70,7 +70,7 @@ pub fn  emitStaticVar(allocator: Allocator, staticVar: Assembler.StaticVariable)
             ;
             code = try allocator.print(template, .{staticVar.name, staticVar.init.int});
         },
-        .long => if (staticVar.init.long == 0) {
+        .long, .ulong => if (staticVar.init.long == 0) {
             const template =
                 \\  .bss
                 \\  .align 8

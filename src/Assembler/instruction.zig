@@ -281,6 +281,8 @@ pub const Operand = union(OperandTag) {
         return switch (constant) {
             .int => @intCast(constant.int),
             .long => @intCast(constant.long),
+            .uint => unreachable,
+            .ulong => unreachable,
         };
     }
 
@@ -301,16 +303,16 @@ pub const Type = enum {
 
     pub fn fromVar(symbols: Symbol.Table, v: TAC.Var) Type {
         return switch (symbols.get(v).?.type) {
-            .Int => .Long,
-            .Long => .Quad,
+            .Int, .UInt => .Long,
+            .Long, .ULong => .Quad,
             .FunType => unreachable,
         };
     }
 
     pub fn fromConstant(constant: TAC.Constant) Type {
         return switch (constant) {
-            .int => .Long,
-            .long => .Quad,
+            .int, .uint => .Long,
+            .long, .ulong => .Quad,
         };
     }
 

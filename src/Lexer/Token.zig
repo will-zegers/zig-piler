@@ -33,10 +33,12 @@ pub const Type = enum {
     OpenParenthesis,
     Return,
     Semicolon,
+    Signed,
     Static,
     Switch,
     TernaryOp,
     UnaryOp,
+    Unsigned,
     Void,
     While,
 };

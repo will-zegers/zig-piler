@@ -99,6 +99,8 @@ pub fn assemble(allocator: Allocator, symbols: Symbol.Table, tree: TAC.Program) 
                         .Int => 4,
                         .Long => 8,
                         .FunType => unreachable,
+                        .UInt => unreachable,
+                        .ULong => unreachable,
                     },
                     .init = staticVar.init,
                 } }) catch allocError();
@@ -114,12 +116,12 @@ pub fn assemble(allocator: Allocator, symbols: Symbol.Table, tree: TAC.Program) 
 
         backendSymbols.put(key, switch (value.type) {
             .FunType =>  .{ .Fun = .{ .defined = defined.get(key) orelse false } },
-            .Int => switch (value.attrs) {
+            .Int, .UInt => switch (value.attrs) {
                 .Static => .{ .Obj = .{ .type = .Long, .isStatic = true } },
                 .Local => .{ .Obj = .{ .type = .Long, .isStatic = false } },
                 .Fun => unreachable,
             },
-            .Long => switch (value.attrs) {
+            .Long, .ULong => switch (value.attrs) {
                 .Static => .{ .Obj = .{ .type = .Quad, .isStatic = true } },
                 .Local => .{ .Obj = .{ .type = .Quad, .isStatic = false } },
                 .Fun => unreachable,
@@ -266,6 +268,8 @@ fn replaceIfPseudo(symbols: Symbol.Table, map: *std.StringHashMap(isize), stackP
                     // stackPointer.* = @divCeil(@abs(stackPointer.*), 8); // align to 8-bytes
                 },
                 .FunType => unreachable,
+                .UInt => unreachable,
+                .ULong => unreachable,
             }
             map.put(key, stackPointer.*) catch allocError();
         }

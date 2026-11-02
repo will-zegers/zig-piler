@@ -12,7 +12,7 @@ const TokenIterator = Token.Iterator;
 pub fn printLexerTokens(tokens: *TokenIterator) void {
     while (!tokens.eofReached()) {
         const token = tokens.next();
-        std.debug.print("{any}: {s}\n", .{ token.type, token.symbol });
+        print("{any}: {s}\n", .{ token.type, token.symbol });
     }
 }
 
@@ -207,9 +207,9 @@ fn printExpression(expr: Parser.Expression, indent: usize) void {
     print("{s}{s} (", .{ indentStr, @tagName(expr) });
     switch (expr) {
         .Assignment => |assign| {
-            std.debug.print("{s}  lhs:\n", .{indentStr});
+            print("{s}  lhs:\n", .{indentStr});
             printExpression(assign.lhs.*, indent + 4);
-            std.debug.print("{s}  rhs:\n", .{indentStr});
+            print("{s}  rhs:\n", .{indentStr});
             printExpression(assign.rhs.*, indent + 4);
             print("{s})\n", .{indentStr});
         },
@@ -228,6 +228,8 @@ fn printExpression(expr: Parser.Expression, indent: usize) void {
         .Constant => |constant| switch (constant) {
             .int => |int| print("int {d})\n", .{int}),
             .long => |long| print("long {d})\n", .{long}),
+            .uint => |uint| print("int {d})\n", .{uint}),
+            .ulong => |ulong| print("long {d})\n", .{ulong}),
         },
         .FunctionCall => |funCall| {
             print("\n  {s}{s}(\n", .{ indentStr, funCall.name });
@@ -238,11 +240,11 @@ fn printExpression(expr: Parser.Expression, indent: usize) void {
             print("{s})\n", .{indentStr});
         },
         .Ternary => |ternary| {
-            std.debug.print("{s}  condition:\n", .{indentStr});
+            print("{s}  condition:\n", .{indentStr});
             printExpression(ternary.condition.*, indent + 4);
-            std.debug.print("{s}  thenExpr:\n", .{indentStr});
+            print("{s}  thenExpr:\n", .{indentStr});
             printExpression(ternary.thenExpr.*, indent + 4);
-            std.debug.print("{s}  elseExpr:\n", .{indentStr});
+            print("{s}  elseExpr:\n", .{indentStr});
             printExpression(ternary.elseExpr.*, indent + 4);
             print("{s})\n", .{indentStr});
         },
@@ -257,44 +259,42 @@ fn printExpression(expr: Parser.Expression, indent: usize) void {
 }
 
 fn printSymbolTable(symbolTable: Symbol.Table) void {
-    std.debug.print("-------Symbol Table-------\n", .{});
+    print("-------Symbol Table-------\n", .{});
     var it = symbolTable.iterator();
     while (it.next()) |entry| {
         const t = entry.value_ptr.*.type;
         const attrs = entry.value_ptr.*.attrs;
-        std.debug.print("{s}:\n", .{entry.key_ptr.*});
-        std.debug.print("  type: {s}\n", .{@tagName(t)});
+        print("{s}:\n", .{entry.key_ptr.*});
+        print("  type: {s}\n", .{@tagName(t)});
         switch (t) {
             .FunType => {
                 if (t.FunType.params.len > 0) {
-                    std.debug.print("    params:", .{});
+                    print("    params:", .{});
                     for (t.FunType.params) |param| {
-                        std.debug.print(" {s}", .{@tagName(param.*)});
+                        print(" {s}", .{@tagName(param.*)});
                     }
-                    std.debug.print("\n", .{});
+                    print("\n", .{});
                 }
-                std.debug.print("    ret: {s}\n", .{@tagName(t.FunType.ret.*)});
+                print("    ret: {s}\n", .{@tagName(t.FunType.ret.*)});
             },
-            .Int, .Long => {},
+            .Int, .Long, .UInt, .ULong => unreachable,
         }
-        std.debug.print("  attrs: {s}\n", .{@tagName(attrs)});
+        print("  attrs: {s}\n", .{@tagName(attrs)});
         switch (attrs) {
             .Fun => |fun| {
-                std.debug.print("  global: {any}\n", .{fun.global});
-                std.debug.print("  defined: {any}\n", .{fun.defined});
+                print("  global: {any}\n", .{fun.global});
+                print("  defined: {any}\n", .{fun.defined});
             },
             .Static => |static| {
-                std.debug.print("  global: {any}\n", .{static.global});
-                std.debug.print("  initialValue:", .{});
+                print("  global: {any}\n", .{static.global});
+                print("  initialValue:", .{});
                 switch (static.initialValue) {
-                    .Tentative, .None => std.debug.print("{any}\n", .{@tagName(static.initialValue)}),
+                    .Tentative, .None => print("{any}\n", .{@tagName(static.initialValue)}),
                     .Initial => |init| switch (init) {
-                        .int => |int| {
-                            std.debug.print("{any}: {d}", .{ @tagName(static.initialValue), int });
-                        },
-                        .long => |long| {
-                            std.debug.print("{any}: {d}", .{ @tagName(static.initialValue), long });
-                        },
+                        .int => |int| print("{any}: {d}", .{ @tagName(static.initialValue), int }),
+                        .long => |long| print("{any}: {d}", .{ @tagName(static.initialValue), long }),
+                        .uint => |uint| print("{any}: {d}", .{ @tagName(static.initialValue), uint }),
+                        .ulong => |ulong| print("{any}: {d}", .{ @tagName(static.initialValue), ulong }),
                     },
                 }
             },
@@ -319,9 +319,9 @@ pub fn printTAC(ir: TAC.Program, symbolTable: Symbol.Table) void {
 fn printTACFunction(function: TAC.Function) void {
     print("  {any} {s}(", .{ @TypeOf(function), function.name });
     if (function.params.len > 0) {
-        std.debug.print("int {s}", .{function.params[0].name});
+        print("int {s}", .{function.params[0].name});
         for (1..function.params.len) |i| {
-            std.debug.print(", int {s}", .{function.params[i].name});
+            print(", int {s}", .{function.params[i].name});
         }
     }
     print(")\n", .{});
@@ -350,7 +350,7 @@ fn printTACFunction(function: TAC.Function) void {
                         printVal(", ", arg, "");
                     }
                 }
-                std.debug.print(")", .{});
+                print(")", .{});
                 print(" -> {s})\n", .{funCall.dst.Var});
             },
             .Label => |label| {
@@ -398,6 +398,8 @@ fn printVal(prefix: []const u8, val: TAC.Val, suffix: []const u8) void {
         .Constant => switch (val.Constant) {
             .int => print("{s}int {d}{s}", .{ prefix, val.Constant.int, suffix }),
             .long => print("{s}long {d}{s}", .{ prefix, val.Constant.long, suffix }),
+            .uint => print("{s}uint {d}{s}", .{ prefix, val.Constant.uint, suffix }),
+            .ulong => print("{s}ulong {d}{s}", .{ prefix, val.Constant.ulong, suffix }),
         },
         .Var => print("{s}{s}{s}", .{ prefix, val.Var, suffix }),
     }
@@ -430,6 +432,8 @@ pub fn printAssemblerAST(ast: Assembler.Assembly) void {
                 switch (staticVar.init) {
                     .int => print("    int: {d}\n", .{staticVar.init.int}),
                     .long => print("    long: {d}\n", .{staticVar.init.long}),
+                    .uint => print("    uint: {d}\n", .{staticVar.init.uint}),
+                    .ulong => print("    ulong: {d}\n", .{staticVar.init.ulong}),
                 }
                 print("  )\n", .{});
             },
@@ -448,19 +452,19 @@ fn printAssemblerFunction(instr: Assembler.Instruction) void {
         },
         .Call => |call| print("name: {s}", .{call.identifier}),
         .Cmp => |cmp| {
-            std.debug.print("arg1: {any}, arg2: {any}", .{ cmp.arg1, cmp.arg2 });
+            print("arg1: {any}, arg2: {any}", .{ cmp.arg1, cmp.arg2 });
         },
         .Idiv => |idiv| {
             printOperand("src: ", idiv.operand, "");
         },
         .Jmp => |jmp| {
-            std.debug.print("target: {s}", .{jmp.target});
+            print("target: {s}", .{jmp.target});
         },
         .JmpCC => |jmp| {
-            std.debug.print("condition: {s}, target: {s}", .{ @tagName(jmp.condition), jmp.target });
+            print("condition: {s}, target: {s}", .{ @tagName(jmp.condition), jmp.target });
         },
         .Label => |label| {
-            std.debug.print("id: {s}", .{label.id});
+            print("id: {s}", .{label.id});
         },
         .Mov => |mov| {
             printType(mov.type);
@@ -476,7 +480,7 @@ fn printAssemblerFunction(instr: Assembler.Instruction) void {
         },
         .Ret, .Cdq => {},
         .SetCC => |set| {
-            std.debug.print("condition: {s}, ", .{@tagName(set.condition)});
+            print("condition: {s}, ", .{@tagName(set.condition)});
             printOperand("target: ", set.operand, null);
         },
         .Unary => |unary| {

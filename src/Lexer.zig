@@ -21,8 +21,10 @@ const KeywordMap = std.StaticStringMap(Token.Type).initComptime(.{
     .{ "int", .Int },
     .{ "long", .Long },
     .{ "return", .Return },
+    .{ "signed", .Signed },
     .{ "static", .Static },
     .{ "switch", .Switch },
+    .{ "unsigend", .Unsigned },
     .{ "void", .Void },
     .{ "while", .While },
 });
@@ -39,7 +41,7 @@ pub fn init(allocator: Allocator) !Lexer {
     return .{
         .allocator = allocator,
         .reIdentifier = try .init("[a-zA-Z_]\\w*\\b"),
-        .reConstant = try .init("[0-9]+l?\\b"),
+        .reConstant = try .init("[0-9]+([Ll]|[Uu]|[Ll][Uu]|[Uu][Ll])?\\b"), // numbers plus long/unsigned specifiers
         .reComment = try .init("//[^\n]*|/\\*([^*]|\\*+[^*/])*\\*+/"),
         .reMacro = try .init("\\#[^\n]*"),
     };

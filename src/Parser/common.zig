@@ -10,6 +10,7 @@ pub const ParsingError = error{
     EOF,
     InvalidType,
     InvalidStorageClass,
+    InvalidSignage,
     Lvalue,
     MaxCaseCount,
     NonConstExpr,
@@ -17,7 +18,7 @@ pub const ParsingError = error{
     Token,
 };
 
-pub const TypeTag = enum { Int, Long, FunType };
+pub const TypeTag = enum { Int, Long, FunType, UInt, ULong };
 pub const Type = union(TypeTag) {
     Int: void,
     Long: void,
@@ -25,6 +26,8 @@ pub const Type = union(TypeTag) {
         params: []*const Type,
         ret: *Type,
     },
+    UInt: void,
+    ULong: void,
 
     pub fn parse(types: [2]?Type, symbol: []const u8) !Type {
         if (types[1] == null) {
@@ -65,6 +68,14 @@ pub const Type = union(TypeTag) {
                 .FunType => true,
                 else => false,
             },
+            .UInt => switch (other) {
+                .UInt => true,
+                else => false,
+            },
+            .ULong => switch (other) {
+                .ULong => true,
+                else => false,
+            },
         };
     }
 };
@@ -79,6 +90,7 @@ pub const Specifiers = struct {
     pub fn parse(tokens: *Token.Iterator) ParsingError!Specifiers {
         var nextToken = tokens.peek();
         var specifiers: Specifiers = .{ .lineIndex = nextToken.lineIndex };
+        var signage: ?enum { Signed, Unsigned } = null;
 
         var typeIndex: usize = 0;
         var types = [2]?Type{ null, null };
@@ -98,6 +110,17 @@ pub const Specifiers = struct {
                     tokens.skip();
                     typeIndex += 1;
                 },
+                .Signed, .Unsigned => {
+                    if (signage != null) {
+                        log.err("Cannot combine with previous '{s}' declaration specifier", .{@tagName(signage.?)});
+                        return ParsingError.InvalidSignage;
+                    }
+                    signage = switch (nextToken.type) {
+                        .Signed => .Signed,
+                        .Unsigned => .Unsigned,
+                        else => unreachable,
+                    };
+                },
                 .Extern, .Static => {
                     if (specifiers.storageClass != null) {
                         log.err("Invalid or duplicate storage class '{s}'", .{nextToken.symbol});
@@ -115,6 +138,13 @@ pub const Specifiers = struct {
             }
             nextToken = tokens.peek();
         }
+
+        const t: Type = try Type.parse(types, nextToken.symbol);
+        specifiers.type = switch (t) {
+            .Int => if (signage != null and signage.? == .Unsigned) .UInt else .Int,
+            .Long => if (signage != null and signage.? == .Unsigned) .ULong else .Long,
+            else => unreachable,
+        };
 
         specifiers.type = try Type.parse(types, nextToken.symbol);
         return specifiers;
