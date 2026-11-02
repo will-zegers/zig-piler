@@ -74,7 +74,7 @@ pub const Expression = union(ExpressionTag) {
                     },
                     .BinaryOp => blk: { // <expr> '+'|'-'|'*'|'/'|'%'|'&'|'|' <expr>
                         const right = try parse(allocator, tokens, nextToken.precedence + 1);
-                        const temp = try Binary.parse(allocator, nextToken, left, right);
+                        const temp = try Binary.parse(allocator, nextToken.lineIndex, nextToken.symbol, left, right);
                         break :blk .{ .Binary = temp };
                     },
                     else => return unexpectedToken(nextToken),
@@ -116,38 +116,37 @@ pub const Expression = union(ExpressionTag) {
 };
 
 pub const Assignment = struct {
-    const OperatorMap = std.StaticStringMap(Binary.Operator).initComptime(.{
-        .{ "+=", Binary.Operator.Add },
-        .{ "&=", Binary.Operator.AndB },
-        .{ "/=", Binary.Operator.Div },
-        .{ "%=", Binary.Operator.Mod },
-        .{ "*=", Binary.Operator.Mul },
-        .{ "|=", Binary.Operator.OrB },
-        .{ "<<=", Binary.Operator.SAL },
-        .{ ">>=", Binary.Operator.SAR },
-        .{ "-=", Binary.Operator.Sub },
-        .{ "^=", Binary.Operator.Xor },
+    const OperatorMap = std.StaticStringMap([]const u8).initComptime(.{
+        .{ "+=", "+" },
+        .{ "&=", "&" },
+        .{ "/=", "/" },
+        .{ "%=", "%" },
+        .{ "*=", "*" },
+        .{ "|=", "|" },
+        .{ "<<=", "<<" },
+        .{ ">>=", ">>" },
+        .{ "-=", "-" },
+        .{ "^=", "^" },
     });
 
     lineIndex: usize,
     type: ?Type = null,
-    operator: ?Binary.Operator,
     lhs: *Expression,
     rhs: *Expression,
 
-    pub fn parse(allocator: Allocator, operator: Token, lhs: Expression, rhs: Expression) ParsingError!Assignment {
-        const op = if (mem.eql(u8, "=", operator.symbol))
-            null
-        else
-            OperatorMap.get(operator.symbol);
-
+    pub fn parse(allocator: Allocator, token: Token, lhs: Expression, rhs: Expression) ParsingError!Assignment {
         const lhsPtr = allocator.create(Expression) catch allocError();
         lhsPtr.* = lhs;
 
         const rhsPtr = allocator.create(Expression) catch allocError();
-        rhsPtr.* = rhs;
+        if (OperatorMap.get(token.symbol)) |op| {
+            rhsPtr.* = .{ .Binary = try .parse(allocator, token.lineIndex, op, lhs, rhs) };
+        } else {
+            if (!mem.eql(u8, "=", token.symbol)) return unexpectedToken(token);
+            rhsPtr.* = rhs;
+        }
 
-        return .{ .lineIndex = operator.lineIndex, .operator = op, .lhs = lhsPtr, .rhs = rhsPtr };
+        return .{ .lineIndex = token.lineIndex, .lhs = lhsPtr, .rhs = rhsPtr };
     }
 
     pub fn deinit(self: Assignment, allocator: Allocator) void {
@@ -208,8 +207,11 @@ pub const Binary = struct {
     left: *Expression,
     right: *Expression,
 
-    pub fn parse(allocator: Allocator, token: Token, left: Expression, right: Expression) ParsingError!Binary {
-        const operator = OperatorMap.get(token.symbol) orelse return unexpectedToken(token);
+    pub fn parse(allocator: Allocator, lineIndex: usize, symbol: []const u8, left: Expression, right: Expression) ParsingError!Binary {
+        const operator = OperatorMap.get(symbol) orelse {
+            log.err("Got unexpected binary operator: {s}", .{symbol});
+            return ParsingError.Token;
+        };
 
         const leftPtr = allocator.create(Expression) catch allocError();
         leftPtr.* = left;
@@ -217,7 +219,7 @@ pub const Binary = struct {
         const rightPtr = allocator.create(Expression) catch allocError();
         rightPtr.* = right;
 
-        return .{ .lineIndex = token.lineIndex, .operator = operator, .left = leftPtr, .right = rightPtr };
+        return .{ .lineIndex = lineIndex, .operator = operator, .left = leftPtr, .right = rightPtr };
     }
 
     pub fn deinit(self: Binary, allocator: Allocator) void {
@@ -271,6 +273,8 @@ pub const Constant = union(ConstantTag) {
 
     pub fn parse(token: Token) ParsingError!Constant {
         const num = mem.trimEnd(u8, token.symbol, "Ll");
+        const isLong = num.len != token.symbol.len; // check for trimmed "L" or "l";
+
         const longValue = std.fmt.parseInt(i64, num, 10) catch |err| {
             switch (err) {
                 error.Overflow => log.err("Numeric constant '{s}' exceeds capacity of long", .{num}),
@@ -279,7 +283,7 @@ pub const Constant = union(ConstantTag) {
             return ParsingError.Token;
         };
 
-        if (longValue <= math.maxInt(i32)) {
+        if (!isLong and longValue <= math.maxInt(i32)) {
             const intValue = std.fmt.parseInt(i32, num, 10) catch unreachable;
             return .{ .int = intValue };
         }

@@ -181,7 +181,9 @@ fn printStatement(statement: Parser.Statement, indent: usize) void {
             print("{s})\n", .{indentStr});
         },
         .Case => |case| {
-            print("{s}{any}( {s}\n", .{ indentStr, @TypeOf(case), case.tag });
+            print("{s}{any}(", .{ indentStr, @TypeOf(case) });
+            if (case.tag) |tag| print(" {s}", .{tag});
+            print("\n", .{});
             if (case.cond) |cond| {
                 print("  {s}cond:\n", .{indentStr});
                 printExpression(cond, indent + 4);

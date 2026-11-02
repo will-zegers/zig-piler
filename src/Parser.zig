@@ -359,7 +359,7 @@ pub const Break = struct {
 
 pub const Case = struct {
     lineIndex: usize,
-    tag: [64:0]u8 = @splat(0),
+    tag: ?[]const u8 = null,
     cond: ?Expression,
     body: ?*Statement,
     parent: ?*Switch = null,
@@ -390,15 +390,15 @@ pub const Case = struct {
         return .{ .lineIndex = lineIndex, .cond = cond, .body = body };
     }
 
-    pub fn registerToParentSwitch(self: *Case) ParsingError!void {
-        _ = self.generateTag();
-        return self.parent.?.addCase(self);
+    pub fn registerToParentSwitch(self: *Case, allocator: Allocator) ParsingError!void {
+        self.tag = self.generateTag(allocator);
+        return self.parent.?.addCase(allocator, self);
     }
 
     // Generate a tag with parent tag and condition constant
     // In addition, assure we're comparing like-types between case condition
     // and switch cond types, truncating case conditions if need be
-    pub fn generateTag(self: *Case) []const u8 {
+    pub fn generateTag(self: *Case, allocator: Allocator) []const u8 {
         std.debug.assert(self.parent != null); // This shouldn't occur, since we catch orphan case before tagging
 
         if (self.cond) |cond| {
@@ -411,29 +411,35 @@ pub const Case = struct {
             const parentType = self.parent.?.cond.getType();
             switch (parentType) {
                 .Int => {
+                    // We bit-cast the labels to unsigned to disallow '-' in the generated labels
+
                     // Note: actual number truncation will be handled by assembly instructions, here
-                    // we just need to make sure truncation will not generate a duplicate case
+                    // we just need to make sure truncation will not generate a duplicate case.
                     const int: i32 = switch (value) {
                         .int => value.int,
                         .long => @truncate(value.long),
                     };
-                    return mem.print(&self.tag, "{s}.{d}", .{ self.parent.?.tag.?, int }) catch allocError();
+                    return allocator.print("{s}.{d}", .{ self.parent.?.tag.?, @as(u32, @bitCast(int)) }) catch allocError();
                 },
                 .Long => {
                     const long: i64 = switch (value) {
                         .int => value.int,
                         .long => value.long,
                     };
-                    return mem.print(&self.tag, "{s}.{d}", .{ self.parent.?.tag.?, long }) catch allocError();
+                    return allocator.print("{s}.{d}", .{ self.parent.?.tag.?, @as(u64, @bitCast(long)) }) catch allocError();
                 },
                 else => unreachable,
             }
         } else {
-            return mem.print(&self.tag, "{s}.default", .{self.parent.?.tag.?}) catch unreachable;
+            return allocator.print("{s}.default", .{self.parent.?.tag.?}) catch unreachable;
         }
     }
 
     pub fn deinit(self: *Case, allocator: Allocator) void {
+        if (self.tag) |tag| {
+            allocator.free(tag);
+        }
+
         if (self.cond) |*cond| {
             Expression.deinit(cond, allocator);
         }
@@ -656,8 +662,6 @@ pub const Return = struct {
 };
 
 pub const Switch = struct {
-    const MAX_CASE_COUNT: usize = 128;
-
     tag: ?[]const u8 = null,
     cond: Expression,
     body: *Statement,
@@ -673,22 +677,18 @@ pub const Switch = struct {
         const body = allocator.create(Statement) catch allocError();
         body.* = try Statement.parse(allocator, tokens);
 
-        const cases = ArrayList(*Case).initCapacity(allocator, MAX_CASE_COUNT) catch allocError();
-        return .{ .cond = cond, .body = body, .cases = cases };
+        return .{ .cond = cond, .body = body, .cases = .empty };
     }
 
-    pub fn addCase(self: *Switch, case: *Case) ParsingError!void {
+    pub fn addCase(self: *Switch, allocator: Allocator, case: *Case) ParsingError!void {
         for (self.cases.items) |child| { // ensure this is not a duplicate case
-            if (mem.eql(u8, &child.tag, &case.tag)) return ParsingError.DuplicateCase;
+            if (mem.eql(u8, child.tag.?, case.tag.?)) return ParsingError.DuplicateCase;
         }
 
         // a case with no conditional signifies a default statement
-        if (case.cond == null) self.defaultTag = &case.tag;
+        if (case.cond == null) self.defaultTag = case.tag.?;
 
-        self.cases.appendBounded(case) catch {
-            log.err("Max case count of {d} exceeded", .{MAX_CASE_COUNT});
-            return ParsingError.MaxCaseCount;
-        };
+        self.cases.append(allocator, case) catch allocError();
     }
 
     pub fn deinit(self: *Switch, allocator: Allocator) void {

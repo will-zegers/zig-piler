@@ -18,7 +18,6 @@ const Operand = instructions.Operand;
 const IllegalInstruction = enum {
     Ill_Binary_Operands,
     Ill_Cmp_Operands,
-    Ill_Cmp_Imm_Dst,
     Ill_Idiv_Operand,
     Ill_Mov_Operands,
     Ill_Movsx_Operands,
@@ -30,6 +29,7 @@ const IllegalInstruction = enum {
 pub fn patchInstructions(allocator: Allocator, unpatched: []Instruction) []Instruction {
     var patched: InstructionList = .empty;
 
+    // TODO: make a general function to move 'src' and 'dst' into their respective temporaries
     for (unpatched) |instr| {
         if (Patcher.detectIllegal(instr)) |illegal| {
             const t = instr.getType().?;
@@ -41,17 +41,12 @@ pub fn patchInstructions(allocator: Allocator, unpatched: []Instruction) []Instr
                     .{ .Mov = .{ .type = t, .src = instr.Binary.src, .dst = .{ .Reg = .r10 } } },
                     .{ .Binary = .{ .type = t, .operator = instr.Binary.operator, .src = .{ .Reg = .r10 }, .dst = instr.Binary.dst } },
                 },
-                // The second argument of a 'cmp' instruction must not be a constant (i.e. immediate value)
-                // Move the immediate value into a temporary register prior to the operation
-                .Ill_Cmp_Imm_Dst => &.{
-                    .{ .Mov = .{ .type = t, .src = instr.Cmp.arg2, .dst = .{ .Reg = .r11 } } },
-                    .{ .Cmp = .{ .type = t, .arg1 = instr.Cmp.arg1, .arg2 = .{ .Reg = .r11 } } },
-                },
                 // Comparison 'cmp' instructions must not have both args as memory addresses
                 // Move the first arg into a temporary register first, then compare
                 .Ill_Cmp_Operands => &.{
                     .{ .Mov = .{ .type = t, .src = instr.Cmp.arg1, .dst = .{ .Reg = .r10 } } },
-                    .{ .Cmp = .{ .type = t, .arg1 = .{ .Reg = .r10 }, .arg2 = instr.Cmp.arg2 } },
+                    .{ .Mov = .{ .type = t, .src = instr.Cmp.arg2, .dst = .{ .Reg = .r11 } } },
+                    .{ .Cmp = .{ .type = t, .arg1 = .{ .Reg = .r10 }, .arg2 = .{ .Reg = .r11 } } },
                 },
                 // Operand (i.e. the divisor) of idiv must not be an immediate value
                 // Move the immediate value into a temporary register prior to the operation
@@ -71,6 +66,7 @@ pub fn patchInstructions(allocator: Allocator, unpatched: []Instruction) []Instr
                 // operation, and move the result in the temporary back to the original 'dst' memory address
                 .Ill_Movsx_Operands => &.{
                     .{ .Mov = .{ .type = .Long, .src = instr.Movsx.src, .dst = .{ .Reg = .r10 } } },
+                    .{ .Mov = .{ .type = .Long, .src = instr.Movsx.dst, .dst = .{ .Reg = .r11 } } },
                     .{ .Movsx = .{ .type = .Quad, .src = .{ .Reg = .r10 }, .dst = .{ .Reg = .r11 } } },
                     .{ .Mov = .{ .type = .Quad, .src = .{ .Reg = .r11 }, .dst = instr.Movsx.dst } },
                 },
@@ -107,6 +103,8 @@ pub fn patchInstructions(allocator: Allocator, unpatched: []Instruction) []Instr
     return patched.toOwnedSlice(allocator) catch allocError();
 }
 
+// TODO: refactor this to be able to emit more than one ill_* error,
+// to make patching more granular
 fn detectIllegal(instr: Instruction) ?IllegalInstruction {
     switch (instr) {
         .Binary => |bin| {
@@ -116,10 +114,7 @@ fn detectIllegal(instr: Instruction) ?IllegalInstruction {
             if (isIllegalShift(bin)) return .Ill_Shift_Rcx;
             if (isIllegalBinaryOperands(bin)) return .Ill_Binary_Operands;
         },
-        .Cmp => |cmp| {
-            if (isIllegalCmpImmDst(cmp)) return .Ill_Cmp_Imm_Dst;
-            if (isIllegalCmpOperands(cmp)) return .Ill_Cmp_Operands;
-        },
+        .Cmp => |cmp| if (isIllegalCmp(cmp)) return .Ill_Cmp_Operands,
         .Idiv => |idiv| if (isIllegalIdiv(idiv)) return .Ill_Idiv_Operand,
         .Mov => |mov| if (isIllegalMove(mov)) return .Ill_Mov_Operands,
         .Movsx => |movsx| if (isIllegalMovsxOperands(movsx)) return .Ill_Movsx_Operands,
@@ -146,11 +141,15 @@ fn isIllegalBinaryQuadword(bin: Binary) bool {
 
     return switch (bin.src) {
         .Imm => |imm| switch (bin.operator) {
-            .Add, .Mul, .Sub => return (imm > math.maxInt(i32)),
+            .Add, .Mul, .Sub, .AndB, .OrB, .Xor => return (imm > math.maxInt(i32)),
             else => false,
         },
         else => return false,
     };
+}
+
+fn isIllegalCmp(cmp: Cmp) bool {
+    return isIllegalCmpImmDst(cmp) or isIllegalCmpOperands(cmp);
 }
 
 // The second argument of a 'cmp' instruction must not be a constant (i.e. immediate value)
@@ -161,7 +160,7 @@ fn isIllegalCmpImmDst(cmp: Cmp) bool {
 // Comparison 'cmp' instructions must not have both args as memory addresses
 fn isIllegalCmpOperands(cmp: Cmp) bool {
     return (isMemoryAddress(cmp.arg1) and isMemoryAddress(cmp.arg2)) or
-        (cmp.type == .Quad and cmp.arg1 == .Imm);
+        (cmp.arg1 == .Imm and cmp.arg1.Imm > math.maxInt(i32));
 }
 
 // Operand of idiv must not be an immediate value

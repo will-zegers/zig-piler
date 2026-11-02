@@ -115,10 +115,9 @@ pub const Binary = struct {
                     .Neq => .NE,
                     else => unreachable,
                 };
-                const srcType: Type = .fromVal(symbols, binary.src1);
                 break :blk allocator.dupe(Instruction, &.{
-                    .{ .Cmp = .{ .type = srcType, .arg1 = src2, .arg2 = src1 } },
-                    .{ .Mov = .{ .type = .Long, .src = .{ .Imm = 0 }, .dst = dst } },
+                    .{ .Cmp = .{ .type = t, .arg1 = src2, .arg2 = src1 } },
+                    .{ .Mov = .{ .type = t, .src = .{ .Imm = 0 }, .dst = dst } },
                     .{ .SetCC = .{ .condition = cCode, .operand = dst } },
                 });
             },
@@ -238,17 +237,18 @@ pub const Unary = struct {
         const src: Operand = .fromVal(unary.src);
         const srcType: Type = .fromVal(symbols, unary.src);
         const dst: Operand = .{ .Pseudo = unary.dst.Var };
-        const dstType: Type = .fromVal(symbols, unary.dst);
-
-        switch (unary.operator) {
-            .Not => {},
-            else => assertTypes(symbols, src, dst),
-        }
+        const dstType: Type = switch (unary.operator) {
+            .Not => .Long, // 'not' always uses 4-byte operands
+            else => blk: {
+                assertTypes(symbols, src, dst);
+                break :blk .fromVal(symbols, unary.dst);
+            },
+        };
 
         return allocator.dupe(Instruction, switch (unary.operator) {
             .Not => &.{
                 .{ .Cmp = .{ .type = srcType, .arg1 = .{ .Imm = 0 }, .arg2 = src } },
-                .{ .Mov = .{ .type = .Long, .src = .{ .Imm = 0 }, .dst = dst } },
+                .{ .Mov = .{ .type = dstType, .src = .{ .Imm = 0 }, .dst = dst } },
                 .{ .SetCC = .{ .condition = .E, .operand = dst } },
             },
             .Negate, .Complement => &.{

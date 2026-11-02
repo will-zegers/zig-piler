@@ -261,7 +261,7 @@ fn typeCheckStatement(allocator: Allocator, symbols: *Symbol.Table, stmt: *State
                 case.cond = castTo(allocator, cond, parentType);
             }
 
-            case.registerToParentSwitch() catch {
+            case.registerToParentSwitch(allocator) catch {
                 ErrorReporter.report(.CaseDuplicate, case.lineIndex, null);
             };
 
@@ -286,7 +286,10 @@ fn typeCheckExpression(allocator: Allocator, symbols: *Symbol.Table, expr: *Expr
         .Binary => |*bin| {
             const lType = typeCheckExpression(allocator, symbols, bin.left);
             const rType = typeCheckExpression(allocator, symbols, bin.right);
-            const commonType = getCommonType(lType, rType);
+            const commonType = switch (bin.operator) {
+                .SAL, .SAR => lType, // bit-shifts are a special case that always assmue the type of the base number
+                else => getCommonType(lType, rType),
+            };
 
             bin.type = commonType;
             bin.left.* = castTo(allocator, bin.left, commonType);
@@ -314,16 +317,17 @@ fn typeCheckExpression(allocator: Allocator, symbols: *Symbol.Table, expr: *Expr
                 return fcall.type.?;
             }
             const funType = symbol.type.FunType;
+            fcall.type = funType.ret.*;
+
             if (funType.params.len > fcall.args.len) {
                 ErrorReporter.report(.TooFewArguments, fcall.lineIndex, null);
-            }
-            if (funType.params.len < fcall.args.len) {
+            } else if (funType.params.len < fcall.args.len) {
                 ErrorReporter.report(.TooManyArguments, fcall.lineIndex, null);
-            }
-
-            fcall.type = symbol.type.FunType.ret.*;
-            for (fcall.args) |*arg| {
-                _ = typeCheckExpression(allocator, symbols, arg);
+            } else {
+                for (fcall.args, funType.params) |*arg, param| {
+                    _ = typeCheckExpression(allocator, symbols, arg);
+                    arg.* = castTo(allocator, arg, param.*);
+                }
             }
 
             return fcall.type.?;

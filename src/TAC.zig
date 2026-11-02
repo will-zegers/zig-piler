@@ -247,7 +247,7 @@ fn emitStatement(allocator: Allocator, context: *Context, instructions: *Instruc
                 if (case.cond) |cond| { // ignore 'default' for now
                     const e = emitExpression(allocator, context, instructions, cond);
                     try instructions.append(allocator, .{ .Binary = .{ .operator = .Eq, .src1 = c, .src2 = e, .dst = dst } });
-                    try instructions.append(allocator, .{ .JumpIfNotZero = .{ .condition = dst, .target = &case.tag } });
+                    try instructions.append(allocator, .{ .JumpIfNotZero = .{ .condition = dst, .target = case.tag.? } });
                 }
             }
             // jump to the default statement if one exists, else to the end of the switch statement
@@ -262,7 +262,7 @@ fn emitStatement(allocator: Allocator, context: *Context, instructions: *Instruc
             try instructions.append(allocator, .{ .Label = .{ .identifier = switchBreak } });
         },
         .Case => |case| {
-            try instructions.append(allocator, .{ .Label = .{ .identifier = &case.tag } });
+            try instructions.append(allocator, .{ .Label = .{ .identifier = case.tag.? } });
             if (case.body) |body| try emitStatement(allocator, context, instructions, body.*);
         },
     }
@@ -288,11 +288,7 @@ fn emitAssignment(allocator: Allocator, context: *Context, instructions: *Instru
 
     // If this is a compound assignment, we need to emit a binary instruction.
     // Otherwise, for simple assignments we just emit a copy.
-    try instructions.append(allocator, if (assign.operator) |op|
-        .{ .Binary = .{ .operator = op, .src1 = dst, .src2 = result, .dst = dst } }
-    else
-        .{ .Copy = .{ .src = result, .dst = dst } });
-
+    try instructions.append(allocator, .{ .Copy = .{ .src = result, .dst = dst } });
     return dst;
 }
 
