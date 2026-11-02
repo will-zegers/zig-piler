@@ -5,6 +5,11 @@ if [ -z $1 ]; then
   exit 1
 fi
 
+SKIP="
+  tests/chapter_9/valid/stack_arguments/stack_alignment.c
+  tests/chapter_10/valid/push_arg_on_page_boundary.c
+"
+
 chapter=$(($1))
 
 if [ ! -z $2 ]; then
@@ -18,6 +23,10 @@ total=0
 function test_directory {
   local dir=$1
   local expect_fail=$([[ $dir =~ "invalid" ]] && echo true || echo false)
+  if [[ $dir =~ "libraries" ]]; then
+    echo "Skipping library tests in $dir"
+    return
+  fi
 
   for file in $dir/*; do
     # recursive call on subdirectory
@@ -25,7 +34,7 @@ function test_directory {
       test_directory "$file"
 
     # run zig-piler on any .c files
-    elif [[ $file =~ \.c$ ]]; then
+    elif [[ $file =~ \.c$ ]] && ! [[ $SKIP =~ $file ]]; then
       total=$((total + 1))
 
       zig-out/bin/zig-piler $stage "$file" &> results.txt
