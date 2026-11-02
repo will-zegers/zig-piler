@@ -223,12 +223,12 @@ fn resolveStatementIdentifiers(allocator: Allocator, context: *Context, statemen
 fn resolveExpression(allocator: Allocator, context: *Context, expr: *Expression) void {
     switch (expr.*) {
         .Assignment => |*assign| {
+            resolveExpression(allocator, context, assign.rhs);
             if (assign.lhs.* != .Var) {
                 context.err.report(.NotAssignable, assign.lineIndex, null);
+                return;
             }
-
             resolveExpression(allocator, context, assign.lhs);
-            resolveExpression(allocator, context, assign.rhs);
         },
         .Binary => |*binary| {
             resolveExpression(allocator, context, binary.left);

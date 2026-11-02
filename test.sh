@@ -60,6 +60,7 @@ for (( i = 1; i <= chapter; i++ )); do
   echo "Testing chapter $i"
   test_directory "tests/chapter_$i"
 done
+rm $out_file
 
 if [[ $passed -eq $total ]]; then echo -n 🥳
 elif [[ $passed -gt $(($total - $passed)) ]]; then echo -n 🤔
@@ -67,3 +68,4 @@ elif [[ $passed -gt 0 ]]; then echo -n 🫠
 else echo -n 💀
 fi
 echo " $passed / $total tests successfull "
+

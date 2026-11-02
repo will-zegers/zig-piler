@@ -6,14 +6,15 @@ const Token = @import("../Lexer.zig").Token;
 pub const identifier = []const u8;
 
 pub const ParsingError = error{
+    DefaultArgument,
     DuplicateCase,
     EOF,
+    ForLoopFunDecl,
     InvalidType,
     InvalidStorageClass,
     InvalidSignage,
     Lvalue,
     MaxCaseCount,
-    NonConstExpr,
     Syntax,
     Token,
 };

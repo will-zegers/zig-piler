@@ -41,7 +41,7 @@ pub fn init(allocator: Allocator) !Lexer {
     return .{
         .allocator = allocator,
         .reIdentifier = try .init("[a-zA-Z_]\\w*\\b"),
-        .reConstant = try .init("[0-9]+([Ll]|[Uu]|[Ll][Uu]|[Uu][Ll])?\\b"), // numbers plus long/unsigned specifiers
+        .reConstant = try .init("[0-9]+([Ll][Uu]|[Uu][Ll]|[Ll]|[Uu])?\\b"), // numbers plus long/unsigned specifiers
         .reComment = try .init("//[^\n]*|/\\*([^*]|\\*+[^*/])*\\*+/"),
         .reMacro = try .init("\\#[^\n]*"),
     };

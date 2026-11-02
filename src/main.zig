@@ -77,14 +77,7 @@ pub fn main(init: process.Init) !void {
 
         if (stage.includes(.Parse)) {
             log.info("Running parser...", .{});
-            tree = Parser.parse(allocator, &tokens) catch {
-                // TODO: can only catch and log one error at a time. Maybe try to
-                // make this more granular at the function/declaration level to
-                // catch more errors at once
-                const index = tokens.lineIndex;
-                log.err(" {d} | {s}\n", .{ index + 1, file.lines[index] });
-                process.exit(1);
-            };
+            tree = Parser.parse(allocator, &tokens, file.lines);
 
             if (debug) {
                 std.debug.print("-------parsed-------\n", .{});

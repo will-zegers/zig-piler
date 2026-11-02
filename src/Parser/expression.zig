@@ -135,27 +135,33 @@ pub const Assignment = struct {
     type: ?Type = null,
     lhs: *Expression,
     rhs: *Expression,
+    isCompound: bool,
 
     pub fn parse(allocator: Allocator, token: Token, lhs: Expression, rhs: Expression) ParsingError!Assignment {
         const lhsPtr = allocator.create(Expression) catch allocError();
         lhsPtr.* = lhs;
 
         const rhsPtr = allocator.create(Expression) catch allocError();
+        var isCompound: bool = undefined;
         if (OperatorMap.get(token.symbol)) |op| {
             rhsPtr.* = .{ .Binary = try .parse(allocator, token.lineIndex, op, lhs, rhs) };
+            isCompound = true;
         } else {
             if (!mem.eql(u8, "=", token.symbol)) return unexpectedToken(token);
+
             rhsPtr.* = rhs;
+            isCompound = false;
         }
 
-        return .{ .lineIndex = token.lineIndex, .lhs = lhsPtr, .rhs = rhsPtr };
+        return .{ .lineIndex = token.lineIndex, .lhs = lhsPtr, .rhs = rhsPtr, .isCompound = isCompound };
     }
 
     pub fn deinit(self: Assignment, allocator: Allocator) void {
         defer allocator.destroy(self.lhs);
         defer allocator.destroy(self.rhs);
 
-        Expression.deinit(self.lhs, allocator);
+        // If this is a compound assignment, let the underlying binary expression clean up the lhs pointer
+        if (!self.isCompound) Expression.deinit(self.lhs, allocator);
         Expression.deinit(self.rhs, allocator);
     }
 };
@@ -241,6 +247,10 @@ pub const Cast = struct {
     pub fn parse(allocator: Allocator, tokens: *Token.Iterator) ParsingError!Cast {
         try expect(.OpenParenthesis, tokens.next());
         const target = try Specifiers.parse(tokens);
+        if (target.storageClass != null) {
+            log.err("Invalid storage class specifier in function declarator", .{});
+            return ParsingError.InvalidStorageClass;
+        }
         try expect(.CloseParenthesis, tokens.next());
 
         const exp = allocator.create(Expression) catch allocError();
@@ -441,7 +451,7 @@ pub const Unary = struct {
     pub fn deinit(self: *Unary, allocator: Allocator) void {
         defer allocator.destroy(self.operand);
 
-        Expression.deinit(self.operand, allocator);
+        self.operand.deinit(allocator);
     }
 };
 

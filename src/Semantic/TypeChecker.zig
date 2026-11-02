@@ -83,18 +83,6 @@ fn typeCheckFunDecl(allocator: Allocator, symbols: *Symbol.Table, decl: *FunDecl
         .attrs = attrs,
     }) catch allocError();
 
-    for (decl.params) |param| {
-        if (param.storageClass != null) {
-            ErrorReporter.report(.InvalidStorageClass, param.lineIndex, param.name);
-            return;
-        }
-
-        if (param.init != null) {
-            ErrorReporter.report(.DefaultArgument, param.lineIndex, param.name);
-            return;
-        }
-    }
-
     if (decl.body) |*body| {
         for (decl.params) |param| {
             symbols.put(param.unique.?, .{ .type = param.type, .attrs = .Local }) catch allocError();
@@ -236,10 +224,6 @@ fn typeCheckStatement(allocator: Allocator, symbols: *Symbol.Table, stmt: *State
         .For => |*f| {
             switch (f.init) {
                 .Declaration => |*decl| {
-                    if (decl.* == .FunDecl) {
-                        ErrorReporter.report(.ForLoopFunctionDecl, decl.FunDecl.lineIndex, decl.FunDecl.name);
-                        return;
-                    }
                     if (decl.* == .VarDecl and decl.VarDecl.storageClass != null) {
                         ErrorReporter.report(.ForLoopStorageClassDecl, decl.VarDecl.lineIndex, decl.VarDecl.name);
                         return;
@@ -258,6 +242,11 @@ fn typeCheckStatement(allocator: Allocator, symbols: *Symbol.Table, stmt: *State
         },
         .Case => |*case| {
             if (case.cond) |*cond| {
+                // No current support for chars or the 'const' keyword, so only expect null or literal constants
+                if (cond.* != .Constant) {
+                    ErrorReporter.report(.NonConstCase, case.lineIndex, null);
+                    return;
+                }
                 _ = typeCheckExpression(allocator, symbols, cond);
                 const parentType = case.parent.?.cond.getType();
                 case.cond = castTo(allocator, cond, parentType);
@@ -299,10 +288,6 @@ fn typeCheckExpression(allocator: Allocator, symbols: *Symbol.Table, expr: *Expr
             return bin.type.?;
         },
         .Cast => |*cast| {
-            if (cast.target.storageClass != null) {
-                ErrorReporter.report(.InvalidStorageClass, cast.lineIndex, null);
-            }
-
             _ = typeCheckExpression(allocator, symbols, cast.exp);
             return cast.target.type.?;
         },

@@ -1,8 +1,9 @@
 const std = @import("std");
-const mem = std.mem;
-const Allocator = mem.Allocator;
 const ArrayList = std.ArrayList;
 const log = std.log;
+const mem = std.mem;
+const Allocator = mem.Allocator;
+const process = std.process;
 
 const Token = @import("Lexer.zig").Token;
 const TokenIterator = Token.Iterator;
@@ -31,8 +32,15 @@ const Parser = @This();
 
 pub const AST = Program;
 
-pub fn parse(allocator: Allocator, tokens: *TokenIterator) ParsingError!AST {
-    const program = try Program.parse(allocator, tokens);
+pub fn parse(allocator: Allocator, tokens: *TokenIterator, textLines: [][]const u8) AST {
+    const program = Program.parse(allocator, tokens) catch {
+        // TODO: can only catch and log one error at a time. Maybe try to
+        // make this more granular at the function/declaration level to
+        // catch more errors at once
+        const index = tokens.lineIndex;
+        log.err(" {d} | {s}\n", .{ index + 1, textLines[index] });
+        process.exit(1);
+    };
     if (!tokens.eofReached()) {
         const token = tokens.next();
         std.log.err("Unexpected token(s) at end of file: {s}", .{token.symbol});
@@ -171,6 +179,14 @@ pub const FunDecl = struct {
         if (nextToken.type != .Void) {
             while (true) {
                 const varDecl: VarDecl = try .parse(allocator, tokens);
+                if (varDecl.storageClass != null) {
+                    log.err("Invalid storage class specifier in function declarator", .{});
+                    return ParsingError.InvalidStorageClass;
+                }
+                if (varDecl.init != null) {
+                    log.err("C does not support default arguments", .{});
+                    return ParsingError.DefaultArgument;
+                }
                 params.append(allocator, varDecl) catch allocError();
 
                 nextToken = tokens.peek();
@@ -372,11 +388,6 @@ pub const Case = struct {
             else => unreachable, // the statement parser already guards against other cases
         };
 
-        // No current support for chars or the 'const' keyword, so only expect null or literal constants
-        if (cond != null and cond.? != .Constant) {
-            std.log.err("Non-constant expression", .{});
-            return ParsingError.NonConstExpr;
-        }
         const lineIndex = nextToken.lineIndex;
         try expect(.Colon, tokens.next());
 
@@ -506,7 +517,13 @@ const ForInit = union(ForInitTag) {
         const nextToken = tokens.peek();
         switch (nextToken.type) {
             .Int, .Long, .Extern, .Static => {
-                return .{ .Declaration = try .parse(allocator, tokens) };
+                const decl: Declaration = try .parse(allocator, tokens);
+                if (decl == .FunDecl) {
+                    log.err("Expected variable declarator or expression", .{});
+                    return ParsingError.ForLoopFunDecl;
+                }
+
+                return .{ .Declaration = decl };
             },
             else => {
                 const expr: ?Expression = if (.Semicolon != nextToken.type)
