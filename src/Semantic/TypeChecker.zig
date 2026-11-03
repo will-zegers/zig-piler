@@ -49,26 +49,29 @@ fn typeCheckFunDecl(allocator: Allocator, symbols: *Symbol.Table, decl: *FunDecl
     var isGlobal: bool = decl.storageClass != .Static;
 
     if (symbols.get(decl.name)) |entry| {
-        if (entry.type != .FunType or entry.type.FunType.params.len != decl.params.len) {
+        if (entry.type != .FunType or // previous entry should be a function declaration, not variable
+            entry.type.FunType.params.len != decl.params.len or // ...and have the same number of params
+            !entry.type.FunType.ret.*.equals(decl.type.FunType.ret.*)) // ...and the same return type
+        {
             ErrorReporter.report(.ConflictingFunctions, decl.lineIndex, decl.name);
             return;
         }
 
         for (decl.params, entry.type.FunType.params) |p, t| {
-            if (!p.type.equals(t.*)) {
+            if (!p.type.equals(t.*)) { // all params align on types
                 ErrorReporter.report(.ConflictingFunctions, decl.lineIndex, decl.name);
                 return;
             }
         }
 
         isDefined = entry.attrs.Fun.defined;
-        if (isDefined and decl.body != null) {
+        if (isDefined and decl.body != null) { // check if this is a redeclaration
             ErrorReporter.report(.Redeclaration, decl.lineIndex, decl.name);
             return;
         }
 
         isGlobal = entry.attrs.Fun.global;
-        if (isGlobal and decl.storageClass == .Static) {
+        if (isGlobal and decl.storageClass == .Static) { // ensure declarations agree on linkage
             ErrorReporter.report(.InvalidStaticDeclaration, decl.lineIndex, decl.name);
             return;
         }
@@ -165,9 +168,9 @@ fn typeCheckLocalVarDecl(allocator: Allocator, symbols: *Symbol.Table, decl: *Va
         var initialValue: Symbol.Static.InitialValue = switch (decl.type) {
             .Int => .{ .Initial = .{ .int = 0 } },
             .Long => .{ .Initial = .{ .long = 0 } },
-            .FunType => unreachable,
             .UInt => .{ .Initial = .{ .uint = 0 } },
             .ULong => .{ .Initial = .{ .ulong = 0 } },
+            .FunType => unreachable,
         };
         if (decl.init) |init| {
             if (init.Assignment.rhs.* == .Constant) {

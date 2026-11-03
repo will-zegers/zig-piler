@@ -387,6 +387,11 @@ fn printTACFunction(function: TAC.Function) void {
                 printVal("dst: ", unary.dst, "");
                 print(")\n", .{});
             },
+            .ZeroExtend => |ze| {
+                printVal("src: ", ze.src, ", ");
+                printVal("dst: ", ze.dst, "");
+                print(")\n", .{});
+            },
         }
     }
     print("    )\n", .{});

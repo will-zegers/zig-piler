@@ -352,17 +352,36 @@ fn emitCast(allocator: Allocator, context: *Context, instructions: *Instructions
 
     const to = cast.target.type.?;
     const exprType = cast.exp.getType();
-    if (exprType.equals(to)) return expr;
+    if (exprType.equals(to)) return expr; // no cast necessary
 
     const tag = try newVariable(allocator, context, to);
     const dst: Val = .{ .Var = tag };
 
+    // TODO: attach a size to Type to make this check more concise
     switch (to) {
-        .Int => try instructions.append(allocator, .{ .Truncate = .{ .src = expr, .dst = dst } }),
-        .Long => try instructions.append(allocator, .{ .SignExtend = .{ .src = expr, .dst = dst } }),
+        .Int => switch (exprType) {
+            .UInt => try instructions.append(allocator, .{ .Copy = .{ .src = expr, .dst = dst } }),
+            .Long, .ULong => try instructions.append(allocator, .{ .Truncate = .{ .src = expr, .dst = dst } }),
+            .Int, .FunType => unreachable,
+        },
+        .Long => switch (exprType) {
+            .Int => try instructions.append(allocator, .{ .SignExtend = .{ .src = expr, .dst = dst } }),
+            .UInt => try instructions.append(allocator, .{ .ZeroExtend = .{ .src = expr, .dst = dst } }),
+            .ULong => try instructions.append(allocator, .{ .Copy = .{ .src = expr, .dst = dst } }),
+            .Long, .FunType => unreachable,
+        },
+        .UInt => switch (exprType) {
+            .Int => try instructions.append(allocator, .{ .Copy = .{ .src = expr, .dst = dst } }),
+            .Long, .ULong => try instructions.append(allocator, .{ .Truncate = .{ .src = expr, .dst = dst } }),
+            .UInt, .FunType => unreachable,
+        },
+        .ULong => switch (exprType) {
+            .Int => try instructions.append(allocator, .{ .SignExtend = .{ .src = expr, .dst = dst } }),
+            .Long => try instructions.append(allocator, .{ .Copy = .{ .src = expr, .dst = dst } }),
+            .UInt => try instructions.append(allocator, .{ .ZeroExtend = .{ .src = expr, .dst = dst } }),
+            .ULong, .FunType => unreachable,
+        },
         .FunType => unreachable,
-        .UInt => unreachable,
-        .ULong => unreachable,
     }
 
     return dst;
@@ -459,7 +478,9 @@ fn emitStorageClassSymbols(allocator: Allocator, symbols: *Symbol.Table) []TopLe
                             .init = switch (entry.type) {
                                 .Int => .{ .int = 0 },
                                 .Long => .{ .long = 0 },
-                                else => unreachable,
+                                .UInt => .{ .uint = 0 },
+                                .ULong => .{ .ulong = 0 },
+                                .FunType => unreachable,
                             },
                         } };
                         symbolDefs.append(allocator, staticVariable) catch allocError();

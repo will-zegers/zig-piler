@@ -57,6 +57,7 @@ pub const Instruction = union(InstructionTag) {
             .SignExtend => signExtend(allocator, symbols, instruction.SignExtend),
             .Truncate => truncate(allocator, symbols, instruction.Truncate),
             .Unary => Unary.toAssembly(allocator, symbols, instruction.Unary),
+            .ZeroExtend => unreachable,
         };
     }
 
@@ -69,8 +70,9 @@ pub const Instruction = union(InstructionTag) {
             .Mov => self.Mov.type,
             .Movsx => self.Movsx.type,
             .Push => self.Push.type,
+            .Ret => self.Ret.type,
             .Unary => self.Unary.type,
-            else => null,
+            .Call, .Jmp, .JmpCC, .Label, .SetCC => null,
         };
     }
 };
@@ -212,13 +214,15 @@ pub const Movsx = struct { type: Type, src: Operand, dst: Operand };
 pub const Push = struct { type: Type = .Quad, operand: Operand };
 
 pub const Ret = struct {
+    type: Type,
+
     pub fn toAssembly(allocator: Allocator, symbols: Symbol.Table, ret: TAC.Return) []Instruction {
         const val: Operand = .fromVal(ret.val);
         const t: Type = .fromVal(symbols, ret.val);
 
         return allocator.dupe(Instruction, &.{
             .{ .Mov = .{ .type = t, .src = val, .dst = .{ .Reg = .ax } } },
-            .{ .Ret = .{} },
+            .{ .Ret = .{ .type = t } },
         }) catch allocError();
     }
 };

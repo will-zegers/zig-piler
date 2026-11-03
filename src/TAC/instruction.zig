@@ -12,6 +12,7 @@ const InstructionTag = enum {
     SignExtend,
     Truncate,
     Unary,
+    ZeroExtend,
 };
 pub const Instruction = union(InstructionTag) {
     Binary: Binary,
@@ -25,6 +26,7 @@ pub const Instruction = union(InstructionTag) {
     SignExtend: SignExtend,
     Truncate: Truncate,
     Unary: Unary,
+    ZeroExtend: ZeroExtend,
 };
 
 pub const Binary = struct {
@@ -63,6 +65,8 @@ pub const Unary = struct {
     src: Val,
     dst: Val,
 };
+
+pub const ZeroExtend = struct { src: Val, dst: Val };
 
 const ValTag = enum { Constant, Var };
 pub const Val = union(ValTag) { Constant: Constant, Var: Var };
