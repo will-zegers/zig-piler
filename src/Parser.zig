@@ -98,7 +98,7 @@ pub const Declaration = union(DeclarationTag) {
         var tokenIndex: usize = 0;
         while (true) {
             switch (tokens.lookAhead(tokenIndex).type) {
-                .Extern, .Int, .Long, .Static => tokenIndex += 1,
+                .Extern, .Int, .Long, .Signed, .Static, .Unsigned => tokenIndex += 1,
                 else => break,
             }
         }
@@ -248,7 +248,7 @@ pub const BlockItem = union(BlockItemTag) {
     pub fn parse(allocator: Allocator, tokens: *TokenIterator) ParsingError!BlockItem {
         const nextToken = tokens.peek();
         return switch (nextToken.type) {
-            .Int, .Long, .Extern, .Static => .{ .Declaration = try .parse(allocator, tokens) },
+            .Int, .Long, .Extern, .Signed, .Static, .Unsigned => .{ .Declaration = try .parse(allocator, tokens) },
             else => .{ .Statement = try .parse(allocator, tokens) },
         };
     }
@@ -421,16 +421,16 @@ pub const Case = struct {
 
             const parentType = self.parent.?.cond.getType();
             switch (parentType) {
-                .Int => {
-                    // We bit-cast the labels to unsigned to disallow '-' in the generated labels
+                // We bit-cast the labels to unsigned to disallow '-' in the generated labels
 
-                    // Note: actual number truncation will be handled by assembly instructions, here
-                    // we just need to make sure truncation will not generate a duplicate case.
+                // Note: actual number truncation will be handled by assembly instructions, here
+                // we just need to make sure truncation will not generate a duplicate case.
+                .Int => {
                     const int: i32 = switch (value) {
                         .int => value.int,
                         .long => @truncate(value.long),
-                        .uint => unreachable,
-                        .ulong => unreachable,
+                        .uint => @bitCast(value.uint),
+                        .ulong => @truncate(@as(i64, @bitCast(value.ulong))),
                     };
                     return allocator.print("{s}.{d}", .{ self.parent.?.tag.?, @as(u32, @bitCast(int)) }) catch allocError();
                 },
@@ -438,12 +438,30 @@ pub const Case = struct {
                     const long: i64 = switch (value) {
                         .int => value.int,
                         .long => value.long,
-                        .uint => unreachable,
-                        .ulong => unreachable,
+                        .uint => value.uint,
+                        .ulong => @bitCast(value.ulong),
                     };
                     return allocator.print("{s}.{d}", .{ self.parent.?.tag.?, @as(u64, @bitCast(long)) }) catch allocError();
                 },
-                else => unreachable,
+                .UInt => {
+                    const uint: u32 = switch (value) {
+                        .int => @bitCast(value.int),
+                        .long => @truncate(@as(u64, @bitCast(value.long))),
+                        .uint => value.uint,
+                        .ulong => @truncate(value.ulong),
+                    };
+                    return allocator.print("{s}.{d}", .{ self.parent.?.tag.?, uint }) catch allocError();
+                },
+                .ULong => {
+                    const ulong: u64 = switch (value) {
+                        .int => @bitCast(@as(i64, value.int)),
+                        .long => @bitCast(value.long),
+                        .uint => value.uint,
+                        .ulong => value.ulong,
+                    };
+                    return allocator.print("{s}.{d}", .{ self.parent.?.tag.?, ulong }) catch allocError();
+                },
+                .FunType => unreachable,
             }
         } else {
             return allocator.print("{s}.default", .{self.parent.?.tag.?}) catch unreachable;
@@ -516,7 +534,7 @@ const ForInit = union(ForInitTag) {
     pub fn parse(allocator: Allocator, tokens: *TokenIterator) ParsingError!ForInit {
         const nextToken = tokens.peek();
         switch (nextToken.type) {
-            .Int, .Long, .Extern, .Static => {
+            .Int, .Long, .Extern, .Signed, .Static, .Unsigned => {
                 const decl: Declaration = try .parse(allocator, tokens);
                 if (decl == .FunDecl) {
                     log.err("Expected variable declarator or expression", .{});

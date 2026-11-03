@@ -24,7 +24,7 @@ const KeywordMap = std.StaticStringMap(Token.Type).initComptime(.{
     .{ "signed", .Signed },
     .{ "static", .Static },
     .{ "switch", .Switch },
-    .{ "unsigend", .Unsigned },
+    .{ "unsigned", .Unsigned },
     .{ "void", .Void },
     .{ "while", .While },
 });

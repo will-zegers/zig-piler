@@ -21,6 +21,8 @@ pub const ParsingError = error{
 
 pub const TypeTag = enum { Int, Long, FunType, UInt, ULong };
 pub const Type = union(TypeTag) {
+    const Signage = enum { Signed, Unsigned };
+
     Int: void,
     Long: void,
     FunType: struct {
@@ -30,16 +32,19 @@ pub const Type = union(TypeTag) {
     UInt: void,
     ULong: void,
 
-    pub fn parse(types: [2]?Type, symbol: []const u8) !Type {
+    pub fn parse(types: [2]?Type, signage: ?Signage, symbol: []const u8) !Type {
         if (types[1] == null) {
             if (types[0] == null) {
-                log.err("Declaration for '{s}' does not name a type", .{symbol});
-                return ParsingError.InvalidType;
+                if (signage == null) {
+                    log.err("Declaration for '{s}' does not name a type", .{symbol});
+                    return ParsingError.InvalidType;
+                }
+                return if (signage.? == .Unsigned) .UInt else .Int;
             }
 
             switch (types[0].?) {
-                .Int => return .Int,
-                .Long => return .Long,
+                .Int => return if (signage != null and signage.? == .Unsigned) .UInt else .Int,
+                .Long => return if (signage != null and signage.? == .Unsigned) .ULong else .Long,
                 else => {
                     log.err("Invalid type specifier '{any} {any}'", .{ types[0].?, types[1].? });
                     return ParsingError.InvalidType;
@@ -47,36 +52,23 @@ pub const Type = union(TypeTag) {
             }
         }
 
+        // TODO: equals()
         if ((types[0].? == .Int and types[1].? == .Long) or (types[0].? == .Long and types[1].? == .Int)) {
-            return .Long;
+            return if (signage != null and signage.? == .Unsigned) .Long else .Long;
         }
 
         log.err("Invalid type specifier '{any} {any}'", .{ types[0].?, types[1].? });
         return ParsingError.InvalidType;
     }
 
+    // Helper function since unions can't use comparison operators directly
     pub fn equals(self: Type, other: Type) bool {
         return switch (self) {
-            .Int => switch (other) {
-                .Int => true,
-                else => false,
-            },
-            .Long => switch (other) {
-                .Long => true,
-                else => false,
-            },
-            .FunType => switch (other) {
-                .FunType => true,
-                else => false,
-            },
-            .UInt => switch (other) {
-                .UInt => true,
-                else => false,
-            },
-            .ULong => switch (other) {
-                .ULong => true,
-                else => false,
-            },
+            .FunType => other == .FunType,
+            .Int => other == .Int,
+            .Long => other == .Long,
+            .UInt => other == .UInt,
+            .ULong => other == .ULong,
         };
     }
 };
@@ -91,7 +83,7 @@ pub const Specifiers = struct {
     pub fn parse(tokens: *Token.Iterator) ParsingError!Specifiers {
         var nextToken = tokens.peek();
         var specifiers: Specifiers = .{ .lineIndex = nextToken.lineIndex };
-        var signage: ?enum { Signed, Unsigned } = null;
+        var signage: ?Type.Signage = null;
 
         var typeIndex: usize = 0;
         var types = [2]?Type{ null, null };
@@ -117,10 +109,13 @@ pub const Specifiers = struct {
                         return ParsingError.InvalidSignage;
                     }
                     signage = switch (nextToken.type) {
+                        // note: different enums
+                        // Token.Type => Type.Signage
                         .Signed => .Signed,
                         .Unsigned => .Unsigned,
                         else => unreachable,
                     };
+                    tokens.skip();
                 },
                 .Extern, .Static => {
                     if (specifiers.storageClass != null) {
@@ -140,14 +135,7 @@ pub const Specifiers = struct {
             nextToken = tokens.peek();
         }
 
-        const t: Type = try Type.parse(types, nextToken.symbol);
-        specifiers.type = switch (t) {
-            .Int => if (signage != null and signage.? == .Unsigned) .UInt else .Int,
-            .Long => if (signage != null and signage.? == .Unsigned) .ULong else .Long,
-            else => unreachable,
-        };
-
-        specifiers.type = try Type.parse(types, nextToken.symbol);
+        specifiers.type = try Type.parse(types, signage, nextToken.symbol);
         return specifiers;
     }
 };

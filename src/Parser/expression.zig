@@ -480,14 +480,17 @@ fn parseFactor(allocator: Allocator, tokens: *TokenIterator) ParsingError!Expres
         },
         .OpenParenthesis => blk: { // '(' <expr> ')'
             const nextToken = tokens.peek();
-            if (nextToken.type == .Int or nextToken.type == .Long) {
-                tokens.rewind();
-                break :blk .{ .Cast = try Cast.parse(allocator, tokens) };
-            } else {
-                const expr: Expression = try .parse(allocator, tokens, 0);
-                const next = tokens.next();
-                if (next.type != .CloseParenthesis) return unexpectedToken(token);
-                break :blk expr;
+            switch (nextToken.type) {
+                .Int, .Long, .Signed, .Unsigned => {
+                    tokens.rewind();
+                    break :blk .{ .Cast = try Cast.parse(allocator, tokens) };
+                },
+                else => {
+                    const expr: Expression = try .parse(allocator, tokens, 0);
+                    const next = tokens.next();
+                    if (next.type != .CloseParenthesis) return unexpectedToken(token);
+                    break :blk expr;
+                },
             }
         },
         else => return unexpectedToken(token),
