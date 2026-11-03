@@ -204,7 +204,7 @@ fn typeCheckStatement(allocator: Allocator, symbols: *Symbol.Table, stmt: *State
             _ = typeCheckExpression(allocator, symbols, &ret.expr);
 
             const symbol = symbols.get(FunctionName.?) orelse unreachable;
-            ret.expr = castTo(allocator, &ret.expr, symbol.type.FunType.ret.*);
+            ret.expr = Cast.to(allocator, &ret.expr, symbol.type.FunType.ret.*);
         },
         .Expression => |*expr| _ = typeCheckExpression(allocator, symbols, expr),
         .If => |*ifStmt| {
@@ -249,7 +249,7 @@ fn typeCheckStatement(allocator: Allocator, symbols: *Symbol.Table, stmt: *State
                 }
                 _ = typeCheckExpression(allocator, symbols, cond);
                 const parentType = case.parent.?.cond.getType();
-                case.cond = castTo(allocator, cond, parentType);
+                case.cond = Cast.to(allocator, cond, parentType);
             }
 
             case.registerToParentSwitch(allocator) catch {
@@ -269,7 +269,7 @@ fn typeCheckExpression(allocator: Allocator, symbols: *Symbol.Table, expr: *Expr
             _ = typeCheckExpression(allocator, symbols, assign.rhs);
 
             assign.type = lType;
-            assign.rhs.* = castTo(allocator, assign.rhs, lType);
+            assign.rhs.* = Cast.to(allocator, assign.rhs, lType);
 
             return assign.type.?;
         },
@@ -278,12 +278,12 @@ fn typeCheckExpression(allocator: Allocator, symbols: *Symbol.Table, expr: *Expr
             const rType = typeCheckExpression(allocator, symbols, bin.right);
             const commonType = switch (bin.operator) {
                 .SAL, .SAR => lType, // bit-shifts are a special case that always assmue the type of the base number
-                else => getCommonType(lType, rType),
+                else => lType.getCommonWith(rType),
             };
 
             bin.type = commonType;
-            bin.left.* = castTo(allocator, bin.left, commonType);
-            bin.right.* = castTo(allocator, bin.right, commonType);
+            bin.left.* = Cast.to(allocator, bin.left, commonType);
+            bin.right.* = Cast.to(allocator, bin.right, commonType);
 
             return bin.type.?;
         },
@@ -314,7 +314,7 @@ fn typeCheckExpression(allocator: Allocator, symbols: *Symbol.Table, expr: *Expr
             } else {
                 for (fcall.args, funType.params) |*arg, param| {
                     _ = typeCheckExpression(allocator, symbols, arg);
-                    arg.* = castTo(allocator, arg, param.*);
+                    arg.* = Cast.to(allocator, arg, param.*);
                 }
             }
 
@@ -325,13 +325,13 @@ fn typeCheckExpression(allocator: Allocator, symbols: *Symbol.Table, expr: *Expr
             const thenType = typeCheckExpression(allocator, symbols, tern.thenExpr);
             const elseType = typeCheckExpression(allocator, symbols, tern.elseExpr);
 
-            var commonType = getCommonType(ifType, thenType);
-            commonType = getCommonType(commonType, elseType);
+            var commonType = ifType.getCommonWith(thenType);
+            commonType = commonType.getCommonWith(elseType);
 
             tern.type = commonType;
-            tern.condition.* = castTo(allocator, tern.condition, commonType);
-            tern.thenExpr.* = castTo(allocator, tern.thenExpr, commonType);
-            tern.elseExpr.* = castTo(allocator, tern.elseExpr, commonType);
+            tern.condition.* = Cast.to(allocator, tern.condition, commonType);
+            tern.thenExpr.* = Cast.to(allocator, tern.thenExpr, commonType);
+            tern.elseExpr.* = Cast.to(allocator, tern.elseExpr, commonType);
 
             return tern.type.?;
         },
@@ -354,39 +354,6 @@ fn typeCheckExpression(allocator: Allocator, symbols: *Symbol.Table, expr: *Expr
             return v.type.?;
         },
     }
-}
-
-fn castTo(allocator: Allocator, exp: *const Expression, toType: Type) Expression {
-    const newExp: Expression = switch (exp.getType()) {
-        .Int => switch (toType) {
-            .Int => exp.*,
-            else => .{ .Cast = .to(allocator, exp, toType) },
-        },
-        .Long => switch (toType) {
-            .Long => exp.*,
-            else => .{ .Cast = .to(allocator, exp, toType) },
-        },
-        .FunType => exp.*,
-        .UInt => switch (toType) {
-            .UInt => exp.*,
-            else => .{ .Cast = .to(allocator, exp, toType) },
-        },
-        .ULong => switch (toType) {
-            .ULong => exp.*,
-            else => .{ .Cast = .to(allocator, exp, toType) },
-        },
-    };
-    return newExp;
-}
-
-fn getCommonType(type1: Type, type2: Type) Type {
-    return switch (type1) {
-        .Long => .Long,
-        else => switch (type2) {
-            .Int => .Int,
-            else => type2,
-        },
-    };
 }
 
 pub fn allocError() noreturn {

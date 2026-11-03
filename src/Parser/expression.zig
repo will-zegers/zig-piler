@@ -258,7 +258,9 @@ pub const Cast = struct {
         return .{ .lineIndex = target.lineIndex, .target = target, .exp = exp };
     }
 
-    pub fn to(allocator: Allocator, exp: *const Expression, toType: Type) Cast {
+    pub fn to(allocator: Allocator, exp: *const Expression, toType: Type) Expression {
+        if (toType.equals(exp.getType())) return exp.*; // same type, no cast needed
+
         const inner = allocator.create(Expression) catch allocError();
         inner.* = exp.*;
 
@@ -268,7 +270,7 @@ pub const Cast = struct {
             .exp = inner,
         };
 
-        return out;
+        return .{ .Cast = out };
     }
 
     pub fn deinit(self: *Cast, allocator: Allocator) void {

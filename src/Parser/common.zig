@@ -52,13 +52,25 @@ pub const Type = union(TypeTag) {
             }
         }
 
-        // TODO: equals()
-        if ((types[0].? == .Int and types[1].? == .Long) or (types[0].? == .Long and types[1].? == .Int)) {
-            return if (signage != null and signage.? == .Unsigned) .Long else .Long;
+        switch (types[1].?) { // current support for 'long int' and 'int long', both result in type 'long'
+            .Int => switch (types[0].?) {
+                .Int => {
+                    log.err("Invalid type specifier '{any} {any}'", .{ types[0].?, types[1].? });
+                    return ParsingError.InvalidType;
+                },
+                .Long => return if (signage != null and signage.? == .Unsigned) .ULong else .Long,
+                .FunType, .UInt, .ULong => unreachable,
+            },
+            .Long => switch (types[0].?) {
+                .Int => return if (signage != null and signage.? == .Unsigned) .ULong else .Long,
+                .Long => {
+                    log.err("Type 'long long' not currently supported", .{});
+                    return ParsingError.InvalidType;
+                },
+                .FunType, .UInt, .ULong => unreachable,
+            },
+            .FunType, .UInt, .ULong => unreachable,
         }
-
-        log.err("Invalid type specifier '{any} {any}'", .{ types[0].?, types[1].? });
-        return ParsingError.InvalidType;
     }
 
     // Helper function since unions can't use comparison operators directly
@@ -69,6 +81,30 @@ pub const Type = union(TypeTag) {
             .Long => other == .Long,
             .UInt => other == .UInt,
             .ULong => other == .ULong,
+        };
+    }
+
+    /// Follows the Sys V ABI rules to determine a common type: if two types are the
+    /// same size but with different signage, prefer the unsigned type; otherwise
+    /// prefer the larger type. (And same types obviously prefer that type)
+    pub fn getCommonWith(self: Type, other: Type) Type {
+        return switch (self) {
+            .Int => other,
+            .UInt => switch (other) {
+                .Int, .UInt => .UInt,
+                .Long, .ULong => other,
+                .FunType => unreachable,
+            },
+            .Long => switch (other) {
+                .ULong => .ULong,
+                .FunType => unreachable,
+                else => self,
+            },
+            .ULong => switch (other) {
+                .FunType => unreachable,
+                else => self,
+            },
+            .FunType => unreachable,
         };
     }
 };
