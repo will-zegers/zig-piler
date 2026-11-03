@@ -117,7 +117,7 @@ pub fn tokenize(self: *Lexer, text: [:0]const u8) !TokenIterator {
                 }
             },
             '~' => { // bitwise NOT operator (complement)
-                token = .{ .type = .UnaryOp, .symbol = "~", .associativity = .RightToLeft, .lineIndex = lineIndex }; //
+                token = .{ .type = .UnaryOp, .symbol = "~", .associativity = .RightToLeft, .lineIndex = lineIndex };
             },
             '!' => {
                 token = switch (remainingText[1]) {
@@ -129,7 +129,7 @@ pub fn tokenize(self: *Lexer, text: [:0]const u8) !TokenIterator {
                 token = switch (remainingText[1]) {
                     '=' => .{ .type = .BinaryOp, .symbol = "-=", .precedence = 30, .associativity = .RightToLeft, .lineIndex = lineIndex }, // subtraction assignment
                     '-' => switch (prevToken.type) {
-                        .Identifier, .CloseParenthesis => .{ .type = .UnaryOp, .symbol = "--", .precedence = 160, .associativity = .LeftToRight, .lineIndex = lineIndex },
+                        .Identifier, .CloseParenthesis, .UnaryOp => .{ .type = .UnaryOp, .symbol = "--", .precedence = 160, .associativity = .LeftToRight, .lineIndex = lineIndex },
                         else => .{ .type = .UnaryOp, .symbol = "--", .precedence = 150, .associativity = .RightToLeft, .lineIndex = lineIndex },
                     },
                     else => switch (prevToken.type) {
@@ -154,7 +154,7 @@ pub fn tokenize(self: *Lexer, text: [:0]const u8) !TokenIterator {
                 token = switch (remainingText[1]) {
                     '=' => .{ .type = .BinaryOp, .symbol = "+=", .precedence = 30, .associativity = .RightToLeft, .lineIndex = lineIndex }, // addition assignment
                     '+' => switch (prevToken.type) {
-                        .Identifier, .CloseParenthesis => .{ .type = .UnaryOp, .symbol = "++", .precedence = 160, .associativity = .LeftToRight, .lineIndex = lineIndex },
+                        .Identifier, .CloseParenthesis, .UnaryOp => .{ .type = .UnaryOp, .symbol = "++", .precedence = 160, .associativity = .LeftToRight, .lineIndex = lineIndex },
                         else => .{ .type = .UnaryOp, .symbol = "++", .precedence = 150, .associativity = .RightToLeft, .lineIndex = lineIndex },
                     },
                     else => .{ .type = .BinaryOp, .symbol = "+", .precedence = 130, .associativity = .LeftToRight, .lineIndex = lineIndex }, // addition

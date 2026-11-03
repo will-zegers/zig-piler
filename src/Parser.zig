@@ -213,16 +213,16 @@ pub const VarDecl = struct {
     pub fn parse(allocator: Allocator, tokens: *TokenIterator) ParsingError!VarDecl {
         const specifiers = try Specifiers.parse(tokens);
 
-        const token = tokens.next();
+        var token = tokens.next();
         try expect(.Identifier, token);
         const name = token.symbol;
 
         var init: ?Expression = null;
         if (mem.eql(u8, "=", tokens.peek().symbol)) {
             const lhs: Expression = .{ .Var = .{ .type = specifiers.type, .name = name, .lineIndex = token.lineIndex } };
-            const operator = tokens.next();
+            token = tokens.next();
             const rhs: Expression = try .parse(allocator, tokens, 0);
-            init = .{ .Assignment = try Assignment.parse(allocator, operator, lhs, rhs) };
+            init = .{ .Assignment = try Assignment.parse(allocator, token, lhs, rhs) };
         }
 
         return .{

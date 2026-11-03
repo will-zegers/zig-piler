@@ -36,7 +36,7 @@ pub const Expression = union(ExpressionTag) {
     Unary: Unary,
     Var: Var,
 
-    /// Evaluates expression from left-to-right for arithmetic, or right-to-left for assignment, operators.
+    /// Evaluates expression from left-to-right for arithmetic, or right-to-left for assignment operators.
     /// This is a recursive descent parser that uses the precedence climbing algorithm.
     pub fn parse(allocator: Allocator, tokens: *TokenIterator, minPrecedence: usize) ParsingError!Expression {
         var left = try parseFactor(allocator, tokens);
@@ -67,12 +67,8 @@ pub const Expression = union(ExpressionTag) {
                     else => return unexpectedToken(nextToken),
                 };
             } else {
-                left = switch (nextToken.type) {
-                    .UnaryOp => blk: { // <factor> '++'|'--'
-                        const temp = try Unary.post(allocator, nextToken, left);
-                        break :blk .{ .Unary = temp };
-                    },
-                    .BinaryOp => blk: { // <expr> '+'|'-'|'*'|'/'|'%'|'&'|'|' <expr>
+                left = blk: switch (nextToken.type) {
+                    .BinaryOp => { // <expr> '+'|'-'|'*'|'/'|'%'|'&'|'|' <expr>
                         const right = try parse(allocator, tokens, nextToken.precedence + 1);
                         const temp = try Binary.parse(allocator, nextToken.lineIndex, nextToken.symbol, left, right);
                         break :blk .{ .Binary = temp };
@@ -147,7 +143,10 @@ pub const Assignment = struct {
             rhsPtr.* = .{ .Binary = try .parse(allocator, token.lineIndex, op, lhs, rhs) };
             isCompound = true;
         } else {
-            if (!mem.eql(u8, "=", token.symbol)) return unexpectedToken(token);
+            if (!mem.eql(u8, "=", token.symbol)) {
+                log.err("Got unrecognized assignment operator '{s}'", .{token.symbol});
+                return ParsingError.Token;
+            }
 
             rhsPtr.* = rhs;
             isCompound = false;
@@ -430,22 +429,34 @@ pub const Unary = struct {
     operand: *Expression,
     order: enum { Pre, Post },
 
-    pub fn pre(allocator: Allocator, token: Token, left: Expression) ParsingError!Unary {
-        const operand = allocator.create(Expression) catch allocError();
-        operand.* = left;
-
+    pub fn pre(allocator: Allocator, token: Token, rhs: Expression) ParsingError!Expression {
         const operator: Operator = OperatorMap.get(token.symbol) orelse return unexpectedToken(token);
-        return .{ .operator = operator, .operand = operand, .order = .Pre, .lineIndex = token.lineIndex };
+
+        const operand = allocator.create(Expression) catch allocError();
+        operand.* = rhs;
+        return .{ .Unary = .{
+            .operator = operator,
+            .operand = operand,
+            .order = .Pre,
+            .lineIndex = token.lineIndex,
+        } };
     }
 
-    pub fn post(allocator: Allocator, token: Token, right: Expression) ParsingError!Unary {
-        if (!mem.eql(u8, "++", token.symbol) and !mem.eql(u8, "--", token.symbol)) return unexpectedToken(token);
+    pub fn post(allocator: Allocator, token: Token, lhs: Expression) ParsingError!Expression {
+        const operator: Operator = OperatorMap.get(token.symbol) orelse return unexpectedToken(token);
+        if (operator != .Dec and operator != .Inc) {
+            log.err("'{s}' cannot be used as a post-fix operator", .{token.symbol});
+            return ParsingError.Token;
+        }
 
         const operand = allocator.create(Expression) catch allocError();
-        operand.* = right;
-
-        const operator: Operator = OperatorMap.get(token.symbol) orelse return unexpectedToken(token);
-        return .{ .operator = operator, .operand = operand, .order = .Post, .lineIndex = token.lineIndex };
+        operand.* = lhs;
+        return .{ .Unary = .{
+            .operator = operator,
+            .operand = operand,
+            .order = .Post,
+            .lineIndex = token.lineIndex,
+        } };
     }
 
     pub fn deinit(self: *Unary, allocator: Allocator) void {
@@ -463,13 +474,13 @@ pub const Var = struct {
 
 fn parseFactor(allocator: Allocator, tokens: *TokenIterator) ParsingError!Expression {
     const token = tokens.next();
-    const expr: Expression = switch (token.type) {
+    var expr: Expression = blk: switch (token.type) {
         .Constant => .{ .Constant = try .parse(token) },
-        .UnaryOp => blk: { // '~'|'!'|'-'|'++'|'--' <factor>
+        .UnaryOp => { // '~'|'!'|'-'|'++'|'--' <factor>
             const right = try parseFactor(allocator, tokens);
-            break :blk .{ .Unary = try Unary.pre(allocator, token, right) };
+            break :blk try Unary.pre(allocator, token, right);
         },
-        .Identifier => blk: {
+        .Identifier => {
             const nextToken = tokens.peek();
             if (nextToken.type == .OpenParenthesis) { // check if this a function call
                 tokens.rewind(); // back up to process all parts of the function call
@@ -478,7 +489,7 @@ fn parseFactor(allocator: Allocator, tokens: *TokenIterator) ParsingError!Expres
                 break :blk .{ .Var = .{ .name = token.symbol, .lineIndex = token.lineIndex } };
             }
         },
-        .OpenParenthesis => blk: { // '(' <expr> ')'
+        .OpenParenthesis => { // '(' <expr> ')'
             const nextToken = tokens.peek();
             switch (nextToken.type) {
                 .Int, .Long, .Signed, .Unsigned => {
@@ -487,8 +498,7 @@ fn parseFactor(allocator: Allocator, tokens: *TokenIterator) ParsingError!Expres
                 },
                 else => {
                     const expr: Expression = try .parse(allocator, tokens, 0);
-                    const next = tokens.next();
-                    if (next.type != .CloseParenthesis) return unexpectedToken(token);
+                    try expect(.CloseParenthesis, tokens.next());
                     break :blk expr;
                 },
             }
@@ -496,9 +506,10 @@ fn parseFactor(allocator: Allocator, tokens: *TokenIterator) ParsingError!Expres
         else => return unexpectedToken(token),
     };
 
-    const nextToken = tokens.peek();
-    if (nextToken.type == .UnaryOp) { // '~'|'!'|'-'|'++'|'--' <factor> '++'|'--'
-        return .{ .Unary = try .post(allocator, tokens.next(), expr) };
+    var nextToken = tokens.peek();
+    while (nextToken.type == .UnaryOp) { // check for postfix operators
+        expr = try Unary.post(allocator, tokens.next(), expr);
+        nextToken = tokens.peek();
     }
 
     return expr;

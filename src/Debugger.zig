@@ -207,14 +207,14 @@ fn printExpression(expr: Parser.Expression, indent: usize) void {
     print("{s}{s} (", .{ indentStr, @tagName(expr) });
     switch (expr) {
         .Assignment => |assign| {
-            print("{s}  lhs:\n", .{indentStr});
+            print("\n{s}  lhs:\n", .{indentStr});
             printExpression(assign.lhs.*, indent + 4);
             print("{s}  rhs:\n", .{indentStr});
             printExpression(assign.rhs.*, indent + 4);
             print("{s})\n", .{indentStr});
         },
         .Binary => |binary| {
-            print("{s}  left:\n", .{indentStr});
+            print("\n{s}  left:\n", .{indentStr});
             printExpression(expr.Binary.left.*, indent + 4);
             print("{s}  operator: {s}\n", .{ indentStr, @tagName(binary.operator) });
             print("{s}  right:\n", .{indentStr});
@@ -240,17 +240,17 @@ fn printExpression(expr: Parser.Expression, indent: usize) void {
             print("{s})\n", .{indentStr});
         },
         .Ternary => |ternary| {
-            print("{s}  condition:\n", .{indentStr});
+            print("\n{s}  condition:\n", .{indentStr});
             printExpression(ternary.condition.*, indent + 4);
-            print("{s}  thenExpr:\n", .{indentStr});
+            print("\n{s}  thenExpr:\n", .{indentStr});
             printExpression(ternary.thenExpr.*, indent + 4);
-            print("{s}  elseExpr:\n", .{indentStr});
+            print("\n{s}  elseExpr:\n", .{indentStr});
             printExpression(ternary.elseExpr.*, indent + 4);
-            print("{s})\n", .{indentStr});
+            print("\n{s})\n", .{indentStr});
         },
         .Unary => |unary| {
-            print("\n{s}  operation: {s}", .{ indentStr, @tagName(unary.operator) });
-            print("\n{s}  factor:\n", .{indentStr});
+            print("\n{s}  operation: {s}\n", .{ indentStr, @tagName(unary.operator) });
+            print("{s}  factor:\n", .{indentStr});
             printExpression(unary.operand.*, indent + 4);
             print("{s})\n", .{indentStr});
         },
