@@ -1,5 +1,6 @@
 const std = @import("std");
 const print = std.debug.print;
+const StringHashMap = std.StringHashMap;
 
 const Parser = @import("Parser.zig");
 const Semantic = @import("Semantic.zig");
@@ -25,7 +26,7 @@ pub fn printParserAST(tree: Parser.AST, symbolTable: ?Symbol.Table) void {
     print("  )\n", .{});
     print(")\n", .{});
 
-    if (symbolTable) |table| printSymbolTable(table);
+    if (symbolTable) |table| printFESymbolTable(table);
 }
 
 fn printBlockItem(blockItem: Parser.BlockItem, indent: usize) void {
@@ -258,7 +259,7 @@ fn printExpression(expr: Parser.Expression, indent: usize) void {
     }
 }
 
-fn printSymbolTable(symbolTable: Symbol.Table) void {
+fn printFESymbolTable(symbolTable: Symbol.Table) void {
     print("-------Symbol Table-------\n", .{});
     var it = symbolTable.iterator();
     while (it.next()) |entry| {
@@ -277,7 +278,7 @@ fn printSymbolTable(symbolTable: Symbol.Table) void {
                 }
                 print("    ret: {s}\n", .{@tagName(t.FunType.ret.*)});
             },
-            .Int, .Long, .UInt, .ULong => unreachable,
+            .Int, .Long, .UInt, .ULong => {},
         }
         print("  attrs: {s}\n", .{@tagName(attrs)});
         switch (attrs) {
@@ -287,9 +288,9 @@ fn printSymbolTable(symbolTable: Symbol.Table) void {
             },
             .Static => |static| {
                 print("  global: {any}\n", .{static.global});
-                print("  initialValue:", .{});
+                print("  initialValue: ", .{});
                 switch (static.initialValue) {
-                    .Tentative, .None => print("{any}\n", .{@tagName(static.initialValue)}),
+                    .Tentative, .None => print("{s}\n", .{@tagName(static.initialValue)}),
                     .Initial => |init| switch (init) {
                         .int => |int| print("{any}: {d}", .{ @tagName(static.initialValue), int }),
                         .long => |long| print("{any}: {d}", .{ @tagName(static.initialValue), long }),
@@ -313,7 +314,7 @@ pub fn printTAC(ir: TAC.Program, symbolTable: Symbol.Table) void {
         }
     }
     print(")\n", .{});
-    printSymbolTable(symbolTable);
+    printFESymbolTable(symbolTable);
 }
 
 fn printTACFunction(function: TAC.Function) void {
@@ -445,6 +446,7 @@ pub fn printAssemblerAST(ast: Assembler.Assembly) void {
         }
     }
     print(")\n", .{});
+    printBESymbolTable(ast.symbols);
 }
 
 fn printAssemblerFunction(instr: Assembler.Instruction) void {
@@ -520,6 +522,22 @@ fn printType(t: Assembler.Type) void {
     switch (t) {
         .Long => print("long, ", .{}),
         .Quad => print("quad, ", .{}),
+    }
+}
+
+fn printBESymbolTable(symbols: StringHashMap(Assembler.Entry)) void {
+    var it = symbols.iterator();
+    while (it.next()) |entry| {
+        const t = entry.value_ptr.*;
+        print("{s}:\n", .{entry.key_ptr.*});
+        print("  type: {s}\n", .{@tagName(t)});
+        switch (t) {
+            .Fun => print("  defined: {any}\n", .{t.Fun.defined}),
+            .Obj => {
+                print("  type: {any}\n", .{t.Obj.type});
+                print("  isStatic: {any}\n", .{t.Obj.isStatic});
+            },
+        }
     }
 }
 
