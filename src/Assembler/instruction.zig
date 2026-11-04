@@ -18,12 +18,14 @@ const InstructionTag = enum {
     Call,
     Cdq,
     Cmp,
+    Div,
     Idiv,
     Jmp,
     JmpCC,
     Label,
     Mov,
     Movsx,
+    Movzx,
     Push,
     Ret,
     SetCC,
@@ -34,12 +36,14 @@ pub const Instruction = union(InstructionTag) {
     Call: Call,
     Cdq: Cdq,
     Cmp: Cmp,
+    Div: Div,
     Idiv: Idiv,
     Jmp: Jmp,
     JmpCC: JmpCC,
     Label: Label,
     Mov: Mov,
     Movsx: Movsx,
+    Movzx: Movzx,
     Push: Push,
     Ret: Ret,
     SetCC: SetCC,
@@ -55,9 +59,9 @@ pub const Instruction = union(InstructionTag) {
             .Label => Label.toAssembly(allocator, instruction.Label),
             .Return => Ret.toAssembly(allocator, symbols, instruction.Return),
             .SignExtend => signExtend(allocator, symbols, instruction.SignExtend),
-            .Truncate => truncate(allocator, symbols, instruction.Truncate),
+            .Truncate => truncate(allocator, instruction.Truncate),
             .Unary => Unary.toAssembly(allocator, symbols, instruction.Unary),
-            .ZeroExtend => unreachable,
+            .ZeroExtend => zeroExtend(allocator, instruction.ZeroExtend),
         };
     }
 
@@ -66,9 +70,11 @@ pub const Instruction = union(InstructionTag) {
             .Binary => self.Binary.type,
             .Cdq => self.Cdq.type,
             .Cmp => self.Cmp.type,
+            .Div => self.Div.type,
             .Idiv => self.Idiv.type,
             .Mov => self.Mov.type,
             .Movsx => self.Movsx.type,
+            .Movzx => self.Movzx.type,
             .Push => self.Push.type,
             .Ret => self.Ret.type,
             .Unary => self.Unary.type,
@@ -89,9 +95,11 @@ pub const Binary = struct {
         const src1: Operand = .fromVal(binary.src1);
         const src2: Operand = .fromVal(binary.src2);
         const dst: Operand = .{ .Pseudo = binary.dst.Var };
-        const t: Type = .fromVar(symbols, binary.dst.Var);
         assertTypes(symbols, src1, dst);
         assertTypes(symbols, src2, dst);
+
+        const signed = symbols.get(binary.dst.Var).?.type.signed();
+        const t: Type = .fromVar(symbols, binary.dst.Var);
 
         return switch (binary.operator) {
             .Div, .Mod => blk: {
@@ -100,20 +108,29 @@ pub const Binary = struct {
                     .Mod => .{ .Reg = .dx },
                     else => unreachable,
                 };
-                break :blk allocator.dupe(Instruction, &.{
-                    .{ .Mov = .{ .type = t, .src = src1, .dst = .{ .Reg = .ax } } },
-                    .{ .Cdq = .{ .type = t } },
-                    .{ .Idiv = .{ .type = t, .operand = src2 } },
-                    .{ .Mov = .{ .type = t, .src = result, .dst = dst } },
-                });
+                if (signed) { // sign-extend and issue idiv (signed) instruction
+                    break :blk allocator.dupe(Instruction, &.{
+                        .{ .Mov = .{ .type = t, .src = src1, .dst = .{ .Reg = .ax } } },
+                        .{ .Cdq = .{ .type = t } },
+                        .{ .Idiv = .{ .type = t, .operand = src2 } },
+                        .{ .Mov = .{ .type = t, .src = result, .dst = dst } },
+                    });
+                } else { // zero-extend and issue div (unsigned) instruction
+                    break :blk allocator.dupe(Instruction, &.{
+                        .{ .Mov = .{ .type = t, .src = src1, .dst = .{ .Reg = .ax } } },
+                        .{ .Mov = .{ .type = t, .src = .{ .Imm = 0 }, .dst = .{ .Reg = .dx } } },
+                        .{ .Div = .{ .type = t, .operand = src2 } },
+                        .{ .Mov = .{ .type = t, .src = result, .dst = dst } },
+                    });
+                }
             },
             .Eq, .Gt, .Gte, .Lt, .Lte, .Neq => |op| blk: {
                 const cCode: ConditionCode = switch (op) {
                     .Eq => .E,
-                    .Gt => .G,
-                    .Gte => .GE,
-                    .Lt => .L,
-                    .Lte => .LE,
+                    .Gt => if (signed) .G else .A,
+                    .Gte => if (signed) .GE else .AE,
+                    .Lt => if (signed) .L else .B,
+                    .Lte => if (signed) .LE else .BE,
                     .Neq => .NE,
                     else => unreachable,
                 };
@@ -124,7 +141,7 @@ pub const Binary = struct {
                 });
             },
             .AndL, .OrL => unreachable, // logical AND and OR have no binary instruction, already handled in TACky
-            else => allocator.dupe(Instruction, &.{
+            .Add, .AndB, .Mul, .OrB, .SAL, .SAR, .Sub, .Xor => allocator.dupe(Instruction, &.{
                 .{ .Mov = .inferType(symbols, src1, dst) },
                 .{ .Binary = .{ .type = t, .operator = binary.operator, .src = src2, .dst = dst } },
             }),
@@ -138,6 +155,10 @@ pub const Cdq = struct { type: Type }; // nX:AX:= sign-extend of AX.
 
 pub const Cmp = struct { type: Type, arg1: Operand, arg2: Operand };
 
+// unsigned division
+pub const Div = struct { type: Type, operand: Operand };
+
+// signed division
 pub const Idiv = struct { type: Type, operand: Operand };
 
 pub const Jmp = struct {
@@ -208,8 +229,11 @@ pub const Mov = struct {
     }
 };
 
-/// Sign-extended move (cast 4-byte to 8-byte)
-pub const Movsx = struct { type: Type, src: Operand, dst: Operand };
+/// Sign-extended move (cast 4-bytes signed to 8-bytes)
+pub const Movsx = struct { type: Type = .Quad, src: Operand, dst: Operand };
+
+/// Zero-extend move (cast 4-bytes unsigned to 8-bytes)
+pub const Movzx = struct { type: Type = .Quad, src: Operand, dst: Operand };
 
 pub const Push = struct { type: Type = .Quad, operand: Operand };
 
@@ -227,7 +251,8 @@ pub const Ret = struct {
     }
 };
 
-const ConditionCode = enum { E, G, GE, L, LE, NE };
+// G, GE, L, LE are condition code for signd comparison; A, AE, B, BE for unsigned
+const ConditionCode = enum { E, NE, G, GE, L, LE, A, AE, B, BE };
 pub const SetCC = struct { condition: ConditionCode, operand: Operand };
 
 pub const Unary = struct {
@@ -285,8 +310,8 @@ pub const Operand = union(OperandTag) {
         return switch (constant) {
             .int => @intCast(constant.int),
             .long => @intCast(constant.long),
-            .uint => unreachable,
-            .ulong => unreachable,
+            .uint => @intCast(constant.uint),
+            .ulong => @intCast(constant.ulong),
         };
     }
 
@@ -460,11 +485,25 @@ fn signExtend(allocator: Allocator, symbols: Symbol.Table, se: TAC.SignExtend) [
     return allocator.dupe(Instruction, &.{.{ .Movsx = .{ .type = t, .src = src, .dst = dst } }}) catch allocError();
 }
 
-fn truncate(allocator: Allocator, symbols: Symbol.Table, tr: TAC.Truncate) []Instruction {
+fn truncate(allocator: Allocator, tr: TAC.Truncate) []Instruction {
     const src: Operand = .fromVal(tr.src);
     const dst: Operand = .fromVal(tr.dst);
-    _ = symbols;
-    const t: Type = .Long;
 
-    return allocator.dupe(Instruction, &.{.{ .Mov = .{ .type = t, .src = src, .dst = dst } }}) catch allocError();
+    return allocator.dupe(Instruction, &.{.{ .Mov = .{ .type = .Long, .src = src, .dst = dst } }}) catch allocError();
+}
+
+fn zeroExtend(allocator: Allocator, ze: TAC.ZeroExtend) []Instruction {
+    const src: Operand = .fromVal(ze.src);
+    const dst: Operand = .fromVal(ze.dst);
+
+    if (dst == .Reg) {
+        return allocator.dupe(Instruction, &.{
+            .{ .Mov = .{ .type = .Long, .src = src, .dst = dst } },
+        }) catch allocError();
+    } else {
+        return allocator.dupe(Instruction, &.{
+            .{ .Mov = .{ .type = .Long, .src = src, .dst = .{ .Reg = .r11 } } },
+            .{ .Mov = .{ .type = .Quad, .src = .{ .Reg = .r11 }, .dst = dst } },
+        }) catch allocError();
+    }
 }

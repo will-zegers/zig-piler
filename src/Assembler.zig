@@ -96,11 +96,9 @@ pub fn assemble(allocator: Allocator, symbols: Symbol.Table, tree: TAC.Program) 
                     .name = staticVar.identifier,
                     .global = staticVar.global,
                     .alignment = switch (entry.type) {
-                        .Int => 4,
-                        .Long => 8,
+                        .Int, .UInt => 4,
+                        .Long, .ULong => 8,
                         .FunType => unreachable,
-                        .UInt => unreachable,
-                        .ULong => unreachable,
                     },
                     .init = staticVar.init,
                 } }) catch allocError();
@@ -203,6 +201,9 @@ fn setupStack(allocator: Allocator, symbols: Symbol.Table, instructions: *Instru
                 replaceIfPseudo(symbols, pseudoMap, &localStack, &cmp.arg1);
                 replaceIfPseudo(symbols, pseudoMap, &localStack, &cmp.arg2);
             },
+            .Div => |*div| {
+                replaceIfPseudo(symbols, pseudoMap, &localStack, &div.operand);
+            },
             .Idiv => |*idiv| {
                 replaceIfPseudo(symbols, pseudoMap, &localStack, &idiv.operand);
             },
@@ -213,6 +214,10 @@ fn setupStack(allocator: Allocator, symbols: Symbol.Table, instructions: *Instru
             .Movsx => |*movsx| {
                 replaceIfPseudo(symbols, pseudoMap, &localStack, &movsx.src);
                 replaceIfPseudo(symbols, pseudoMap, &localStack, &movsx.dst);
+            },
+            .Movzx => |*movzx| {
+                replaceIfPseudo(symbols, pseudoMap, &localStack, &movzx.src);
+                replaceIfPseudo(symbols, pseudoMap, &localStack, &movzx.dst);
             },
             .Push => |*push| {
                 replaceIfPseudo(symbols, pseudoMap, &localStack, &push.operand);
@@ -227,7 +232,7 @@ fn setupStack(allocator: Allocator, symbols: Symbol.Table, instructions: *Instru
         }
     }
 
-    // Make sure the stack is 16-byte aligned
+    // Make sure the stack is 16-byte aligned, per SYS V ABI
     const stackSpace = 16 * @divCeil(@abs(localStack), 16);
 
     // Prepend the instructions with stack space allocation based on the number of
@@ -257,10 +262,10 @@ fn replaceIfPseudo(symbols: Symbol.Table, map: *std.StringHashMap(isize), stackP
         // map it to the location in the local stack space
         if (map.get(key) == null) {
             switch (entry.type) {
-                .Int => {
+                .Int, .UInt => {
                     stackPointer.* -= LONGWORD_BYTES;
                 },
-                .Long => {
+                .Long, .ULong => {
                     stackPointer.* -= QUADWORD_BYTES;
                     while (@rem(stackPointer.*, 8) != 0) {
                         stackPointer.* -= 1;
@@ -268,8 +273,6 @@ fn replaceIfPseudo(symbols: Symbol.Table, map: *std.StringHashMap(isize), stackP
                     // stackPointer.* = @divCeil(@abs(stackPointer.*), 8); // align to 8-bytes
                 },
                 .FunType => unreachable,
-                .UInt => unreachable,
-                .ULong => unreachable,
             }
             map.put(key, stackPointer.*) catch allocError();
         }

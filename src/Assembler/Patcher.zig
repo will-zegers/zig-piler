@@ -8,16 +8,19 @@ const instructions = @import("instruction.zig");
 const InstructionList = instructions.InstructionList;
 const Binary = instructions.Binary;
 const Cmp = instructions.Cmp;
+const Div = instructions.Div;
 const Idiv = instructions.Idiv;
 const Instruction = instructions.Instruction;
 const Mov = instructions.Mov;
 const Movsx = instructions.Movsx;
+const Movzx = instructions.Movzx;
 const Push = instructions.Push;
 const Operand = instructions.Operand;
 
 const IllegalInstruction = enum {
     Ill_Binary_Operands,
     Ill_Cmp_Operands,
+    Ill_Div_Operand,
     Ill_Idiv_Operand,
     Ill_Mov_Operands,
     Ill_Movsx_Operands,
@@ -50,6 +53,10 @@ pub fn patchInstructions(allocator: Allocator, unpatched: []Instruction) []Instr
                 },
                 // Operand (i.e. the divisor) of idiv must not be an immediate value
                 // Move the immediate value into a temporary register prior to the operation
+                .Ill_Div_Operand => &.{
+                    .{ .Mov = .{ .type = t, .src = instr.Div.operand, .dst = .{ .Reg = .r10 } } },
+                    .{ .Div = .{ .type = t, .operand = .{ .Reg = .r10 } } },
+                },
                 .Ill_Idiv_Operand => &.{
                     .{ .Mov = .{ .type = t, .src = instr.Idiv.operand, .dst = .{ .Reg = .r10 } } },
                     .{ .Idiv = .{ .type = t, .operand = .{ .Reg = .r10 } } },
@@ -115,6 +122,7 @@ fn detectIllegal(instr: Instruction) ?IllegalInstruction {
             if (isIllegalBinaryOperands(bin)) return .Ill_Binary_Operands;
         },
         .Cmp => |cmp| if (isIllegalCmp(cmp)) return .Ill_Cmp_Operands,
+        .Div => |div| if (isIllegalDiv(div)) return .Ill_Div_Operand,
         .Idiv => |idiv| if (isIllegalIdiv(idiv)) return .Ill_Idiv_Operand,
         .Mov => |mov| if (isIllegalMove(mov)) return .Ill_Mov_Operands,
         .Movsx => |movsx| if (isIllegalMovsxOperands(movsx)) return .Ill_Movsx_Operands,
@@ -164,10 +172,16 @@ fn isIllegalCmpOperands(cmp: Cmp) bool {
 }
 
 // Operand of idiv must not be an immediate value
+fn isIllegalDiv(div: Div) bool {
+    return div.operand == .Imm;
+}
+
+// Operand of idiv must not be an immediate value
 fn isIllegalIdiv(idiv: Idiv) bool {
     return idiv.operand == .Imm;
 }
 
+// TODO: consider merging all movs (mov, movsx, movzx) under one general check
 fn isIllegalMove(mov: Mov) bool {
     return isIllegalMoveMemory(mov) or isIllegalMoveQuadImm(mov);
 }

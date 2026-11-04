@@ -459,6 +459,9 @@ fn printAssemblerFunction(instr: Assembler.Instruction) void {
         .Cmp => |cmp| {
             print("arg1: {any}, arg2: {any}", .{ cmp.arg1, cmp.arg2 });
         },
+        .Div => |div| {
+            printOperand("src: ", div.operand, "");
+        },
         .Idiv => |idiv| {
             printOperand("src: ", idiv.operand, "");
         },
@@ -476,12 +479,16 @@ fn printAssemblerFunction(instr: Assembler.Instruction) void {
             printOperand("src: ", mov.src, ", ");
             printOperand("dst: ", mov.dst, null);
         },
-        .Push => |push| {
-            printOperand("src: ", push.operand, null);
-        },
         .Movsx => |movsx| {
             printOperand("src: ", movsx.src, ", ");
             printOperand("dst: ", movsx.dst, null);
+        },
+        .Movzx => |movzx| {
+            printOperand("src: ", movzx.src, ", ");
+            printOperand("dst: ", movzx.dst, null);
+        },
+        .Push => |push| {
+            printOperand("src: ", push.operand, null);
         },
         .Ret, .Cdq => {},
         .SetCC => |set| {

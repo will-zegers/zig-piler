@@ -169,6 +169,7 @@ pub fn emitFunction(allocator: Allocator, function: Assembler.Function, symbols:
 
                 break :code allocator.print(template, .{suffix, arg1, arg2});
             },
+            .Div => unreachable,
             .Idiv => |idiv| {
                 const template =
                     \\  idiv{c}   {s}
@@ -225,6 +226,7 @@ pub fn emitFunction(allocator: Allocator, function: Assembler.Function, symbols:
 
                 break :code allocator.print(template, .{suffix, src, dst});
             },
+            .Movzx => unreachable,
             .Push => |push| {
                 const template =
                     \\  pushq  {s}
@@ -244,6 +246,7 @@ pub fn emitFunction(allocator: Allocator, function: Assembler.Function, symbols:
                 const template =
                     \\  set{s}   {s}
                 ;
+                // TODO: maybe just makes the enums lower case and grab the string from the @tagName
                 const condCode = switch (set.condition) {
                     .E => "e",
                     .G => "g",
@@ -251,6 +254,10 @@ pub fn emitFunction(allocator: Allocator, function: Assembler.Function, symbols:
                     .L => "l",
                     .LE => "le",
                     .NE => "ne",
+                    .A => "a",
+                    .AE => "ae",
+                    .B => "b",
+                    .BE => "be",
                 };
                 const operand = getOperandString(allocator, set.operand, .Long);
 
