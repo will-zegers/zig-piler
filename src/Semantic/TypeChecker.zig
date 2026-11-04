@@ -281,7 +281,7 @@ fn typeCheckExpression(allocator: Allocator, symbols: *Symbol.Table, expr: *Expr
             const rType = typeCheckExpression(allocator, symbols, bin.right);
             const commonType = switch (bin.operator) {
                 .SAL, .SAR => lType, // bit-shifts are a special case that always assmue the type of the base number
-                else => lType.getCommonWith(rType),
+                else => Type.getCommon(lType, rType),
             };
 
             bin.type = commonType;
@@ -328,8 +328,8 @@ fn typeCheckExpression(allocator: Allocator, symbols: *Symbol.Table, expr: *Expr
             const thenType = typeCheckExpression(allocator, symbols, tern.thenExpr);
             const elseType = typeCheckExpression(allocator, symbols, tern.elseExpr);
 
-            var commonType = ifType.getCommonWith(thenType);
-            commonType = commonType.getCommonWith(elseType);
+            var commonType = Type.getCommon(ifType, thenType);
+            commonType = Type.getCommon(commonType, elseType);
 
             tern.type = commonType;
             tern.condition.* = Cast.to(allocator, tern.condition, commonType);

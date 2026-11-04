@@ -23,6 +23,8 @@ pub const TypeTag = enum { Int, Long, FunType, UInt, ULong };
 pub const Type = union(TypeTag) {
     const Signage = enum { Signed, Unsigned };
 
+    const Error = error{NonComparable};
+
     Int: void,
     Long: void,
     FunType: struct {
@@ -73,6 +75,18 @@ pub const Type = union(TypeTag) {
         }
     }
 
+    pub fn signed(self: Type) bool {
+        return (self.equals(.Int) or self.equals(.Long));
+    }
+
+    pub fn size(self: Type) usize {
+        return switch (self) {
+            .Int, .UInt => 4,
+            .Long, .ULong => 8,
+            .FunType => unreachable,
+        };
+    }
+
     // Helper function since unions can't use comparison operators directly
     pub fn equals(self: Type, other: Type) bool {
         return switch (self) {
@@ -87,22 +101,32 @@ pub const Type = union(TypeTag) {
     /// Follows the Sys V ABI rules to determine a common type: if two types are the
     /// same size but with different signage, prefer the unsigned type; otherwise
     /// prefer the larger type. (And same types obviously prefer that type)
-    pub fn getCommonWith(self: Type, other: Type) Type {
-        return switch (self) {
-            .Int => other,
-            .UInt => switch (other) {
+    pub fn getCommon(type1: Type, type2: Type) Type {
+        // This two cases will result in an error during semantic type checking,
+        // but use return types for now if either is a funtion type
+        // if (type1 == .FunType) return getCommon(type1.FunType.ret.*, type2);
+        // if (type2 == .FunType) return getCommon(type1, type2.FunType.ret.*);
+
+        // if (type1.size() > type2.size()) return type1;
+        // if (type1.size() < type2.size()) return type2;
+        // if (!type1.signed()) return type1;
+        // return type2;
+
+        return switch (type1) {
+            .Int => type2,
+            .UInt => switch (type2) {
                 .Int, .UInt => .UInt,
-                .Long, .ULong => other,
+                .Long, .ULong => type2,
                 .FunType => unreachable,
             },
-            .Long => switch (other) {
+            .Long => switch (type2) {
                 .ULong => .ULong,
                 .FunType => unreachable,
-                else => self,
+                else => type1,
             },
-            .ULong => switch (other) {
+            .ULong => switch (type2) {
                 .FunType => unreachable,
-                else => self,
+                else => type1,
             },
             .FunType => unreachable,
         };

@@ -24,6 +24,7 @@ pub const Truncate = instr.Truncate;
 pub const Unary = instr.Unary;
 pub const Val = instr.Val;
 pub const Var = instr.Var;
+pub const ZeroExtend = instr.ZeroExtend;
 
 pub const TAC = @This();
 
@@ -357,32 +358,17 @@ fn emitCast(allocator: Allocator, context: *Context, instructions: *Instructions
     const tag = try newVariable(allocator, context, to);
     const dst: Val = .{ .Var = tag };
 
-    // TODO: attach a size to Type to make this check more concise
-    switch (to) {
-        .Int => switch (exprType) {
-            .UInt => try instructions.append(allocator, .{ .Copy = .{ .src = expr, .dst = dst } }),
-            .Long, .ULong => try instructions.append(allocator, .{ .Truncate = .{ .src = expr, .dst = dst } }),
-            .Int, .FunType => unreachable,
-        },
-        .Long => switch (exprType) {
-            .Int => try instructions.append(allocator, .{ .SignExtend = .{ .src = expr, .dst = dst } }),
-            .UInt => try instructions.append(allocator, .{ .ZeroExtend = .{ .src = expr, .dst = dst } }),
-            .ULong => try instructions.append(allocator, .{ .Copy = .{ .src = expr, .dst = dst } }),
-            .Long, .FunType => unreachable,
-        },
-        .UInt => switch (exprType) {
-            .Int => try instructions.append(allocator, .{ .Copy = .{ .src = expr, .dst = dst } }),
-            .Long, .ULong => try instructions.append(allocator, .{ .Truncate = .{ .src = expr, .dst = dst } }),
-            .UInt, .FunType => unreachable,
-        },
-        .ULong => switch (exprType) {
-            .Int => try instructions.append(allocator, .{ .SignExtend = .{ .src = expr, .dst = dst } }),
-            .Long => try instructions.append(allocator, .{ .Copy = .{ .src = expr, .dst = dst } }),
-            .UInt => try instructions.append(allocator, .{ .ZeroExtend = .{ .src = expr, .dst = dst } }),
-            .ULong, .FunType => unreachable,
-        },
-        .FunType => unreachable,
+    var instruction: Instruction = undefined;
+    if (exprType.size() == to.size()) { // same size, so just copy bits over
+        instruction = .{ .Copy = .{ .src = expr, .dst = dst } };
+    } else if (exprType.size() > to.size()) { // largers size to smaller: truncate
+        instruction = .{ .Truncate = .{ .src = expr, .dst = dst } };
+    } else if (exprType.signed()) { // signed into a larger size needs sign extension
+        instruction = .{ .SignExtend = .{ .src = expr, .dst = dst } };
+    } else { // unsigned into larger, zero extend (since unsigned always > 0)
+        instruction = .{ .ZeroExtend = .{ .src = expr, .dst = dst } };
     }
+    try instructions.append(allocator, instruction);
 
     return dst;
 }
