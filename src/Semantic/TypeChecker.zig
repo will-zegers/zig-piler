@@ -32,7 +32,7 @@ pub fn run(allocator: Allocator, symbols: *Symbol.Table, errorReporter: *Error.R
     for (tree.declarations) |*decl| {
         switch (decl.*) {
             .FunDecl => |*funDecl| typeCheckFunDecl(allocator, symbols, funDecl),
-            .VarDecl => |*varDecl| typeCheckFileScopeVarDecl(symbols, varDecl),
+            .VarDecl => |*varDecl| typeCheckFileScopeVarDecl(allocator, symbols, varDecl),
         }
     }
 }
@@ -96,25 +96,10 @@ fn typeCheckFunDecl(allocator: Allocator, symbols: *Symbol.Table, decl: *FunDecl
     }
 }
 
-fn typeCheckFileScopeVarDecl(symbols: *Symbol.Table, decl: *VarDecl) void {
-    var initialValue: Symbol.Static.InitialValue = undefined;
-    if (decl.init) |init| {
-        // TODO: extend initialize to use constant binary and unary expressions
-        if (init.Assignment.rhs.* == .Constant) {
-            initialValue = .{ .Initial = init.Assignment.rhs.Constant };
-        } else {
-            // Report an error, but continue as if there's no initialization
-            ErrorReporter.report(.NonConstInitializer, decl.lineIndex, decl.name);
-        }
-    } else { // no initializer
-        if (decl.storageClass == .Extern) {
-            initialValue = .None;
-        } else {
-            initialValue = .Tentative;
-        }
-    }
-
+fn typeCheckFileScopeVarDecl(allocator: Allocator, symbols: *Symbol.Table, decl: *VarDecl) void {
+    var initialValue: Symbol.Static.InitialValue = if (decl.storageClass == .Extern) .None else .Tentative;
     var isGlobal = decl.storageClass != .Static;
+
     if (symbols.get(decl.name)) |entry| {
         if (!entry.type.equals(decl.type)) {
             ErrorReporter.report(.Redeclaration, decl.lineIndex, decl.name);
@@ -131,7 +116,7 @@ fn typeCheckFileScopeVarDecl(symbols: *Symbol.Table, decl: *VarDecl) void {
 
         switch (entry.attrs.Static.initialValue) {
             .Initial => |init| { // ensure no redefinitions of global variables
-                if (initialValue == .Initial) {
+                if (decl.init != null) {
                     ErrorReporter.report(.VariableRedefinition, decl.lineIndex, decl.name);
                     return;
                 }
@@ -145,9 +130,24 @@ fn typeCheckFileScopeVarDecl(symbols: *Symbol.Table, decl: *VarDecl) void {
             .None => {},
         }
     }
-
-    const attrs: Symbol.Attrs = .{ .Static = .{ .initialValue = initialValue, .global = isGlobal } };
+    var attrs: Symbol.Attrs = .{ .Static = .{ .initialValue = initialValue, .global = isGlobal } };
     symbols.put(decl.name, .{ .type = decl.type, .attrs = attrs }) catch allocError();
+
+    // Now that we've added an entry to the symbol table, type check init (if it exists) and update
+    // the entry if need be
+    if (decl.init) |*init| {
+        if (init.Assignment.rhs.* == .Constant) {
+            _ = typeCheckExpression(allocator, symbols, init);
+            initialValue = .{ .Initial = init.Assignment.rhs.Constant };
+            attrs = .{ .Static = .{ .initialValue = initialValue, .global = isGlobal } };
+
+            symbols.put(decl.name, .{ .type = decl.type, .attrs = attrs }) catch allocError();
+        } else {
+            // TODO: revisit this when SemanticError becomes an error class
+            // Report an error, but continue as if there's no initialization
+            ErrorReporter.report(.NonConstInitializer, decl.lineIndex, decl.name);
+        }
+    }
 }
 
 fn typeCheckLocalVarDecl(allocator: Allocator, symbols: *Symbol.Table, decl: *VarDecl) void {
