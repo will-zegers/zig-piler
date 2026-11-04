@@ -126,12 +126,12 @@ pub const Binary = struct {
             },
             .Eq, .Gt, .Gte, .Lt, .Lte, .Neq => |op| blk: {
                 const cCode: ConditionCode = switch (op) {
-                    .Eq => .E,
-                    .Gt => if (signed) .G else .A,
-                    .Gte => if (signed) .GE else .AE,
-                    .Lt => if (signed) .L else .B,
-                    .Lte => if (signed) .LE else .BE,
-                    .Neq => .NE,
+                    .Eq => .e,
+                    .Gt => if (signed) .g else .a,
+                    .Gte => if (signed) .ge else .ae,
+                    .Lt => if (signed) .l else .b,
+                    .Lte => if (signed) .le else .be,
+                    .Neq => .ne,
                     else => unreachable,
                 };
                 break :blk allocator.dupe(Instruction, &.{
@@ -181,7 +181,7 @@ pub const JmpCC = struct {
 
                 break :blk allocator.dupe(Instruction, &.{
                     .{ .Cmp = .{ .type = t, .arg1 = .{ .Imm = 0 }, .arg2 = arg2 } },
-                    .{ .JmpCC = .{ .condition = .E, .target = jz.target } },
+                    .{ .JmpCC = .{ .condition = .e, .target = jz.target } },
                 }) catch allocError();
             },
             .JumpIfNotZero => |jnz| blk: {
@@ -190,7 +190,7 @@ pub const JmpCC = struct {
 
                 break :blk allocator.dupe(Instruction, &.{
                     .{ .Cmp = .{ .type = t, .arg1 = .{ .Imm = 0 }, .arg2 = arg2 } },
-                    .{ .JmpCC = .{ .condition = .NE, .target = jnz.target } },
+                    .{ .JmpCC = .{ .condition = .ne, .target = jnz.target } },
                 }) catch allocError();
             },
             else => unreachable,
@@ -252,7 +252,7 @@ pub const Ret = struct {
 };
 
 // G, GE, L, LE are condition code for signd comparison; A, AE, B, BE for unsigned
-const ConditionCode = enum { E, NE, G, GE, L, LE, A, AE, B, BE };
+const ConditionCode = enum { e, ne, g, ge, l, le, a, ae, b, be };
 pub const SetCC = struct { condition: ConditionCode, operand: Operand };
 
 pub const Unary = struct {
@@ -278,7 +278,7 @@ pub const Unary = struct {
             .Not => &.{
                 .{ .Cmp = .{ .type = srcType, .arg1 = .{ .Imm = 0 }, .arg2 = src } },
                 .{ .Mov = .{ .type = dstType, .src = .{ .Imm = 0 }, .dst = dst } },
-                .{ .SetCC = .{ .condition = .E, .operand = dst } },
+                .{ .SetCC = .{ .condition = .e, .operand = dst } },
             },
             .Negate, .Complement => &.{
                 .{ .Mov = .inferType(symbols, src, dst) },

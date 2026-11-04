@@ -206,11 +206,7 @@ pub fn emitFunction(allocator: Allocator, function: Assembler.Function, symbols:
                 const template =
                     \\  j{s}    {s}{s}
                 ;
-                const condCode = switch (jmp.condition) {
-                    .E => "e",
-                    .NE => "ne",
-                    else => unreachable,
-                };
+                const condCode = @tagName(jmp.condition); // will only be 'e' or 'ne';
 
                 break :code allocator.print(template, .{condCode, labelPrefix, jmp.target});
             },
@@ -262,19 +258,7 @@ pub fn emitFunction(allocator: Allocator, function: Assembler.Function, symbols:
                 const template =
                     \\  set{s}   {s}
                 ;
-                // TODO: maybe just makes the enums lower case and grab the string from the @tagName
-                const condCode = switch (set.condition) {
-                    .E => "e",
-                    .G => "g",
-                    .GE => "ge",
-                    .L => "l",
-                    .LE => "le",
-                    .NE => "ne",
-                    .A => "a",
-                    .AE => "ae",
-                    .B => "b",
-                    .BE => "be",
-                };
+                const condCode = @tagName(set.condition);
                 const operand = getOperandString(allocator, set.operand, .Long);
 
                 break :code allocator.print(template, .{condCode, operand});
