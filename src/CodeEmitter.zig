@@ -179,7 +179,7 @@ pub fn emitFunction(allocator: Allocator, function: Assembler.Function, symbols:
             },
             .Div => |div| {
                 const template =
-                    \\  idiv{c}   {s}
+                    \\  div{c}   {s}
                 ;
                 const suffix = getSuffix(div.type);
                 const operand = getOperandString(allocator, div.operand, div.type);
