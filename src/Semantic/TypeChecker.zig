@@ -357,6 +357,7 @@ fn typeCheckExpression(allocator: Allocator, symbols: *Symbol.Table, expr: *Expr
             const symbol = symbols.get(v.name) orelse unreachable;
             if (symbol.type == .FunType) {
                 ErrorReporter.report(.FunctionUsedAsVariable, v.lineIndex, v.name);
+                return symbol.type.FunType.ret.*;
             }
 
             v.type = symbol.type;

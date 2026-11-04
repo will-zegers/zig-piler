@@ -308,7 +308,7 @@ pub const Operand = union(OperandTag) {
 
     pub fn constantToImm(constant: TAC.Constant) usize {
         return switch (constant) {
-            .int => @intCast(constant.int),
+            .int => @bitCast(@as(isize, constant.int)),
             .long => @intCast(constant.long),
             .uint => @intCast(constant.uint),
             .ulong => @intCast(constant.ulong),

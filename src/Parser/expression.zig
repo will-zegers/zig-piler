@@ -265,6 +265,8 @@ pub const Cast = struct {
     pub fn to(allocator: Allocator, exp: *const Expression, toType: Type) Expression {
         if (toType.equals(exp.getType())) return exp.*; // same type, no cast needed
 
+        if (exp.* == .Constant) return .{ .Constant = exp.Constant.as(toType) };
+
         const inner = allocator.create(Expression) catch allocError();
         inner.* = exp.*;
 
@@ -326,6 +328,48 @@ pub const Constant = union(ConstantTag) {
                 const int: i32 = @intCast(signedValue);
                 return .{ .int = int };
             }
+        }
+    }
+
+    pub fn as(self: Constant, to: Type) Constant {
+        switch (to) {
+            .Int => {
+                const int: i32 = switch (self) {
+                    .int => self.int,
+                    .long => @truncate(self.long),
+                    .uint => @bitCast(self.uint),
+                    .ulong => @truncate(@as(i64, @bitCast(self.ulong))),
+                };
+                return .{ .int = int };
+            },
+            .UInt => {
+                const uint: u32 = switch (self) {
+                    .int => @bitCast(self.int),
+                    .long => @truncate(@as(u64, @bitCast(self.long))),
+                    .uint => self.uint,
+                    .ulong => @truncate(self.ulong),
+                };
+                return .{ .uint = uint };
+            },
+            .Long => {
+                const long: i64 = switch (self) {
+                    .int => self.int,
+                    .long => self.long,
+                    .uint => self.uint,
+                    .ulong => @bitCast(self.ulong),
+                };
+                return .{ .long = long };
+            },
+            .ULong => {
+                const ulong: u64 = switch (self) {
+                    .int => @bitCast(@as(i64, self.int)),
+                    .long => @bitCast(self.long),
+                    .uint => self.uint,
+                    .ulong => self.ulong,
+                };
+                return .{ .ulong = ulong };
+            },
+            .FunType => unreachable,
         }
     }
 

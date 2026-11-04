@@ -412,56 +412,32 @@ pub const Case = struct {
     pub fn generateTag(self: *Case, allocator: Allocator) []const u8 {
         std.debug.assert(self.parent != null); // This shouldn't occur, since we catch orphan case before tagging
 
+        const parentType = self.parent.?.cond.getType();
         if (self.cond) |cond| {
-            const value = switch (cond) {
-                .Constant => cond.Constant,
-                .Cast => cond.Cast.exp.Constant,
+            switch (cond) {
+                .Constant => switch (parentType) {
+                    .Int, .UInt => {
+                        const value = cond.Constant.as(.UInt);
+                        return allocator.print("{s}.{d}", .{ self.parent.?.tag.?, value.uint }) catch allocError();
+                    },
+                    .Long, .ULong => {
+                        const value = cond.Constant.as(.ULong);
+                        return allocator.print("{s}.{d}", .{ self.parent.?.tag.?, value.ulong }) catch allocError();
+                    },
+                    .FunType => unreachable,
+                },
+                .Cast => switch (parentType) {
+                    .Int, .UInt => {
+                        const value = cond.Cast.exp.Constant.as(.UInt);
+                        return allocator.print("{s}.{d}", .{ self.parent.?.tag.?, value.uint }) catch allocError();
+                    },
+                    .Long, .ULong => {
+                        const value = cond.Cast.exp.Constant.as(.ULong);
+                        return allocator.print("{s}.{d}", .{ self.parent.?.tag.?, value.ulong }) catch allocError();
+                    },
+                    .FunType => unreachable,
+                },
                 else => unreachable,
-            };
-
-            const parentType = self.parent.?.cond.getType();
-            switch (parentType) {
-                // We bit-cast the labels to unsigned to disallow '-' in the generated labels
-
-                // Note: actual number truncation will be handled by assembly instructions, here
-                // we just need to make sure truncation will not generate a duplicate case.
-                .Int => {
-                    const int: i32 = switch (value) {
-                        .int => value.int,
-                        .long => @truncate(value.long),
-                        .uint => @bitCast(value.uint),
-                        .ulong => @truncate(@as(i64, @bitCast(value.ulong))),
-                    };
-                    return allocator.print("{s}.{d}", .{ self.parent.?.tag.?, @as(u32, @bitCast(int)) }) catch allocError();
-                },
-                .Long => {
-                    const long: i64 = switch (value) {
-                        .int => value.int,
-                        .long => value.long,
-                        .uint => value.uint,
-                        .ulong => @bitCast(value.ulong),
-                    };
-                    return allocator.print("{s}.{d}", .{ self.parent.?.tag.?, @as(u64, @bitCast(long)) }) catch allocError();
-                },
-                .UInt => {
-                    const uint: u32 = switch (value) {
-                        .int => @bitCast(value.int),
-                        .long => @truncate(@as(u64, @bitCast(value.long))),
-                        .uint => value.uint,
-                        .ulong => @truncate(value.ulong),
-                    };
-                    return allocator.print("{s}.{d}", .{ self.parent.?.tag.?, uint }) catch allocError();
-                },
-                .ULong => {
-                    const ulong: u64 = switch (value) {
-                        .int => @bitCast(@as(i64, value.int)),
-                        .long => @bitCast(value.long),
-                        .uint => value.uint,
-                        .ulong => value.ulong,
-                    };
-                    return allocator.print("{s}.{d}", .{ self.parent.?.tag.?, ulong }) catch allocError();
-                },
-                .FunType => unreachable,
             }
         } else {
             return allocator.print("{s}.default", .{self.parent.?.tag.?}) catch unreachable;
