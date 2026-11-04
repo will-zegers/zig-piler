@@ -70,6 +70,15 @@ pub const StaticVariable = struct {
     global: bool,
     init: Symbol.StaticInit,
     alignment: usize,
+
+    pub fn isZero(self: StaticVariable) bool {
+        return switch (self.init) {
+            .int => self.init.int == 0,
+            .uint => self.init.uint == 0,
+            .long => self.init.long == 0,
+            .ulong => self.init.ulong == 0,
+        };
+    }
 };
 
 const TopLevelTag = enum { Function, StaticVariable };

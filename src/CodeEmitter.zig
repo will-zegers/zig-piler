@@ -53,7 +53,7 @@ pub fn  emitStaticVar(allocator: Allocator, staticVar: Assembler.StaticVariable)
 
     var code: []const u8 = undefined;
     switch (staticVar.init) {
-        .int, .uint => if (staticVar.init.int == 0) {
+        .int, .uint => if (staticVar.isZero()) {
             const template =
                 \\  .bss
                 \\  .align 4
@@ -68,9 +68,12 @@ pub fn  emitStaticVar(allocator: Allocator, staticVar: Assembler.StaticVariable)
                 \\{s}:
                 \\  .long {d}
             ;
-            code = try allocator.print(template, .{staticVar.name, staticVar.init.int});
+            code = if (staticVar.init == .int)
+                try allocator.print(template, .{staticVar.name, staticVar.init.int})
+            else
+                try allocator.print(template, .{staticVar.name, staticVar.init.uint});
         },
-        .long, .ulong => if (staticVar.init.long == 0) {
+        .long, .ulong => if (staticVar.isZero()) {
             const template =
                 \\  .bss
                 \\  .align 8
@@ -85,7 +88,10 @@ pub fn  emitStaticVar(allocator: Allocator, staticVar: Assembler.StaticVariable)
                 \\{s}:
                 \\  .quad {d}
             ;
-            code = try allocator.print(template, .{staticVar.name, staticVar.init.long});
+            code = if (staticVar.init == .long)
+                try allocator.print(template, .{staticVar.name, staticVar.init.long})
+            else
+                try allocator.print(template, .{staticVar.name, staticVar.init.ulong});
         },
     }
     try instructions.append(allocator, code);
@@ -171,7 +177,15 @@ pub fn emitFunction(allocator: Allocator, function: Assembler.Function, symbols:
 
                 break :code allocator.print(template, .{suffix, arg1, arg2});
             },
-            .Div => unreachable,
+            .Div => |div| {
+                const template =
+                    \\  idiv{c}   {s}
+                ;
+                const suffix = getSuffix(div.type);
+                const operand = getOperandString(allocator, div.operand, div.type);
+
+                break :code allocator.print(template, .{suffix, operand});
+            },
             .Idiv => |idiv| {
                 const template =
                     \\  idiv{c}   {s}
