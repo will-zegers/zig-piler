@@ -133,6 +133,8 @@ pub fn emitFunction(allocator: Allocator, function: Assembler.Function, symbols:
                     .Xor => "xor",
                     .SAL => "sal",
                     .SAR => "sar",
+                    .SHL => "shl",
+                    .SHR => "shr",
                     else => unreachable,
                 };
                 const suffix = getSuffix(binary.type);

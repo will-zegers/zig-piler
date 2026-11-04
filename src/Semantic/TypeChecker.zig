@@ -280,13 +280,19 @@ fn typeCheckExpression(allocator: Allocator, symbols: *Symbol.Table, expr: *Expr
             const lType = typeCheckExpression(allocator, symbols, bin.left);
             const rType = typeCheckExpression(allocator, symbols, bin.right);
             const commonType = switch (bin.operator) {
-                .SAL, .SAR => lType, // bit-shifts are a special case that always assmue the type of the base number
+                .ShiftL, .ShiftR => lType, // bit-shifts are a special case that always assmue the type of the base number
                 else => Type.getCommon(lType, rType),
             };
 
             bin.type = commonType;
             bin.left.* = Cast.to(allocator, bin.left, commonType);
             bin.right.* = Cast.to(allocator, bin.right, commonType);
+
+            if (bin.operator == .ShiftL) {
+                bin.operator = if (commonType.signed()) .SAL else .SHL;
+            } else if (bin.operator == .ShiftR) {
+                bin.operator = if (commonType.signed()) .SAR else .SHR;
+            }
 
             return bin.type.?;
         },

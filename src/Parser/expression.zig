@@ -181,8 +181,12 @@ pub const Binary = struct {
         Neq,
         OrB,
         OrL,
+        ShiftL,
+        ShiftR,
         SAL,
         SAR,
+        SHL,
+        SHR,
         Sub,
         Xor,
     };
@@ -202,8 +206,8 @@ pub const Binary = struct {
         .{ "!=", .Neq },
         .{ "|", .OrB },
         .{ "||", .OrL },
-        .{ "<<", .SAL },
-        .{ ">>", .SAR },
+        .{ "<<", .ShiftL },
+        .{ ">>", .ShiftR },
         .{ "-", .Sub },
         .{ "^", .Xor },
     });

@@ -102,34 +102,15 @@ pub const Type = union(TypeTag) {
     /// same size but with different signage, prefer the unsigned type; otherwise
     /// prefer the larger type. (And same types obviously prefer that type)
     pub fn getCommon(type1: Type, type2: Type) Type {
-        // This two cases will result in an error during semantic type checking,
+        // These two cases will result in an error during semantic type checking,
         // but use return types for now if either is a funtion type
-        // if (type1 == .FunType) return getCommon(type1.FunType.ret.*, type2);
-        // if (type2 == .FunType) return getCommon(type1, type2.FunType.ret.*);
+        if (type1 == .FunType) return getCommon(type1.FunType.ret.*, type2);
+        if (type2 == .FunType) return getCommon(type1, type2.FunType.ret.*);
 
-        // if (type1.size() > type2.size()) return type1;
-        // if (type1.size() < type2.size()) return type2;
-        // if (!type1.signed()) return type1;
-        // return type2;
-
-        return switch (type1) {
-            .Int => type2,
-            .UInt => switch (type2) {
-                .Int, .UInt => .UInt,
-                .Long, .ULong => type2,
-                .FunType => unreachable,
-            },
-            .Long => switch (type2) {
-                .ULong => .ULong,
-                .FunType => unreachable,
-                else => type1,
-            },
-            .ULong => switch (type2) {
-                .FunType => unreachable,
-                else => type1,
-            },
-            .FunType => unreachable,
-        };
+        if (type1.size() > type2.size()) return type1;
+        if (type1.size() < type2.size()) return type2;
+        if (!type1.signed()) return type1;
+        return type2;
     }
 };
 

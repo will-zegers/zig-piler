@@ -222,7 +222,10 @@ fn isIllegalPushImmQuad(push: Push) bool {
 
 // Shift instructions must not have the destination as a memory address (i.e. stack)
 fn isIllegalShift(bin: Binary) bool {
-    return (bin.operator == .SAL or bin.operator == .SAR) and isMemoryAddress(bin.dst);
+    return switch (bin.operator) {
+        .SAL, .SAR, .SHL, .SHR => isMemoryAddress(bin.dst),
+        else => false,
+    };
 }
 
 pub fn allocError() noreturn {
