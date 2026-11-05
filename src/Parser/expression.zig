@@ -88,6 +88,7 @@ pub const Expression = union(ExpressionTag) {
             .Binary => self.Binary.type.?,
             .Cast => self.Cast.target.type.?,
             .Constant => switch (self.Constant) {
+                .double => .Double,
                 .int => .Int,
                 .long => .Long,
                 .uint => .UInt,
@@ -285,14 +286,20 @@ pub const Cast = struct {
     }
 };
 
-const ConstantTag = enum { int, long, uint, ulong };
+const ConstantTag = enum { double, int, uint, long, ulong };
 pub const Constant = union(ConstantTag) {
+    double: f64,
     int: i32,
-    long: i64,
     uint: u32,
+    long: i64,
     ulong: u64,
 
     pub fn parse(token: Token) ParsingError!Constant {
+        if (mem.findScalar(u8, token.symbol, '.') != null or mem.findAny(u8, token.symbol, "Ee") != null) {
+            const double = std.fmt.parseFloat(f64, token.symbol) catch |err| return parseError(err, token.symbol);
+            return .{ .double = double };
+        }
+
         var valueStr = mem.trimEnd(u8, token.symbol, "Ll"); // ...l?
         if (valueStr.len != token.symbol.len) { // explicit 'long'
             const longValueStr = mem.trimEnd(u8, valueStr, "Uu"); // ...ul?
@@ -333,8 +340,16 @@ pub const Constant = union(ConstantTag) {
 
     pub fn as(self: Constant, to: Type) Constant {
         switch (to) {
+            .Double => {
+                const double: f64 = switch (self) {
+                    .double => self.double,
+                    else => unreachable,
+                };
+                return .{ .double = double };
+            },
             .Int => {
                 const int: i32 = switch (self) {
+                    .double => unreachable,
                     .int => self.int,
                     .long => @truncate(self.long),
                     .uint => @bitCast(self.uint),
@@ -344,6 +359,7 @@ pub const Constant = union(ConstantTag) {
             },
             .UInt => {
                 const uint: u32 = switch (self) {
+                    .double => unreachable,
                     .int => @bitCast(self.int),
                     .long => @truncate(@as(u64, @bitCast(self.long))),
                     .uint => self.uint,
@@ -353,6 +369,7 @@ pub const Constant = union(ConstantTag) {
             },
             .Long => {
                 const long: i64 = switch (self) {
+                    .double => unreachable,
                     .int => self.int,
                     .long => self.long,
                     .uint => self.uint,
@@ -362,6 +379,7 @@ pub const Constant = union(ConstantTag) {
             },
             .ULong => {
                 const ulong: u64 = switch (self) {
+                    .double => unreachable,
                     .int => @bitCast(@as(i64, self.int)),
                     .long => @bitCast(self.long),
                     .uint => self.uint,
@@ -542,7 +560,7 @@ fn parseFactor(allocator: Allocator, tokens: *TokenIterator) ParsingError!Expres
         .OpenParenthesis => { // '(' <expr> ')'
             const nextToken = tokens.peek();
             switch (nextToken.type) {
-                .Int, .Long, .Signed, .Unsigned => {
+                .Double, .Int, .Long, .Signed, .Unsigned => {
                     tokens.rewind();
                     break :blk .{ .Cast = try Cast.parse(allocator, tokens) };
                 },

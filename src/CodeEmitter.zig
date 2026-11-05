@@ -53,6 +53,7 @@ pub fn  emitStaticVar(allocator: Allocator, staticVar: Assembler.StaticVariable)
 
     var code: []const u8 = undefined;
     switch (staticVar.initial) {
+        .double => unreachable,
         .int, .uint => if (staticVar.isZero()) {
             const template =
                 \\  .bss

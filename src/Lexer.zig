@@ -84,18 +84,19 @@ pub fn tokenize(self: *Lexer, text: [:0]const u8) !TokenIterator {
         var token: Token = undefined;
         switch (currentChar) {
             'a'...'z', 'A'...'Z', '_' => { // identifiers and keywords
-                const identifier = self.reIdentifier.exec(remainingText) orelse badToken("identifier", remainingText, lineIndex);
+                const identifier = self.reIdentifier.exec(remainingText, 0) orelse badToken("identifier", remainingText, lineIndex);
                 const tokenType = KeywordMap.get(identifier) orelse .Identifier;
                 token = .{ .type = tokenType, .symbol = identifier, .lineIndex = lineIndex };
             },
+
             '0'...'9', '.' => { // constants
-                var constant: ?[]const u8 = self.reConstantDouble.exec(remainingText);
+                var constant: ?[]const u8 = self.reConstantDouble.exec(remainingText, 1);
                 if (constant == null) {
-                    constant = self.reConstantInt.exec(remainingText) orelse badToken("constant", remainingText, lineIndex);
+                    constant = self.reConstantInt.exec(remainingText, 1) orelse badToken("constant", remainingText, lineIndex);
                 }
-                std.debug.print("{s}\n", .{constant.?});
                 token = .{ .type = .Constant, .symbol = constant.?, .lineIndex = lineIndex };
             },
+
             '(', ')', '{', '}', ';' => { // brackets and semicolons
                 token = switch (currentChar) {
                     '(' => .{ .type = .OpenParenthesis, .symbol = "(", .lineIndex = lineIndex },
@@ -107,7 +108,7 @@ pub fn tokenize(self: *Lexer, text: [:0]const u8) !TokenIterator {
                 };
             },
             '#' => { // ignore macros for now
-                const macro = self.reMacro.exec(remainingText) orelse badToken("macro", remainingText, lineIndex);
+                const macro = self.reMacro.exec(remainingText, 0) orelse badToken("macro", remainingText, lineIndex);
                 tokenStart += macro.len;
                 continue;
             },
@@ -123,7 +124,7 @@ pub fn tokenize(self: *Lexer, text: [:0]const u8) !TokenIterator {
             '/' => { // line and block comments; division operator
                 switch (remainingText[1]) {
                     '/', '*' => { // comment
-                        const comment = self.reComment.exec(remainingText) orelse badToken("comment", remainingText, lineIndex);
+                        const comment = self.reComment.exec(remainingText, 0) orelse badToken("comment", remainingText, lineIndex);
                         lineIndex += mem.count(u8, comment, "\n"); // Update the line index to include the commented lines
                         tokenStart += comment.len;
                         continue;
@@ -255,7 +256,7 @@ fn badToken(expected: []const u8, text: [:0]const u8, lineIndex: usize) noreturn
         std.process.exit(1);
     };
 
-    const token = reBadToken.exec(text).?;
+    const token = reBadToken.exec(text, 0).?;
     std.log.err("Invalid {s} found '{s}' on line {d}", .{ expected, token, lineNumber });
     std.process.exit(1);
 }

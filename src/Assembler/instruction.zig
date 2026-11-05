@@ -308,6 +308,7 @@ pub const Operand = union(OperandTag) {
 
     pub fn constantToImm(constant: TAC.Constant) usize {
         return switch (constant) {
+            .double => unreachable,
             .int => @bitCast(@as(isize, constant.int)),
             .long => @intCast(constant.long),
             .uint => @intCast(constant.uint),
@@ -332,6 +333,7 @@ pub const Type = enum {
 
     pub fn fromVar(symbols: Symbol.Table, v: TAC.Var) Type {
         return switch (symbols.get(v).?.type) {
+            .Double => unreachable,
             .Int, .UInt => .Long,
             .Long, .ULong => .Quad,
             .FunType => unreachable,
@@ -340,6 +342,7 @@ pub const Type = enum {
 
     pub fn fromConstant(constant: TAC.Constant) Type {
         return switch (constant) {
+            .double => unreachable,
             .int, .uint => .Long,
             .long, .ulong => .Quad,
         };

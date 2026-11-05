@@ -19,12 +19,13 @@ pub const ParsingError = error{
     Token,
 };
 
-pub const TypeTag = enum { Int, Long, FunType, UInt, ULong };
+pub const TypeTag = enum { Double, Int, Long, FunType, UInt, ULong };
 pub const Type = union(TypeTag) {
     const Signage = enum { Signed, Unsigned };
 
     const Error = error{NonComparable};
 
+    Double: void,
     Int: void,
     Long: void,
     FunType: struct {
@@ -34,7 +35,7 @@ pub const Type = union(TypeTag) {
     UInt: void,
     ULong: void,
 
-    pub fn parse(types: [2]?Type, signage: ?Signage, symbol: []const u8) !Type {
+    fn parse(types: [2]?Type, signage: ?Signage, symbol: []const u8) !Type {
         if (types[1] == null) {
             if (types[0] == null) {
                 if (signage == null) {
@@ -45,18 +46,25 @@ pub const Type = union(TypeTag) {
             }
 
             switch (types[0].?) {
+                .Double => return .Double,
                 .Int => return if (signage != null and signage.? == .Unsigned) .UInt else .Int,
                 .Long => return if (signage != null and signage.? == .Unsigned) .ULong else .Long,
                 else => {
-                    log.err("Invalid type specifier '{any} {any}'", .{ types[0].?, types[1].? });
+                    log.err("Invalid type specifier '{any}'", .{types[0].?});
                     return ParsingError.InvalidType;
                 },
             }
         }
 
         switch (types[1].?) { // current support for 'long int' and 'int long', both result in type 'long'
+            .Double => if (types[0].? == .Long) { // 'double long' and 'long double' also valid
+                return .Double;
+            } else {
+                log.err("Invalid type specifier '{any}' '{any}'", .{ types[0].?, types[1].? });
+                return ParsingError.InvalidType;
+            },
             .Int => switch (types[0].?) {
-                .Int => {
+                .Double, .Int => {
                     log.err("Invalid type specifier '{any} {any}'", .{ types[0].?, types[1].? });
                     return ParsingError.InvalidType;
                 },
@@ -69,6 +77,7 @@ pub const Type = union(TypeTag) {
                     log.err("Type 'long long' not currently supported", .{});
                     return ParsingError.InvalidType;
                 },
+                .Double => return .Double,
                 .FunType, .UInt, .ULong => unreachable,
             },
             .FunType, .UInt, .ULong => unreachable,
@@ -82,7 +91,7 @@ pub const Type = union(TypeTag) {
     pub fn size(self: Type) usize {
         return switch (self) {
             .Int, .UInt => 4,
-            .Long, .ULong => 8,
+            .Double, .Long, .ULong => 8,
             .FunType => unreachable,
         };
     }
@@ -91,6 +100,7 @@ pub const Type = union(TypeTag) {
     pub fn equals(self: Type, other: Type) bool {
         return switch (self) {
             .FunType => other == .FunType,
+            .Double => other == .Double,
             .Int => other == .Int,
             .Long => other == .Long,
             .UInt => other == .UInt,
@@ -130,13 +140,14 @@ pub const Specifiers = struct {
         var types = [2]?Type{ null, null };
         while (true) {
             switch (nextToken.type) {
-                .Int, .Long => {
+                .Double, .Int, .Long => {
                     if (typeIndex >= types.len) {
                         log.err("Unvalid type specifier '{s}'", .{nextToken.symbol});
                         return ParsingError.InvalidType;
                     }
 
                     switch (nextToken.type) {
+                        .Double => types[typeIndex] = .Double,
                         .Int => types[typeIndex] = .Int,
                         .Long => types[typeIndex] = .Long,
                         else => unreachable,
@@ -177,6 +188,10 @@ pub const Specifiers = struct {
         }
 
         specifiers.type = try Type.parse(types, signage, nextToken.symbol);
+        if (signage != null and specifiers.type.? == .Double) {
+            log.err("'double' cannot be signed or unsigned", .{});
+            return ParsingError.InvalidSignage;
+        }
         return specifiers;
     }
 };

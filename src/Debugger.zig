@@ -227,6 +227,7 @@ fn printExpression(expr: Parser.Expression, indent: usize) void {
             printExpression(cast.exp.*, 0);
         },
         .Constant => |constant| switch (constant) {
+            .double => |double| print("double {d})\n", .{double}),
             .int => |int| print("int {d})\n", .{int}),
             .long => |long| print("long {d})\n", .{long}),
             .uint => |uint| print("int {d})\n", .{uint}),
@@ -278,7 +279,7 @@ fn printFESymbolTable(symbolTable: Symbol.Table) void {
                 }
                 print("    ret: {s}\n", .{@tagName(t.FunType.ret.*)});
             },
-            .Int, .Long, .UInt, .ULong => {},
+            .Double, .Int, .Long, .UInt, .ULong => {},
         }
         print("  attrs: {s}\n", .{@tagName(attrs)});
         switch (attrs) {
@@ -292,6 +293,7 @@ fn printFESymbolTable(symbolTable: Symbol.Table) void {
                 switch (static.initialValue) {
                     .Tentative, .None => print("{s}\n", .{@tagName(static.initialValue)}),
                     .Initial => |init| switch (init) {
+                        .double => |double| print("{any}: {d}", .{ @tagName(static.initialValue), double }),
                         .int => |int| print("{any}: {d}", .{ @tagName(static.initialValue), int }),
                         .long => |long| print("{any}: {d}", .{ @tagName(static.initialValue), long }),
                         .uint => |uint| print("{any}: {d}", .{ @tagName(static.initialValue), uint }),
@@ -402,6 +404,7 @@ fn printTACFunction(function: TAC.Function) void {
 fn printVal(prefix: []const u8, val: TAC.Val, suffix: []const u8) void {
     switch (val) {
         .Constant => switch (val.Constant) {
+            .double => print("{s}int {d}{s}", .{ prefix, val.Constant.double, suffix }),
             .int => print("{s}int {d}{s}", .{ prefix, val.Constant.int, suffix }),
             .long => print("{s}long {d}{s}", .{ prefix, val.Constant.long, suffix }),
             .uint => print("{s}uint {d}{s}", .{ prefix, val.Constant.uint, suffix }),
@@ -436,6 +439,7 @@ pub fn printAssemblerAST(ast: Assembler.Assembly) void {
                 print("    identifier: {s}\n", .{staticVar.name});
                 print("    global: {any}\n", .{staticVar.global});
                 switch (staticVar.initial) {
+                    .double => print("    double: {d}\n", .{staticVar.initial.double}),
                     .int => print("    int: {d}\n", .{staticVar.initial.int}),
                     .long => print("    long: {d}\n", .{staticVar.initial.long}),
                     .uint => print("    uint: {d}\n", .{staticVar.initial.uint}),

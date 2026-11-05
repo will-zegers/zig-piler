@@ -77,7 +77,7 @@ pub const StaticVariable = struct {
             .global = staticVar.global,
             .alignment = switch (varType) {
                 .Int, .UInt => 4,
-                .Long, .ULong => 8,
+                .Double, .Long, .ULong => 8,
                 .FunType => unreachable,
             },
             .initial = staticVar.initial,
@@ -86,6 +86,7 @@ pub const StaticVariable = struct {
 
     pub fn isZero(self: StaticVariable) bool {
         return switch (self.initial) {
+            .double => self.initial.double == 0,
             .int => self.initial.int == 0,
             .uint => self.initial.uint == 0,
             .long => self.initial.long == 0,
@@ -280,6 +281,7 @@ fn replaceIfPseudo(
                     stackPointer.* += QUADWORD_BYTES;
                     stackPointer.* = 8 * @divCeil(stackPointer.*, 8);
                 },
+                .Double => unreachable, // this could probably be merge with longs
                 .FunType => unreachable,
             }
             try map.put(key, -stackPointer.*);
@@ -300,6 +302,7 @@ fn populateBackendSymbols(beSymbols: *StringHashMap(Entry), feSymbols: Symbol.Ta
         if (beSymbols.contains(key)) continue;
 
         beSymbols.put(key, switch (value.type) {
+            .Double => unreachable,
             .Int, .UInt => switch (value.attrs) {
                 .Static => .{ .Obj = .{ .type = .Long, .isStatic = true } },
                 .Local => .{ .Obj = .{ .type = .Long, .isStatic = false } },

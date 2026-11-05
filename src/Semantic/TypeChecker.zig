@@ -166,6 +166,7 @@ fn typeCheckLocalVarDecl(allocator: Allocator, symbols: *Symbol.Table, decl: *Va
         }
     } else if (decl.storageClass == .Static) {
         var initialValue: Symbol.Static.InitialValue = switch (decl.type) {
+            .Double => .{ .Initial = .{ .double = 0 } },
             .Int => .{ .Initial = .{ .int = 0 } },
             .Long => .{ .Initial = .{ .long = 0 } },
             .UInt => .{ .Initial = .{ .uint = 0 } },
@@ -250,6 +251,11 @@ fn typeCheckStatement(allocator: Allocator, symbols: *Symbol.Table, stmt: *State
                     ErrorReporter.report(.NonConstCase, case.lineIndex, null);
                     return;
                 }
+                if (cond.*.Constant == .double) {
+                    ErrorReporter.report(.NonIntegerCaseCondition, case.lineIndex, null);
+                    return;
+                }
+
                 _ = typeCheckExpression(allocator, symbols, cond);
                 const parentType = case.parent.?.cond.getType();
                 case.cond = Cast.to(allocator, cond, parentType);
@@ -301,6 +307,7 @@ fn typeCheckExpression(allocator: Allocator, symbols: *Symbol.Table, expr: *Expr
             return cast.target.type.?;
         },
         .Constant => return switch (expr.Constant) {
+            .double => .Double,
             .int => .Int,
             .long => .Long,
             .uint => .UInt,

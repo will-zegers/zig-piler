@@ -98,7 +98,7 @@ pub const Declaration = union(DeclarationTag) {
         var tokenIndex: usize = 0;
         while (true) {
             switch (tokens.lookAhead(tokenIndex).type) {
-                .Extern, .Int, .Long, .Signed, .Static, .Unsigned => tokenIndex += 1,
+                .Double, .Extern, .Int, .Long, .Signed, .Static, .Unsigned => tokenIndex += 1,
                 else => break,
             }
         }
@@ -248,7 +248,7 @@ pub const BlockItem = union(BlockItemTag) {
     pub fn parse(allocator: Allocator, tokens: *TokenIterator) ParsingError!BlockItem {
         const nextToken = tokens.peek();
         return switch (nextToken.type) {
-            .Int, .Long, .Extern, .Signed, .Static, .Unsigned => .{ .Declaration = try .parse(allocator, tokens) },
+            .Double, .Extern, .Int, .Long, .Signed, .Static, .Unsigned => .{ .Declaration = try .parse(allocator, tokens) },
             else => .{ .Statement = try .parse(allocator, tokens) },
         };
     }
@@ -424,6 +424,7 @@ pub const Case = struct {
                         const value = cond.Constant.as(.ULong);
                         return allocator.print("{s}.{d}", .{ self.parent.?.tag.?, value.ulong }) catch allocError();
                     },
+                    .Double => unreachable,
                     .FunType => unreachable,
                 },
                 .Cast => switch (parentType) {
@@ -435,6 +436,7 @@ pub const Case = struct {
                         const value = cond.Cast.exp.Constant.as(.ULong);
                         return allocator.print("{s}.{d}", .{ self.parent.?.tag.?, value.ulong }) catch allocError();
                     },
+                    .Double => unreachable,
                     .FunType => unreachable,
                 },
                 else => unreachable,
@@ -510,7 +512,7 @@ const ForInit = union(ForInitTag) {
     pub fn parse(allocator: Allocator, tokens: *TokenIterator) ParsingError!ForInit {
         const nextToken = tokens.peek();
         switch (nextToken.type) {
-            .Int, .Long, .Extern, .Signed, .Static, .Unsigned => {
+            .Double, .Int, .Long, .Extern, .Signed, .Static, .Unsigned => {
                 const decl: Declaration = try .parse(allocator, tokens);
                 if (decl == .FunDecl) {
                     log.err("Expected variable declarator or expression", .{});

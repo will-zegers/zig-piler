@@ -462,6 +462,7 @@ fn emitStorageClassSymbols(allocator: Allocator, symbols: *Symbol.Table) []TopLe
                             .identifier = name,
                             .global = static.global,
                             .initial = switch (entry.type) {
+                                .Double => .{ .double = 0 },
                                 .Int => .{ .int = 0 },
                                 .Long => .{ .long = 0 },
                                 .UInt => .{ .uint = 0 },
