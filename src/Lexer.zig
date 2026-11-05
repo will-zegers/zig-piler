@@ -42,10 +42,22 @@ reMacro: Regex,
 pub fn init(allocator: Allocator) !Lexer {
     return .{
         .allocator = allocator,
+
+        // matches lines starting with '// upto any non-newline character, or block quotes starting at /* to the next */'
         .reComment = try .init("//[^\n]*|/\\*([^*]|\\*+[^*/])*\\*+/"),
-        .reConstantInt = try .init("^([0-9]+([Ll][Uu]|[Uu][Ll]|[Ll]|[Uu])?)[^0-9@A-Za-z._]"), // for some reason, '\w' has not worked
+
+        // captures any string of consecutive numberic characters, followed by optional long 'l' and unsigned 'u' specifiers,
+        // upto any (non-captured) word or '.' characters (for some reason, '\w' wouldn't work, hence the [^0-9A-Za-z_.])
+        .reConstantInt = try .init("^([0-9]+([Ll][Uu]|[Uu][Ll]|[Ll]|[Uu])?)[^0-9@A-Za-z._]"),
+        //
+        // put simply: captures scientific notation, <integer>.<fractional>, or <interger>. upto any non-word or '.' character
         .reConstantDouble = try .init("^(([0-9]*\\.[0-9]+|[0-9]+\\.?)[Ee][+-]?[0-9]+|[0-9]*\\.[0-9]+|[0-9]+\\.)[^0-9@A-Za-z._]"),
+
+        // any string beginning with a letter or underscore, followed by any seqeuence of word characters (includes mathches on keywords,
+        // which are identified by the above hashmap)
         .reIdentifier = try .init("[a-zA-Z_]\\w*\\b"),
+
+        // matches any line beginning with '#' upto the newline
         .reMacro = try .init("\\#[^\n]*"),
     };
 }
