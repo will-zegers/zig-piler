@@ -52,7 +52,7 @@ pub fn  emitStaticVar(allocator: Allocator, staticVar: Assembler.StaticVariable)
     }
 
     var code: []const u8 = undefined;
-    switch (staticVar.init) {
+    switch (staticVar.initial) {
         .int, .uint => if (staticVar.isZero()) {
             const template =
                 \\  .bss
@@ -68,10 +68,10 @@ pub fn  emitStaticVar(allocator: Allocator, staticVar: Assembler.StaticVariable)
                 \\{s}:
                 \\  .long {d}
             ;
-            code = if (staticVar.init == .int)
-                try allocator.print(template, .{staticVar.name, staticVar.init.int})
+            code = if (staticVar.initial == .int)
+                try allocator.print(template, .{staticVar.name, staticVar.initial.int})
             else
-                try allocator.print(template, .{staticVar.name, staticVar.init.uint});
+                try allocator.print(template, .{staticVar.name, staticVar.initial.uint});
         },
         .long, .ulong => if (staticVar.isZero()) {
             const template =
@@ -88,10 +88,10 @@ pub fn  emitStaticVar(allocator: Allocator, staticVar: Assembler.StaticVariable)
                 \\{s}:
                 \\  .quad {d}
             ;
-            code = if (staticVar.init == .long)
-                try allocator.print(template, .{staticVar.name, staticVar.init.long})
+            code = if (staticVar.initial == .long)
+                try allocator.print(template, .{staticVar.name, staticVar.initial.long})
             else
-                try allocator.print(template, .{staticVar.name, staticVar.init.ulong});
+                try allocator.print(template, .{staticVar.name, staticVar.initial.ulong});
         },
     }
     try instructions.append(allocator, code);

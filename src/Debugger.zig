@@ -412,7 +412,7 @@ fn printVal(prefix: []const u8, val: TAC.Val, suffix: []const u8) void {
 }
 
 fn printTACStaticVariable(staticVar: TAC.StaticVariable) void {
-    print("  {any} {s} = {any} (global: {any})\n", .{ @TypeOf(staticVar), staticVar.identifier, staticVar.init, staticVar.global });
+    print("  {any} {s} = {any} (global: {any})\n", .{ @TypeOf(staticVar), staticVar.identifier, staticVar.initial, staticVar.global });
 }
 
 pub fn printAssemblerAST(ast: Assembler.Assembly) void {
@@ -435,11 +435,11 @@ pub fn printAssemblerAST(ast: Assembler.Assembly) void {
                 print("  {any} (\n", .{@TypeOf(staticVar)});
                 print("    identifier: {s}\n", .{staticVar.name});
                 print("    global: {any}\n", .{staticVar.global});
-                switch (staticVar.init) {
-                    .int => print("    int: {d}\n", .{staticVar.init.int}),
-                    .long => print("    long: {d}\n", .{staticVar.init.long}),
-                    .uint => print("    uint: {d}\n", .{staticVar.init.uint}),
-                    .ulong => print("    ulong: {d}\n", .{staticVar.init.ulong}),
+                switch (staticVar.initial) {
+                    .int => print("    int: {d}\n", .{staticVar.initial.int}),
+                    .long => print("    long: {d}\n", .{staticVar.initial.long}),
+                    .uint => print("    uint: {d}\n", .{staticVar.initial.uint}),
+                    .ulong => print("    ulong: {d}\n", .{staticVar.initial.ulong}),
                 }
                 print("  )\n", .{});
             },

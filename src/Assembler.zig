@@ -18,7 +18,6 @@ const ARG_REGISTERS = instruction.ARG_REGISTERS;
 const LONGWORD_BYTES = instruction.LONGWORD_BYTES;
 const QUADWORD_BYTES = instruction.QUADWORD_BYTES;
 const Binary = instruction.Binary;
-const InstructionList = instruction.InstructionList;
 const Jmp = instruction.Jmp;
 const JmpCC = instruction.JmpCC;
 const Label = instruction.Label;
@@ -68,15 +67,29 @@ pub const StaticVariable = struct {
     type: Parser.Type,
     name: []const u8,
     global: bool,
-    init: Symbol.StaticInit,
+    initial: Symbol.StaticInit,
     alignment: usize,
 
+    pub fn init(varType: Parser.Type, staticVar: TAC.StaticVariable) StaticVariable {
+        return .{
+            .type = varType,
+            .name = staticVar.identifier,
+            .global = staticVar.global,
+            .alignment = switch (varType) {
+                .Int, .UInt => 4,
+                .Long, .ULong => 8,
+                .FunType => unreachable,
+            },
+            .initial = staticVar.initial,
+        };
+    }
+
     pub fn isZero(self: StaticVariable) bool {
-        return switch (self.init) {
-            .int => self.init.int == 0,
-            .uint => self.init.uint == 0,
-            .long => self.init.long == 0,
-            .ulong => self.init.ulong == 0,
+        return switch (self.initial) {
+            .int => self.initial.int == 0,
+            .uint => self.initial.uint == 0,
+            .long => self.initial.long == 0,
+            .ulong => self.initial.ulong == 0,
         };
     }
 };
@@ -87,54 +100,28 @@ const TopLevel = union(TopLevelTag) {
     StaticVariable: StaticVariable,
 };
 
-pub fn assemble(allocator: Allocator, symbols: Symbol.Table, tree: TAC.Program) Assembly {
+pub fn assemble(allocator: Allocator, frontendSymbols: Symbol.Table, tree: TAC.Program) Assembly {
     var topLevelList: ArrayList(TopLevel) = .empty;
-    var defined: StringHashMap(bool) = .init(allocator);
-    defer defined.deinit();
+    var backendSymbols: StringHashMap(Entry) = .init(allocator);
 
     for (tree.topLevel) |topLevel| {
         switch (topLevel) {
-            .Function => {
-                const assembly = assembleFunction(allocator, symbols, topLevel.Function, &defined);
+            .Function => |fun| {
+                const assembly = assembleFunction(allocator, frontendSymbols, topLevel.Function);
                 topLevelList.append(allocator, .{ .Function = assembly }) catch allocError();
+
+                // Function has been defined here, add an entry to the backend table
+                backendSymbols.put(fun.name, .{ .Fun = .{ .defined = true } }) catch allocError();
             },
             .StaticVariable => |staticVar| {
-                const entry = symbols.get(staticVar.identifier).?;
-                topLevelList.append(allocator, .{ .StaticVariable = .{
-                    .type = entry.type,
-                    .name = staticVar.identifier,
-                    .global = staticVar.global,
-                    .alignment = switch (entry.type) {
-                        .Int, .UInt => 4,
-                        .Long, .ULong => 8,
-                        .FunType => unreachable,
-                    },
-                    .init = staticVar.init,
-                } }) catch allocError();
+                const entry = frontendSymbols.get(staticVar.identifier).?;
+                topLevelList.append(allocator, .{ .StaticVariable =
+                    StaticVariable.init(entry.type, staticVar),
+                } ) catch allocError();
             },
         }
     }
-
-    var backendSymbols: StringHashMap(Entry) = .init(allocator);
-    var it = symbols.iterator();
-    while (it.next()) |entry| {
-        const key = entry.key_ptr.*;
-        const value = entry.value_ptr.*;
-
-        backendSymbols.put(key, switch (value.type) {
-            .FunType =>  .{ .Fun = .{ .defined = defined.get(key) orelse false } },
-            .Int, .UInt => switch (value.attrs) {
-                .Static => .{ .Obj = .{ .type = .Long, .isStatic = true } },
-                .Local => .{ .Obj = .{ .type = .Long, .isStatic = false } },
-                .Fun => unreachable,
-            },
-            .Long, .ULong => switch (value.attrs) {
-                .Static => .{ .Obj = .{ .type = .Quad, .isStatic = true } },
-                .Local => .{ .Obj = .{ .type = .Quad, .isStatic = false } },
-                .Fun => unreachable,
-            }
-        }) catch allocError();
-    }
+    populateBackendSymbols(&backendSymbols, frontendSymbols);
 
     return .{
         .allocator = allocator,
@@ -144,34 +131,11 @@ pub fn assemble(allocator: Allocator, symbols: Symbol.Table, tree: TAC.Program) 
 }
 
 // TODO: break this function up
-pub fn assembleFunction(allocator: Allocator, symbols: Symbol.Table, function: TAC.Function, defined: *StringHashMap(bool)) Function {
-    var instructionList: InstructionList = .empty;
-    var pseudoMap: std.StringHashMap(isize) = .init(allocator);
+pub fn assembleFunction(allocator: Allocator, symbols: Symbol.Table, function: TAC.Function) Function {
+    var instructionList: ArrayList(Instruction) = .empty;
+
+    var pseudoMap = initStack(allocator, symbols, &instructionList, function.params) catch allocError();
     defer pseudoMap.deinit();
-
-    defined.put(function.name, true) catch allocError();
-
-    // Move register arguments into stack memory so as not to clobber callee-saved registers
-    var i: usize = 0;
-    while (i < function.params.len and i < ARG_REGISTERS.len) {
-        const name = function.params[i].unique.?;
-        const src: Operand = .{ .Reg = ARG_REGISTERS[i] };
-        const dst: Operand = .{ .Pseudo = name };
-        const t: Type = .fromVar(symbols, name);
-        instructionList.append(allocator, .{ .Mov = .{ .type = t, .src = src, .dst = dst } }) catch allocError();
-
-        i += 1;
-    }
-
-    // Since the stack args already exist in memory, add an entry to the pseudo
-    // table for the already existing stack offsets
-    var stackPointerOffset: isize = 2 * QUADWORD_BYTES; // return-address + caller base-pointer
-    while (i < function.params.len) {
-        pseudoMap.put(function.params[i].unique.?, stackPointerOffset) catch allocError();
-
-        i += 1;
-        stackPointerOffset += QUADWORD_BYTES;
-    }
 
     // First pass to build Assembly AST
     for (function.body) |instr| {
@@ -182,7 +146,7 @@ pub fn assembleFunction(allocator: Allocator, symbols: Symbol.Table, function: T
     }
 
     // Second pass, replace Pseudo registers with stack locations and prepend the prelude
-    setupStack(allocator, symbols, &instructionList, &pseudoMap);
+    setupStack(allocator, symbols, &instructionList, &pseudoMap) catch allocError();
 
     // Find illegal instructions (see specifications in the Patcher module)
     var instructions = instructionList.toOwnedSlice(allocator) catch allocError();
@@ -197,45 +161,78 @@ pub fn assembleFunction(allocator: Allocator, symbols: Symbol.Table, function: T
     };
 }
 
-fn setupStack(allocator: Allocator, symbols: Symbol.Table, instructions: *InstructionList, pseudoMap: *StringHashMap(isize)) void{
+/// Move register arguments into stack memory so as not to clobber callee-saved registers; initializes
+/// a mapping for pseudo registers for allocating local variables to the stack
+fn initStack(
+    allocator: Allocator,
+    symbols: Symbol.Table,
+    instructions: *ArrayList(Instruction),
+    params: []Parser.VarDecl
+) Allocator.Error!StringHashMap(isize) {
+    var pseudoMap: StringHashMap(isize) = .init(allocator);
+
+    var stackPointerOffset: isize = 2 * QUADWORD_BYTES; // return-address + caller base-pointer
+    for (params, 0..) |param, i| {
+        if (i < ARG_REGISTERS.len) { // register arguments
+            const name = param.unique.?;
+            const src: Operand = .{ .Reg = ARG_REGISTERS[i] };
+            const dst: Operand = .{ .Pseudo = name };
+            const t: Type = .fromVar(symbols, name);
+            try instructions.append(allocator, .{ .Mov = .{ .type = t, .src = src, .dst = dst } });
+        } else { // stack arguments
+            // Since the stack args already exist in memory, add an entry to the pseudo
+            // table for the already existing stack offsets
+            try pseudoMap.put(param.unique.?, stackPointerOffset);
+            stackPointerOffset += QUADWORD_BYTES;
+        }
+    }
+    return pseudoMap;
+}
+
+fn setupStack(
+    allocator: Allocator,
+    symbols: Symbol.Table,
+    instructions: *ArrayList(Instruction),
+    pseudoMap: *StringHashMap(isize)
+) Allocator.Error!void{
     var localStack: isize = 0;
 
     for (instructions.items) |*instr| {
         switch (instr.*) {
             .Binary => |*binary| {
-                replaceIfPseudo(symbols, pseudoMap, &localStack, &binary.src);
-                replaceIfPseudo(symbols, pseudoMap, &localStack, &binary.dst);
+                try replaceIfPseudo(symbols, pseudoMap, &localStack, &binary.src);
+                try replaceIfPseudo(symbols, pseudoMap, &localStack, &binary.dst);
             },
             .Cmp => |*cmp| {
-                replaceIfPseudo(symbols, pseudoMap, &localStack, &cmp.arg1);
-                replaceIfPseudo(symbols, pseudoMap, &localStack, &cmp.arg2);
+                try replaceIfPseudo(symbols, pseudoMap, &localStack, &cmp.arg1);
+                try replaceIfPseudo(symbols, pseudoMap, &localStack, &cmp.arg2);
             },
             .Div => |*div| {
-                replaceIfPseudo(symbols, pseudoMap, &localStack, &div.operand);
+                try replaceIfPseudo(symbols, pseudoMap, &localStack, &div.operand);
             },
             .Idiv => |*idiv| {
-                replaceIfPseudo(symbols, pseudoMap, &localStack, &idiv.operand);
+                try replaceIfPseudo(symbols, pseudoMap, &localStack, &idiv.operand);
             },
             .Mov => |*mov| {
-                replaceIfPseudo(symbols, pseudoMap, &localStack, &mov.src);
-                replaceIfPseudo(symbols, pseudoMap, &localStack, &mov.dst);
+                try replaceIfPseudo(symbols, pseudoMap, &localStack, &mov.src);
+                try replaceIfPseudo(symbols, pseudoMap, &localStack, &mov.dst);
             },
             .Movsx => |*movsx| {
-                replaceIfPseudo(symbols, pseudoMap, &localStack, &movsx.src);
-                replaceIfPseudo(symbols, pseudoMap, &localStack, &movsx.dst);
+                try replaceIfPseudo(symbols, pseudoMap, &localStack, &movsx.src);
+                try replaceIfPseudo(symbols, pseudoMap, &localStack, &movsx.dst);
             },
             .Movzx => |*movzx| {
-                replaceIfPseudo(symbols, pseudoMap, &localStack, &movzx.src);
-                replaceIfPseudo(symbols, pseudoMap, &localStack, &movzx.dst);
+                try replaceIfPseudo(symbols, pseudoMap, &localStack, &movzx.src);
+                try replaceIfPseudo(symbols, pseudoMap, &localStack, &movzx.dst);
             },
             .Push => |*push| {
-                replaceIfPseudo(symbols, pseudoMap, &localStack, &push.operand);
+                try replaceIfPseudo(symbols, pseudoMap, &localStack, &push.operand);
             },
             .SetCC => |*setcc| {
-                replaceIfPseudo(symbols, pseudoMap, &localStack, &setcc.operand);
+                try replaceIfPseudo(symbols, pseudoMap, &localStack, &setcc.operand);
             },
             .Unary => |*unary| {
-                replaceIfPseudo(symbols, pseudoMap, &localStack, &unary.operand);
+                try replaceIfPseudo(symbols, pseudoMap, &localStack, &unary.operand);
             },
             else => {},
         }
@@ -256,7 +253,12 @@ fn setupStack(allocator: Allocator, symbols: Symbol.Table, instructions: *Instru
 
 /// Replace 'Psuedo' registers generated in the first pass with memory locations
 /// on the stack
-fn replaceIfPseudo(symbols: Symbol.Table, map: *std.StringHashMap(isize), stackPointer: *isize, operand: *Operand) void {
+fn replaceIfPseudo(
+    symbols: Symbol.Table,
+    map: *std.StringHashMap(isize),
+    stackPointer: *isize,
+    operand: *Operand
+) Allocator.Error!void {
     if (operand.* == .Pseudo) {
         const key = operand.Pseudo;
         const entry = symbols.get(key).?;
@@ -268,25 +270,48 @@ fn replaceIfPseudo(symbols: Symbol.Table, map: *std.StringHashMap(isize), stackP
         }
 
         // If the pseudo register has not been mapped to a location on the stack,
-        // map it to the location in the local stack space
+        // map it to the next location in the local stack space and move the SP
         if (map.get(key) == null) {
             switch (entry.type) {
                 .Int, .UInt => {
-                    stackPointer.* -= LONGWORD_BYTES;
+                    stackPointer.* += LONGWORD_BYTES;
                 },
                 .Long, .ULong => {
-                    stackPointer.* -= QUADWORD_BYTES;
-                    while (@rem(stackPointer.*, 8) != 0) {
-                        stackPointer.* -= 1;
-                    }
-                    // stackPointer.* = @divCeil(@abs(stackPointer.*), 8); // align to 8-bytes
+                    stackPointer.* += QUADWORD_BYTES;
+                    stackPointer.* = 8 * @divCeil(stackPointer.*, 8);
                 },
                 .FunType => unreachable,
             }
-            map.put(key, stackPointer.*) catch allocError();
+            try map.put(key, -stackPointer.*);
         }
         const value = map.get(key).?;
         operand.* = .{ .Stack = value };
+    }
+}
+
+fn populateBackendSymbols(beSymbols: *StringHashMap(Entry), feSymbols: Symbol.Table) void {
+    var it = feSymbols.iterator();
+    while (it.next()) |entry| {
+
+        const key = entry.key_ptr.*;
+        const value = entry.value_ptr.*;
+
+        // Skip backend symbols function entries that were defined in assembly
+        if (beSymbols.contains(key)) continue;
+
+        beSymbols.put(key, switch (value.type) {
+            .Int, .UInt => switch (value.attrs) {
+                .Static => .{ .Obj = .{ .type = .Long, .isStatic = true } },
+                .Local => .{ .Obj = .{ .type = .Long, .isStatic = false } },
+                .Fun => unreachable,
+            },
+            .Long, .ULong => switch (value.attrs) {
+                .Static => .{ .Obj = .{ .type = .Quad, .isStatic = true } },
+                .Local => .{ .Obj = .{ .type = .Quad, .isStatic = false } },
+                .Fun => unreachable,
+            },
+            .FunType => .{ .Fun = .{ .defined = false } },
+        }) catch allocError();
     }
 }
 

@@ -58,7 +58,7 @@ pub const StaticVariable = struct {
     type: Parser.Type,
     identifier: []const u8,
     global: bool,
-    init: Symbol.StaticInit,
+    initial: Symbol.StaticInit,
 };
 
 const TopLevelTag = enum { Function, StaticVariable };
@@ -452,7 +452,7 @@ fn emitStorageClassSymbols(allocator: Allocator, symbols: *Symbol.Table) []TopLe
                             .type = entry.type,
                             .identifier = name,
                             .global = static.global,
-                            .init = static.initialValue.Initial,
+                            .initial = static.initialValue.Initial,
                         } };
                         symbolDefs.append(allocator, staticVariable) catch allocError();
                     },
@@ -461,7 +461,7 @@ fn emitStorageClassSymbols(allocator: Allocator, symbols: *Symbol.Table) []TopLe
                             .type = entry.type,
                             .identifier = name,
                             .global = static.global,
-                            .init = switch (entry.type) {
+                            .initial = switch (entry.type) {
                                 .Int => .{ .int = 0 },
                                 .Long => .{ .long = 0 },
                                 .UInt => .{ .uint = 0 },
