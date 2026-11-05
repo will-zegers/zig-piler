@@ -131,6 +131,9 @@ pub fn main(init: process.Init) !void {
         if (stage == .ToLibrary) {
             try argv.append(allocator, "-c");
         }
+        for (args.libraries) |lib| {
+            try argv.append(allocator, lib);
+        }
         try argv.appendSlice(allocator, sourceList.items);
 
         var cmd = try process.spawn(init.io, .{ .argv = argv.items });

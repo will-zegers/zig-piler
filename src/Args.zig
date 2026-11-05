@@ -28,10 +28,12 @@ debug: bool = false,
 stage: Stage = .ToExecutable,
 inputFiles: [][]const u8 = undefined,
 outputELF: ?[]const u8 = null,
+libraries: [][]const u8 = undefined,
 
 pub fn parse(allocator: Allocator, init: std.process.Init) Allocator.Error!Args {
     var args: Args = .{ .allocator = allocator };
     var inputFiles: ArrayList([]const u8) = .empty;
+    var libraries: ArrayList([]const u8) = .empty;
 
     var argsIt = try init.minimal.args.iterateAllocator(init.gpa);
     defer argsIt.deinit();
@@ -64,9 +66,12 @@ pub fn parse(allocator: Allocator, init: std.process.Init) Allocator.Error!Args 
             args.stage = .ToLibrary
         else if (mem.eql(u8, "-e", arg))
             args.stage = .ToExecutable
+        else if (mem.startsWith(u8, arg, "-l"))
+            try libraries.append(allocator, arg)
         else
             try inputFiles.append(allocator, arg);
     }
+    args.libraries = try libraries.toOwnedSlice(allocator);
     args.inputFiles = try inputFiles.toOwnedSlice(allocator);
     if (args.inputFiles.len == 0) usage();
 
@@ -105,4 +110,5 @@ fn usage() noreturn {
 pub fn deinit(self: Args, allocator: Allocator) void {
     allocator.free(self.inputFiles);
     allocator.free(self.outputELF.?);
+    allocator.free(self.libraries);
 }
