@@ -21,6 +21,7 @@ pub const Type = enum {
     Continue,
     Default,
     Do,
+    Double,
     Else,
     Extern,
     For,

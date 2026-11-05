@@ -13,6 +13,7 @@ const KeywordMap = std.StaticStringMap(Token.Type).initComptime(.{
     .{ "continue", .Continue },
     .{ "default", .Default },
     .{ "do", .Do },
+    .{ "double", .Double },
     .{ "else", .Else },
     .{ "extern", .Extern },
     .{ "for", .For },
@@ -32,25 +33,28 @@ const KeywordMap = std.StaticStringMap(Token.Type).initComptime(.{
 const Lexer = @This();
 
 allocator: Allocator,
-reIdentifier: Regex,
-reConstant: Regex,
 reComment: Regex,
+reConstantDouble: Regex,
+reConstantInt: Regex,
+reIdentifier: Regex,
 reMacro: Regex,
 
 pub fn init(allocator: Allocator) !Lexer {
     return .{
         .allocator = allocator,
-        .reIdentifier = try .init("[a-zA-Z_]\\w*\\b"),
-        .reConstant = try .init("[0-9]+([Ll][Uu]|[Uu][Ll]|[Ll]|[Uu])?[^\\w.]"), // numbers plus long/unsigned specifiers
         .reComment = try .init("//[^\n]*|/\\*([^*]|\\*+[^*/])*\\*+/"),
+        .reConstantInt = try .init("^([0-9]+([Ll][Uu]|[Uu][Ll]|[Ll]|[Uu])?)[^0-9@A-Za-z._]"), // for some reason, '\w' has not worked
+        .reConstantDouble = try .init("^(([0-9]*\\.[0-9]+|[0-9]+\\.?)[Ee][+-]?[0-9]+|[0-9]*\\.[0-9]+|[0-9]+\\.)[^0-9@A-Za-z._]"),
+        .reIdentifier = try .init("[a-zA-Z_]\\w*\\b"),
         .reMacro = try .init("\\#[^\n]*"),
     };
 }
 
 pub fn deinit(self: *Lexer) void {
-    defer self.reIdentifier.deinit();
-    defer self.reConstant.deinit();
     defer self.reComment.deinit();
+    defer self.reConstantInt.deinit();
+    defer self.reConstantDouble.deinit();
+    defer self.reIdentifier.deinit();
     defer self.reMacro.deinit();
 }
 
@@ -68,13 +72,17 @@ pub fn tokenize(self: *Lexer, text: [:0]const u8) !TokenIterator {
         var token: Token = undefined;
         switch (currentChar) {
             'a'...'z', 'A'...'Z', '_' => { // identifiers and keywords
-                const identifier = self.reIdentifier.exec(remainingText) orelse badToken(remainingText, lineIndex);
+                const identifier = self.reIdentifier.exec(remainingText) orelse badToken("identifier", remainingText, lineIndex);
                 const tokenType = KeywordMap.get(identifier) orelse .Identifier;
                 token = .{ .type = tokenType, .symbol = identifier, .lineIndex = lineIndex };
             },
-            '0'...'9' => { // constants
-                const constant = self.reConstant.exec(remainingText) orelse badToken(remainingText, lineIndex);
-                token = .{ .type = .Constant, .symbol = constant, .lineIndex = lineIndex };
+            '0'...'9', '.' => { // constants
+                var constant: ?[]const u8 = self.reConstantDouble.exec(remainingText);
+                if (constant == null) {
+                    constant = self.reConstantInt.exec(remainingText) orelse badToken("constant", remainingText, lineIndex);
+                }
+                std.debug.print("{s}\n", .{constant.?});
+                token = .{ .type = .Constant, .symbol = constant.?, .lineIndex = lineIndex };
             },
             '(', ')', '{', '}', ';' => { // brackets and semicolons
                 token = switch (currentChar) {
@@ -87,7 +95,7 @@ pub fn tokenize(self: *Lexer, text: [:0]const u8) !TokenIterator {
                 };
             },
             '#' => { // ignore macros for now
-                const macro = self.reMacro.exec(remainingText) orelse badToken(remainingText, lineIndex);
+                const macro = self.reMacro.exec(remainingText) orelse badToken("macro", remainingText, lineIndex);
                 tokenStart += macro.len;
                 continue;
             },
@@ -103,7 +111,7 @@ pub fn tokenize(self: *Lexer, text: [:0]const u8) !TokenIterator {
             '/' => { // line and block comments; division operator
                 switch (remainingText[1]) {
                     '/', '*' => { // comment
-                        const comment = self.reComment.exec(remainingText) orelse badToken(remainingText, lineIndex);
+                        const comment = self.reComment.exec(remainingText) orelse badToken("comment", remainingText, lineIndex);
                         lineIndex += mem.count(u8, comment, "\n"); // Update the line index to include the commented lines
                         tokenStart += comment.len;
                         continue;
@@ -211,7 +219,7 @@ pub fn tokenize(self: *Lexer, text: [:0]const u8) !TokenIterator {
             ':' => token = .{ .type = .Colon, .symbol = ":", .lineIndex = lineIndex },
             ',' => token = .{ .type = .Comma, .symbol = ",", .precedence = 10, .lineIndex = lineIndex },
             else => {
-                badToken(remainingText, lineIndex);
+                badToken("symbol", remainingText, lineIndex);
             },
         }
         tokens.append(self.allocator, token) catch allocError();
@@ -228,7 +236,7 @@ pub fn allocError() noreturn {
 }
 
 /// From the remaining text, find the first non-whitespace sequence to report as the invalid token
-fn badToken(text: [:0]const u8, lineIndex: usize) noreturn {
+fn badToken(expected: []const u8, text: [:0]const u8, lineIndex: usize) noreturn {
     const lineNumber = lineIndex + 1;
     const reBadToken = Regex.init("\\S*") catch {
         std.log.err("Lexing error on line {d}", .{lineNumber});
@@ -236,6 +244,6 @@ fn badToken(text: [:0]const u8, lineIndex: usize) noreturn {
     };
 
     const token = reBadToken.exec(text).?;
-    std.log.err("Invalid symbol found '{s}' on line {d}", .{ token, lineNumber });
+    std.log.err("Invalid {s} found '{s}' on line {d}", .{ expected, token, lineNumber });
     std.process.exit(1);
 }
