@@ -95,6 +95,12 @@ pub const StaticVariable = struct {
     }
 };
 
+pub const StaticConstant = struct {
+    name: []const u8,
+    alignment: usize,
+    initial: Symbol.StaticInit, 
+};
+
 const TopLevelTag = enum { Function, StaticVariable };
 const TopLevel = union(TopLevelTag) {
     Function: Function,

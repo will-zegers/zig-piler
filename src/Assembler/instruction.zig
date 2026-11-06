@@ -18,6 +18,8 @@ const InstructionTag = enum {
     Call,
     Cdq,
     Cmp,
+    Cttsd2si,
+    Cttsi2sd,
     Div,
     Idiv,
     Jmp,
@@ -36,6 +38,8 @@ pub const Instruction = union(InstructionTag) {
     Call: Call,
     Cdq: Cdq,
     Cmp: Cmp,
+    Cttsd2si: Cttsd2si,
+    Cttsi2sd: Cttsi2sd,
     Div: Div,
     Idiv: Idiv,
     Jmp: Jmp,
@@ -49,21 +53,22 @@ pub const Instruction = union(InstructionTag) {
     SetCC: SetCC,
     Unary: Unary,
 
+    // TODO: see about making this 'toAssembly' funcation non-pub
     pub fn assemble(allocator: Allocator, symbols: Symbol.Table, instruction: TAC.Instruction) []Instruction {
         return switch (instruction) {
             .Binary => Binary.toAssembly(allocator, symbols, instruction.Binary),
             .Copy => Mov.toAssembly(allocator, symbols, instruction.Copy),
-            .DoubleToInt => unreachable,
-            .DoubleToUInt => unreachable,
+            .DoubleToInt => Cttsd2si.toAssemblySigned(allocator, symbols, instruction.DoubleToInt),
+            .DoubleToUInt => Cttsd2si.toAssemblySigned(allocator, symbols, instruction.DoubleToInt),
             .FunCall => funCallToAssembly(allocator, symbols, instruction.FunCall) catch allocError(),
-            .IntToDouble => unreachable,
+            .IntToDouble => Cttsi2sd.toAssemblySigned(allocator, symbols, instruction.IntToDouble),
             .Jump => Jmp.toAssembly(allocator, instruction.Jump),
             .JumpIfZero, .JumpIfNotZero => JmpCC.toAssembly(allocator, symbols, instruction),
             .Label => Label.toAssembly(allocator, instruction.Label),
             .Return => Ret.toAssembly(allocator, symbols, instruction.Return),
             .SignExtend => signExtend(allocator, symbols, instruction.SignExtend),
             .Truncate => truncate(allocator, instruction.Truncate),
-            .UIntToDouble => unreachable,
+            .UIntToDouble => Cttsi2sd.toAssemblyUnsigned(allocator, symbols, instruction.UIntToDouble),
             .Unary => Unary.toAssembly(allocator, symbols, instruction.Unary),
             .ZeroExtend => zeroExtend(allocator, instruction.ZeroExtend),
         };
@@ -74,6 +79,8 @@ pub const Instruction = union(InstructionTag) {
             .Binary => self.Binary.type,
             .Cdq => self.Cdq.type,
             .Cmp => self.Cmp.type,
+            .Cttsd2si => self.Cttsd2si.type,
+            .Cttsi2sd => self.Cttsi2sd.type,
             .Div => self.Div.type,
             .Idiv => self.Idiv.type,
             .Mov => self.Mov.type,
@@ -99,8 +106,8 @@ pub const Binary = struct {
         const src1: Operand = .fromVal(binary.src1);
         const src2: Operand = .fromVal(binary.src2);
         const dst: Operand = .{ .Pseudo = binary.dst.Var };
-        assertTypes(symbols, src1, dst);
-        assertTypes(symbols, src2, dst);
+        std.debug.assert(assertTypes(symbols, src1, dst));
+        std.debug.assert(assertTypes(symbols, src2, dst));
 
         const signed = symbols.get(binary.dst.Var).?.type.signed();
         const t: Type = .fromVar(symbols, binary.dst.Var);
@@ -158,6 +165,86 @@ pub const Call = struct { identifier: []const u8 };
 pub const Cdq = struct { type: Type }; // nX:AX:= sign-extend of AX.
 
 pub const Cmp = struct { type: Type, arg1: Operand, arg2: Operand };
+
+pub const Cttsd2si = struct {
+    type: Type,
+    src: Operand,
+    dst: Operand,
+
+    fn toAssemblySigned(allocator: Allocator, symbols: Symbol.Table, d2i: TAC.DoubleToInt) []Instruction {
+        const src: Operand = .fromVal(d2i.src);
+        const dst: Operand = .fromVal(d2i.dst);
+        std.debug.assert(assertTypes(symbols, src, dst));
+        const t: Type = .fromVal(symbols, d2i.dst);
+
+        switch (t) {
+            .Long => {},
+            .Quad => {},
+            else => unreachable,
+        }
+
+        return allocator.dupe(Instruction, &.{
+            .{ .Cttsd2si = .{ .type = t, .src = src, .dst = dst } },
+        }) catch allocError();
+    }
+
+    fn toAssemblyUnsigned(allocator: Allocator, symbols: Symbol.Table, d2i: TAC.DoubleToUInt) []Instruction {
+        const src: Operand = .fromVal(d2i.src);
+        const dst: Operand = .fromVal(d2i.dst);
+        std.debug.assert(assertTypes(symbols, src, dst));
+        const t: Type = .fromVal(symbols, d2i.dst);
+
+        switch (t) {
+            .Long => {},
+            .Quad => {},
+            else => unreachable,
+        }
+
+        return allocator.dupe(Instruction, &.{
+            .{ .Cttsd2si = .{ .type = t, .src = src, .dst = dst } },
+        }) catch allocError();
+    }
+};
+
+pub const Cttsi2sd = struct {
+    type: Type,
+    src: Operand,
+    dst: Operand,
+
+    fn toAssemblySigned(allocator: Allocator, symbols: Symbol.Table, d2i: TAC.IntToDouble) []Instruction {
+        const src: Operand = .fromVal(d2i.src);
+        const dst: Operand = .fromVal(d2i.dst);
+        std.debug.assert(assertTypes(symbols, src, dst));
+        const t: Type = .fromVal(symbols, d2i.dst);
+
+        switch (t) {
+            .Long => {},
+            .Quad => {},
+            else => unreachable,
+        }
+
+        return allocator.dupe(Instruction, &.{
+            .{ .Cttsd2si = .{ .type = t, .src = src, .dst = dst } },
+        }) catch allocError();
+    }
+
+    fn toAssemblyUnsigned(allocator: Allocator, symbols: Symbol.Table, d2i: TAC.UIntToDouble) []Instruction {
+        const src: Operand = .fromVal(d2i.src);
+        const dst: Operand = .fromVal(d2i.dst);
+        std.debug.assert(assertTypes(symbols, src, dst));
+        const t: Type = .fromVal(symbols, d2i.src);
+
+        switch (t) {
+            .Long => {},
+            .Quad => {},
+            else => unreachable,
+        }
+
+        return allocator.dupe(Instruction, &.{
+            .{ .Cttsd2si = .{ .type = t, .src = src, .dst = dst } },
+        }) catch allocError();
+    }
+};
 
 // unsigned division
 pub const Div = struct { type: Type, operand: Operand };
@@ -223,7 +310,7 @@ pub const Mov = struct {
     }
 
     pub fn inferType(symbols: Symbol.Table, src: Operand, dst: Operand) Mov {
-        assertTypes(symbols, src, dst);
+        std.debug.assert(assertTypes(symbols, src, dst));
 
         var t = dst.getType(symbols);
         if (t == null) t = src.getType(symbols);
@@ -273,7 +360,7 @@ pub const Unary = struct {
         const dstType: Type = switch (unary.operator) {
             .Not => .Long, // 'not' always uses 4-byte operands
             else => blk: {
-                assertTypes(symbols, src, dst);
+                std.debug.assert(assertTypes(symbols, src, dst));
                 break :blk .fromVal(symbols, unary.dst);
             },
         };
@@ -310,7 +397,7 @@ pub const Operand = union(OperandTag) {
         };
     }
 
-    pub fn constantToImm(constant: TAC.Constant) usize {
+    fn constantToImm(constant: TAC.Constant) usize {
         return switch (constant) {
             .double => unreachable,
             .int => @bitCast(@as(isize, constant.int)),
@@ -329,15 +416,44 @@ pub const Operand = union(OperandTag) {
     }
 };
 
-pub const Reg = enum { ax, cx, cl, dx, di, si, r8, r9, r10, r11, sp };
+pub const Reg = enum {
+    ax,
+    cx,
+    cl,
+    dx,
+    di,
+    si,
+    r8,
+    r9,
+    r10,
+    r11,
+    sp,
+    mmx0,
+    mmx1,
+    mmx2,
+    mmx3,
+    mmx4,
+    mmx5,
+    mmx6,
+    mmx7,
+    mmx8,
+    mmx9,
+    mmx10,
+    mmx11,
+    mmx12,
+    mmx13,
+    mmx14,
+    mmx15,
+};
 
 pub const Type = enum {
     Long,
     Quad,
+    Double,
 
     pub fn fromVar(symbols: Symbol.Table, v: TAC.Var) Type {
         return switch (symbols.get(v).?.type) {
-            .Double => unreachable,
+            .Double => .Double,
             .Int, .UInt => .Long,
             .Long, .ULong => .Quad,
             .FunType => unreachable,
@@ -346,7 +462,7 @@ pub const Type = enum {
 
     pub fn fromConstant(constant: TAC.Constant) Type {
         return switch (constant) {
-            .double => unreachable,
+            .double => .Double,
             .int, .uint => .Long,
             .long, .ulong => .Quad,
         };
@@ -366,39 +482,24 @@ pub fn allocError() noreturn {
     std.process.exit(1);
 }
 
-fn assertTypes(symbols: Symbol.Table, op1: Operand, op2: Operand) void {
+fn assertTypes(symbols: Symbol.Table, op1: Operand, op2: Operand) bool {
     const type1 = op1.getType(symbols);
     const type2 = op2.getType(symbols);
 
     if (type1) |t1| {
         if (type2) |t2| {
             if (t1 != t2) {
-                switch (op1) {
-                    .Imm => std.debug.print("Imm({d})", .{op1.Imm}),
-                    .Pseudo => std.debug.print("Pseudo({s})", .{op1.Pseudo}),
-                    .Reg => std.debug.print("Reg({s})", .{@tagName(op1.Reg)}),
-                    .Stack => std.debug.print("Stack({d})", .{op1.Stack}),
-                    .Data => std.debug.print("Data({s}) ", .{op1.Data}),
-                }
-                std.debug.print("\n", .{});
-                switch (op2) {
-                    .Imm => std.debug.print("Imm({d})", .{op2.Imm}),
-                    .Pseudo => std.debug.print("Pseudo({s})", .{op2.Pseudo}),
-                    .Reg => std.debug.print("Reg({s})", .{@tagName(op2.Reg)}),
-                    .Stack => std.debug.print("Stack({d})", .{op2.Stack}),
-                    .Data => std.debug.print("Data({s}) ", .{op2.Data}),
-                }
-                std.debug.print("\n", .{});
                 std.log.err("Mismatched types: {any} and {any}\n", .{ t1, t2 });
-                std.process.exit(1);
+                return false;
             }
         }
     } else if (type1 == null and type2 == null) {
         std.log.err("Missing types\n", .{});
         std.log.err("  {any}\n", .{op1});
         std.log.err("  {any}\n", .{op2});
-        std.process.exit(1);
+        return false;
     }
+    return true;
 }
 
 fn funCallToAssembly(allocator: Allocator, symbols: Symbol.Table, funCall: TAC.FunCall) ![]Instruction {
@@ -435,6 +536,7 @@ fn funCallToAssembly(allocator: Allocator, symbols: Symbol.Table, funCall: TAC.F
             .Constant => .fromVal(funCall.args[i]),
             .Var => |arg| {
                 switch (Type.fromVar(symbols, arg)) {
+                    .Double => unreachable,
                     .Quad => break :blk .fromVal(funCall.args[i]),
                     .Long => {
                         // For long word vars, first move them into the lower bytes bytes of AX register,

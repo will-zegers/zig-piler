@@ -163,6 +163,7 @@ pub fn emitFunction(allocator: Allocator, function: Assembler.Function, symbols:
             },
             .Cdq => |cdq| {
                 const template = switch (cdq.type) {
+                    .Double => unreachable,
                     .Long => "  cdq\n",
                     .Quad => "  cqo\n",
                 };
@@ -178,6 +179,8 @@ pub fn emitFunction(allocator: Allocator, function: Assembler.Function, symbols:
 
                 break :code allocator.print(template, .{suffix, arg1, arg2});
             },
+            .Cttsd2si => unreachable,
+            .Cttsi2sd => unreachable,
             .Div => |div| {
                 const template =
                     \\  div{c}   {s}
@@ -290,6 +293,7 @@ pub fn emitFunction(allocator: Allocator, function: Assembler.Function, symbols:
 
 fn getSuffix(t: Assembler.Type) u8 {
     return switch (t) {
+        .Double => unreachable,
         .Long => 'l',
         .Quad => 'q',
     };
@@ -309,18 +313,21 @@ fn getRegisterName(allocator: Allocator, reg: Assembler.Reg, t: Assembler.Type) 
     switch(reg) {
         .ax, .cx, .dx, .di, .si => {
             return switch (t) {
+                .Double =>  unreachable,
                 .Long => allocator.print("%e{s}", .{@tagName(reg)}),
                 .Quad => allocator.print("%r{s}", .{@tagName(reg)}),
             } catch allocError();
         },
         .r8, .r9, .r10, .r11 => {
             return switch (t) {
+                .Double =>  unreachable,
                 .Long => allocator.print("%{s}d", .{@tagName(reg)}),
                 .Quad => allocator.print("%{s}", .{@tagName(reg)}),
             } catch allocError();
         },
         .cl => return allocator.print("%{s}", .{@tagName(reg)}) catch allocError(),
         .sp => return allocator.print("%rsp", .{}) catch allocError(),
+        else => unreachable, // mmx registers
     }
 }
 

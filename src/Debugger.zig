@@ -485,6 +485,16 @@ fn printAssemblerFunction(instr: Assembler.Instruction) void {
         .Cmp => |cmp| {
             print("arg1: {any}, arg2: {any}", .{ cmp.arg1, cmp.arg2 });
         },
+        .Cttsd2si => |ctt| {
+            printType(ctt.type);
+            printOperand("src: ", ctt.src, ", ");
+            printOperand("dst: ", ctt.dst, null);
+        },
+        .Cttsi2sd => |ctt| {
+            printType(ctt.type);
+            printOperand("src: ", ctt.src, ", ");
+            printOperand("dst: ", ctt.dst, null);
+        },
         .Div => |div| {
             printOperand("src: ", div.operand, "");
         },
@@ -544,6 +554,7 @@ fn printOperand(prefix: ?[]const u8, operand: Assembler.Operand, suffix: ?[]cons
 fn printType(t: Assembler.Type) void {
     print("type: ", .{});
     switch (t) {
+        .Double => print("double, ", .{}),
         .Long => print("long, ", .{}),
         .Quad => print("quad, ", .{}),
     }
