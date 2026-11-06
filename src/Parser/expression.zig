@@ -449,6 +449,7 @@ pub const FunctionCall = struct {
 
 pub const Ternary = struct {
     type: ?Type = null,
+    // TODO: needs lineIndex
     condition: *Expression,
     thenExpr: *Expression,
     elseExpr: *Expression,

@@ -241,22 +241,26 @@ fn typeCheckStatement(allocator: Allocator, symbols: *Symbol.Table, stmt: *State
             typeCheckStatement(allocator, symbols, f.body);
         },
         .Switch => |*swtch| {
-            _ = typeCheckExpression(allocator, symbols, &swtch.cond);
+            const condType = typeCheckExpression(allocator, symbols, &swtch.cond);
+            if (condType == .Double) {
+                ErrorReporter.report(.NonIntegerStatement, swtch.lineIndex, "double");
+                return;
+            }
             typeCheckStatement(allocator, symbols, swtch.body);
         },
         .Case => |*case| {
             if (case.cond) |*cond| {
-                // No current support for chars or the 'const' keyword, so only expect null or literal constants
+                // No current support 'const' expressions, so only expect null ('default') or literal constants
                 if (cond.* != .Constant) {
                     ErrorReporter.report(.NonConstCase, case.lineIndex, null);
                     return;
                 }
-                if (cond.*.Constant == .double) {
-                    ErrorReporter.report(.NonIntegerCaseCondition, case.lineIndex, null);
+
+                const condType = typeCheckExpression(allocator, symbols, cond);
+                if (condType == .Double) {
+                    ErrorReporter.report(.NonIntegerStatement, case.lineIndex, "double");
                     return;
                 }
-
-                _ = typeCheckExpression(allocator, symbols, cond);
                 const parentType = case.parent.?.cond.getType();
                 case.cond = Cast.to(allocator, cond, parentType);
             }
@@ -286,8 +290,11 @@ fn typeCheckExpression(allocator: Allocator, symbols: *Symbol.Table, expr: *Expr
             const lType = typeCheckExpression(allocator, symbols, bin.left);
             const rType = typeCheckExpression(allocator, symbols, bin.right);
 
-            if (bin.operator == .Mod and (lType == .Double or rType == .Double)) {
-                ErrorReporter.report(.BinaryDoubleOperand, bin.lineIndex, null);
+            if (lType == .Double or rType == .Double) {
+                switch (bin.operator) {
+                    .AndB, .Mod, .OrB, .ShiftL, .ShiftR, .Xor => ErrorReporter.report(.BinaryDoubleOperand, bin.lineIndex, null),
+                    else => {},
+                }
             }
 
             const commonType = switch (bin.operator) {

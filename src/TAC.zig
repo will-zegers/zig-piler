@@ -359,7 +359,19 @@ fn emitCast(allocator: Allocator, context: *Context, instructions: *Instructions
     const dst: Val = .{ .Var = tag };
 
     var instruction: Instruction = undefined;
-    if (exprType.size() == to.size()) { // same size, so just copy bits over
+    if (exprType == .Double and to != .Double) { // double to int-type
+        instruction = switch (to) {
+            .Int, .Long => .{ .DoubleToInt = .{ .src = expr, .dst = dst } },
+            .UInt, .ULong => .{ .DoubleToUInt = .{ .src = expr, .dst = dst } },
+            .Double, .FunType => unreachable,
+        };
+    } else if (exprType != .Double and to == .Double) { //int-type to double
+        instruction = switch (exprType) {
+            .Int, .Long => .{ .IntToDouble = .{ .src = expr, .dst = dst } },
+            .UInt, .ULong => .{ .UIntToDouble = .{ .src = expr, .dst = dst } },
+            .Double, .FunType => unreachable,
+        };
+    } else if (exprType.size() == to.size()) { // same size, so just copy bits over
         instruction = .{ .Copy = .{ .src = expr, .dst = dst } };
     } else if (exprType.size() > to.size()) { // largers size to smaller: truncate
         instruction = .{ .Truncate = .{ .src = expr, .dst = dst } };

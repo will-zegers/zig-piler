@@ -678,6 +678,7 @@ pub const Return = struct {
 };
 
 pub const Switch = struct {
+    lineIndex: usize,
     tag: ?[]const u8 = null,
     cond: Expression,
     body: *Statement,
@@ -685,7 +686,8 @@ pub const Switch = struct {
     defaultTag: ?[]const u8 = null,
 
     pub fn parse(allocator: Allocator, tokens: *TokenIterator) ParsingError!Switch {
-        try expect(.Switch, tokens.next());
+        const token = tokens.next();
+        try expect(.Switch, token);
         try expect(.OpenParenthesis, tokens.peek());
 
         const cond: Expression = try .parse(allocator, tokens, 0);
@@ -693,7 +695,7 @@ pub const Switch = struct {
         const body = allocator.create(Statement) catch allocError();
         body.* = try .parse(allocator, tokens);
 
-        return .{ .cond = cond, .body = body, .cases = .empty };
+        return .{ .lineIndex = token.lineIndex, .cond = cond, .body = body, .cases = .empty };
     }
 
     pub fn addCase(self: *Switch, allocator: Allocator, case: *Case) ParsingError!void {

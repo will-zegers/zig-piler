@@ -53,13 +53,17 @@ pub const Instruction = union(InstructionTag) {
         return switch (instruction) {
             .Binary => Binary.toAssembly(allocator, symbols, instruction.Binary),
             .Copy => Mov.toAssembly(allocator, symbols, instruction.Copy),
+            .DoubleToInt => unreachable,
+            .DoubleToUInt => unreachable,
             .FunCall => funCallToAssembly(allocator, symbols, instruction.FunCall) catch allocError(),
+            .IntToDouble => unreachable,
             .Jump => Jmp.toAssembly(allocator, instruction.Jump),
             .JumpIfZero, .JumpIfNotZero => JmpCC.toAssembly(allocator, symbols, instruction),
             .Label => Label.toAssembly(allocator, instruction.Label),
             .Return => Ret.toAssembly(allocator, symbols, instruction.Return),
             .SignExtend => signExtend(allocator, symbols, instruction.SignExtend),
             .Truncate => truncate(allocator, instruction.Truncate),
+            .UIntToDouble => unreachable,
             .Unary => Unary.toAssembly(allocator, symbols, instruction.Unary),
             .ZeroExtend => zeroExtend(allocator, instruction.ZeroExtend),
         };

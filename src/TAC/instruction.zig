@@ -3,7 +3,10 @@ const Parser = @import("../Parser.zig");
 const InstructionTag = enum {
     Binary,
     Copy,
+    DoubleToInt,
+    DoubleToUInt,
     FunCall,
+    IntToDouble,
     Jump,
     JumpIfNotZero,
     JumpIfZero,
@@ -11,13 +14,17 @@ const InstructionTag = enum {
     Return,
     SignExtend,
     Truncate,
+    UIntToDouble,
     Unary,
     ZeroExtend,
 };
 pub const Instruction = union(InstructionTag) {
     Binary: Binary,
     Copy: Copy,
+    DoubleToInt: DoubleToInt,
+    DoubleToUInt: DoubleToUInt,
     FunCall: FunCall,
+    IntToDouble: IntToDouble,
     Jump: Jump,
     JumpIfNotZero: JumpIfNotZero,
     JumpIfZero: JumpIfZero,
@@ -25,6 +32,7 @@ pub const Instruction = union(InstructionTag) {
     Return: Return,
     SignExtend: SignExtend,
     Truncate: Truncate,
+    UIntToDouble: UIntToDouble,
     Unary: Unary,
     ZeroExtend: ZeroExtend,
 };
@@ -42,7 +50,15 @@ pub const Constant = Parser.Constant;
 
 pub const Copy = struct { src: Val, dst: Val };
 
+pub const DoubleToInt = struct { src: Val, dst: Val };
+
+pub const DoubleToUInt = struct { src: Val, dst: Val };
+
 pub const FunCall = struct { name: []const u8, args: []Val, dst: Val };
+
+pub const IntToDouble = struct { src: Val, dst: Val };
+
+pub const UIntToDouble = struct { src: Val, dst: Val };
 
 pub const Jump = struct { target: []const u8 };
 

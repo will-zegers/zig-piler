@@ -345,6 +345,16 @@ fn printTACFunction(function: TAC.Function) void {
                 printVal("dst: ", copy.dst, "");
                 print(")\n", .{});
             },
+            .DoubleToInt => |dti| {
+                printVal("src: ", dti.src, ", ");
+                printVal("dst: ", dti.dst, "");
+                print(")\n", .{});
+            },
+            .DoubleToUInt => |dtu| {
+                printVal("src: ", dtu.src, ", ");
+                printVal("dst: ", dtu.dst, "");
+                print(")\n", .{});
+            },
             .FunCall => |funCall| {
                 print("{s}(", .{funCall.name});
                 if (funCall.args.len > 0) {
@@ -355,6 +365,11 @@ fn printTACFunction(function: TAC.Function) void {
                 }
                 print(")", .{});
                 print(" -> {s})\n", .{funCall.dst.Var});
+            },
+            .IntToDouble => |itd| {
+                printVal("src: ", itd.src, ", ");
+                printVal("dst: ", itd.dst, "");
+                print(")\n", .{});
             },
             .Label => |label| {
                 print("name: {s})\n", .{label.identifier});
@@ -382,6 +397,11 @@ fn printTACFunction(function: TAC.Function) void {
             .Truncate => |tr| {
                 printVal("src: ", tr.src, ", ");
                 printVal("dst: ", tr.dst, "");
+                print(")\n", .{});
+            },
+            .UIntToDouble => |utd| {
+                printVal("src: ", utd.src, ", ");
+                printVal("dst: ", utd.dst, "");
                 print(")\n", .{});
             },
             .Unary => |unary| {
