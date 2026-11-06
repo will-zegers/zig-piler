@@ -343,13 +343,16 @@ pub const Constant = union(ConstantTag) {
             .Double => {
                 const double: f64 = switch (self) {
                     .double => self.double,
-                    else => unreachable,
+                    .int => @floatFromInt(self.int),
+                    .uint => @floatFromInt(self.uint),
+                    .long => @floatFromInt(self.long),
+                    .ulong => @floatFromInt(self.ulong),
                 };
                 return .{ .double = double };
             },
             .Int => {
                 const int: i32 = switch (self) {
-                    .double => unreachable,
+                    .double => @intFromFloat(self.double),
                     .int => self.int,
                     .long => @truncate(self.long),
                     .uint => @bitCast(self.uint),
@@ -359,7 +362,7 @@ pub const Constant = union(ConstantTag) {
             },
             .UInt => {
                 const uint: u32 = switch (self) {
-                    .double => unreachable,
+                    .double => @intFromFloat(self.double),
                     .int => @bitCast(self.int),
                     .long => @truncate(@as(u64, @bitCast(self.long))),
                     .uint => self.uint,
@@ -369,7 +372,7 @@ pub const Constant = union(ConstantTag) {
             },
             .Long => {
                 const long: i64 = switch (self) {
-                    .double => unreachable,
+                    .double => @intFromFloat(self.double),
                     .int => self.int,
                     .long => self.long,
                     .uint => self.uint,
@@ -379,7 +382,7 @@ pub const Constant = union(ConstantTag) {
             },
             .ULong => {
                 const ulong: u64 = switch (self) {
-                    .double => unreachable,
+                    .double => @intFromFloat(self.double),
                     .int => @bitCast(@as(i64, self.int)),
                     .long => @bitCast(self.long),
                     .uint => self.uint,

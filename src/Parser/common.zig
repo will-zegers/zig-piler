@@ -117,6 +117,7 @@ pub const Type = union(TypeTag) {
         if (type1 == .FunType) return getCommon(type1.FunType.ret.*, type2);
         if (type2 == .FunType) return getCommon(type1, type2.FunType.ret.*);
 
+        if (type1.equals(.Double) or type2.equals(.Double)) return .Double;
         if (type1.size() > type2.size()) return type1;
         if (type1.size() < type2.size()) return type2;
         if (!type1.signed()) return type1;

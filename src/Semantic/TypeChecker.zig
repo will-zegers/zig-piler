@@ -285,6 +285,11 @@ fn typeCheckExpression(allocator: Allocator, symbols: *Symbol.Table, expr: *Expr
         .Binary => |*bin| {
             const lType = typeCheckExpression(allocator, symbols, bin.left);
             const rType = typeCheckExpression(allocator, symbols, bin.right);
+
+            if (bin.operator == .Mod and (lType == .Double or rType == .Double)) {
+                ErrorReporter.report(.BinaryDoubleOperand, bin.lineIndex, null);
+            }
+
             const commonType = switch (bin.operator) {
                 .ShiftL, .ShiftR => lType, // bit-shifts are a special case that always assmue the type of the base number
                 else => Type.getCommon(lType, rType),
@@ -353,6 +358,10 @@ fn typeCheckExpression(allocator: Allocator, symbols: *Symbol.Table, expr: *Expr
         },
         .Unary => |*un| {
             const operandType = typeCheckExpression(allocator, symbols, un.operand);
+            if (operandType == .Double and un.operator == .Complement) {
+                ErrorReporter.report(.UnaryDoubleOperand, un.lineIndex, null);
+            }
+
             un.type = switch (un.operator) {
                 .Not => .Int,
                 else => operandType,

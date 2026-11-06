@@ -7,6 +7,7 @@ const std = @import("std");
 const log = std.log;
 
 pub const SemanticError = enum {
+    BinaryDoubleOperand,
     BlockScopeStaticFunDecl,
     Break,
     CallOnNonFunction,
@@ -28,6 +29,7 @@ pub const SemanticError = enum {
     Redeclaration,
     TooFewArguments,
     TooManyArguments,
+    UnaryDoubleOperand,
     UndeclaredIdentifier,
     UnresolvedSymbol,
     FunctionUsedAsVariable,
@@ -44,6 +46,7 @@ pub const Reporter = struct {
 
     pub fn report(self: *Reporter, err: SemanticError, lineIndex: usize, name: ?[]const u8) void {
         switch (err) {
+            .BinaryDoubleOperand => log.err("Invalid operands to binary epxression", .{}),
             .BlockScopeStaticFunDecl => log.err("Function declared in block scope cannot have a 'static' storage class", .{}),
             .Break => log.err("'break' statement outside of loop or switch statement", .{}),
             .CallOnNonFunction => log.err("Called object is not a function or function pointer", .{}),
@@ -65,6 +68,7 @@ pub const Reporter = struct {
             .Redeclaration => log.err("Redeclaration of '{s}'", .{name.?}),
             .TooFewArguments => log.err("Too few arguments in function call", .{}),
             .TooManyArguments => log.err("Too many arguments in function call", .{}),
+            .UnaryDoubleOperand => log.err("Invalid argument type 'double' to unary expression", .{}),
             .UndeclaredIdentifier => log.err("Use of undeclared identifier '{s}'", .{name.?}),
             .UnresolvedSymbol => log.err("Could not resolve symbol '{s}'", .{name.?}),
             .FunctionUsedAsVariable => log.err("Function '{s}' cannot be used as a variable", .{name.?}),
