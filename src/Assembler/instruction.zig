@@ -73,63 +73,52 @@ pub const UPPER_BOUND_STATIC: StaticConstant = .{
 };
 
 const InstructionTag = enum {
-    Binary,
+    // zig fmt: off
+    Unary, Binary,
     Call,
     Cdq,
     Cmp,
-    Cttsd2si,
-    Cttsi2sd,
-    Div,
-    Idiv,
-    Jmp,
-    JmpCC,
+    Cttsd2si, Cttsi2sd,
+    Div, Idiv,
+    Jmp, JmpCC,
     Label,
-    Mov,
-    Movsx,
-    Movzx,
+    Mov, Movsx, Movzx,
     Push,
     Ret,
     SetCC,
-    Unary,
 };
 pub const Instruction = union(InstructionTag) {
-    Binary: Binary,
+    Unary: Unary, Binary: Binary,
     Call: Call,
     Cdq: Cdq,
     Cmp: Cmp,
-    Cttsd2si: Cttsd2si,
-    Cttsi2sd: Cttsi2sd,
-    Div: Div,
-    Idiv: Idiv,
-    Jmp: Jmp,
-    JmpCC: JmpCC,
+    Cttsd2si: Cttsd2si, Cttsi2sd: Cttsi2sd,
+    Div: Div, Idiv: Idiv,
+    Jmp: Jmp, JmpCC: JmpCC,
     Label: Label,
-    Mov: Mov,
-    Movsx: Movsx,
-    Movzx: Movzx,
+    Mov: Mov, Movsx: Movsx, Movzx: Movzx,
     Push: Push,
     Ret: Ret,
     SetCC: SetCC,
-    Unary: Unary,
 
     // TODO: see about making this 'toAssembly' funcation non-pub
-    pub fn assemble(allocator: Allocator, symbols: Symbol.Table, instruction: TAC.Instruction) []Instruction {
+    pub fn assemble(allocator: Allocator, symbols: Symbol.Table, constants: *AutoHashMap(u64, StaticConstant), instruction: TAC.Instruction) []Instruction {
         return switch (instruction) {
-            .Binary => Binary.toAssembly(allocator, symbols, instruction.Binary),
-            .Copy => Mov.toAssembly(allocator, symbols, instruction.Copy),
-            .DoubleToInt => Cttsd2si.toAssemblySigned(allocator, symbols, instruction.DoubleToInt),
-            .DoubleToUInt => Cttsd2si.toAssemblyUnsigned(allocator, symbols, instruction.DoubleToUInt),
-            .FunCall => funCallToAssembly(allocator, symbols, instruction.FunCall) catch allocError(),
-            .IntToDouble => Cttsi2sd.toAssemblySigned(allocator, symbols, instruction.IntToDouble),
+            .Binary => Binary.toAssembly(allocator, symbols, constants, instruction.Binary),
+            .Copy => Mov.toAssembly(allocator, symbols, constants, instruction.Copy),
+            .DoubleToInt => Cttsd2si.toAssemblySigned(allocator, symbols, constants, instruction.DoubleToInt),
+            .DoubleToUInt => Cttsd2si.toAssemblyUnsigned(allocator, symbols, constants, instruction.DoubleToUInt),
+            .FunCall => funCallToAssembly(allocator, symbols, constants, instruction.FunCall) catch allocError(),
+            .IntToDouble => Cttsi2sd.toAssemblySigned(allocator, symbols, constants, instruction.IntToDouble),
             .Jump => Jmp.toAssembly(allocator, instruction.Jump),
-            .JumpIfZero, .JumpIfNotZero => JmpCC.toAssembly(allocator, symbols, instruction),
+            .JumpIfZero, .JumpIfNotZero => JmpCC.toAssembly(allocator, symbols, constants, instruction),
             .Label => Label.toAssembly(allocator, instruction.Label),
-            .Return => Ret.toAssembly(allocator, symbols, instruction.Return),
-            .SignExtend => signExtend(allocator, symbols, instruction.SignExtend),
-            .Truncate => truncate(allocator, instruction.Truncate),
-            .UIntToDouble => Cttsi2sd.toAssemblyUnsigned(allocator, symbols, instruction.UIntToDouble),
-            .Unary => Unary.toAssembly(allocator, symbols, instruction.Unary),
-            .ZeroExtend => zeroExtend(allocator, instruction.ZeroExtend),
+            .Return => Ret.toAssembly(allocator, symbols, constants, instruction.Return),
+            .SignExtend => signExtend(allocator, symbols, constants, instruction.SignExtend),
+            .Truncate => truncate(allocator, constants, instruction.Truncate),
+            .UIntToDouble => Cttsi2sd.toAssemblyUnsigned(allocator, symbols, constants, instruction.UIntToDouble),
+            .Unary => Unary.toAssembly(allocator, symbols, constants, instruction.Unary),
+            .ZeroExtend => zeroExtend(allocator, constants, instruction.ZeroExtend),
         };
     }
 
@@ -161,9 +150,9 @@ pub const Binary = struct {
     src: Operand,
     dst: Operand,
 
-    pub fn toAssembly(allocator: Allocator, symbols: Symbol.Table, binary: TAC.Binary) []Instruction {
-        const src1: Operand = .fromVal(binary.src1);
-        const src2: Operand = .fromVal(binary.src2);
+    pub fn toAssembly(allocator: Allocator, symbols: Symbol.Table, constants: *AutoHashMap(u64, StaticConstant), binary: TAC.Binary) []Instruction {
+        const src1: Operand = .fromVal(allocator, constants, binary.src1);
+        const src2: Operand = .fromVal(allocator, constants, binary.src2);
         const dst: Operand = .{ .Pseudo = binary.dst.Var };
         std.debug.assert(assertTypes(symbols, src1, dst));
         std.debug.assert(assertTypes(symbols, src2, dst));
@@ -230,17 +219,17 @@ pub const Cttsd2si = struct {
     src: Operand,
     dst: Operand,
 
-    fn toAssemblySigned(allocator: Allocator, symbols: Symbol.Table, d2i: TAC.DoubleToInt) []Instruction {
-        const src: Operand = .fromVal(d2i.src);
-        const dst: Operand = .fromVal(d2i.dst);
+    fn toAssemblySigned(allocator: Allocator, symbols: Symbol.Table, constants: *AutoHashMap(u64, StaticConstant), d2i: TAC.DoubleToInt) []Instruction {
+        const src: Operand = .fromVal(allocator, constants, d2i.src);
+        const dst: Operand = .fromVal(allocator, constants, d2i.dst);
         const t: Type = .fromVal(symbols, d2i.dst);
 
         return allocator.dupe(Instruction, &.{.{ .Cttsd2si = .{ .type = t, .src = src, .dst = dst } }}) catch allocError();
     }
 
-    fn toAssemblyUnsigned(allocator: Allocator, symbols: Symbol.Table, d2u: TAC.DoubleToUInt) []Instruction {
-        const src: Operand = .fromVal(d2u.src);
-        const dst: Operand = .fromVal(d2u.dst);
+    fn toAssemblyUnsigned(allocator: Allocator, symbols: Symbol.Table, constants: *AutoHashMap(u64, StaticConstant), d2u: TAC.DoubleToUInt) []Instruction {
+        const src: Operand = .fromVal(allocator, constants, d2u.src);
+        const dst: Operand = .fromVal(allocator, constants, d2u.dst);
         const t: Type = .fromVal(symbols, d2u.dst);
 
         const assembly = switch (t) {
@@ -248,7 +237,10 @@ pub const Cttsd2si = struct {
                 .{ .Cttsd2si = .{ .type = .Quad, .src = src, .dst = .{ .Reg = .ax } } },
                 .{ .Mov = .{ .type = .Long, .src = .{ .Reg = .ax }, .dst = dst } },
             }),
-            .Quad => unreachable,
+            .Quad => allocator.dupe(Instruction, &.{
+                .{ .Cttsd2si = .{ .type = .Quad, .src = src, .dst = .{ .Reg = .ax } } },
+                .{ .Mov = .{ .type = .Long, .src = .{ .Reg = .ax }, .dst = dst } },
+            }),
             else => unreachable,
         } catch allocError();
 
@@ -261,17 +253,17 @@ pub const Cttsi2sd = struct {
     src: Operand,
     dst: Operand,
 
-    fn toAssemblySigned(allocator: Allocator, symbols: Symbol.Table, d2i: TAC.IntToDouble) []Instruction {
-        const src: Operand = .fromVal(d2i.src);
-        const dst: Operand = .fromVal(d2i.dst);
+    fn toAssemblySigned(allocator: Allocator, symbols: Symbol.Table, constants: *AutoHashMap(u64, StaticConstant), d2i: TAC.IntToDouble) []Instruction {
+        const src: Operand = .fromVal(allocator, constants, d2i.src);
+        const dst: Operand = .fromVal(allocator, constants, d2i.dst);
         const t: Type = .fromVal(symbols, d2i.src);
 
         return allocator.dupe(Instruction, &.{.{ .Cttsi2sd = .{ .type = t, .src = src, .dst = dst } }}) catch allocError();
     }
 
-    fn toAssemblyUnsigned(allocator: Allocator, symbols: Symbol.Table, d2i: TAC.UIntToDouble) []Instruction {
-        const src: Operand = .fromVal(d2i.src);
-        const dst: Operand = .fromVal(d2i.dst);
+    fn toAssemblyUnsigned(allocator: Allocator, symbols: Symbol.Table, constants: *AutoHashMap(u64, StaticConstant), d2i: TAC.UIntToDouble) []Instruction {
+        const src: Operand = .fromVal(allocator, constants, d2i.src);
+        const dst: Operand = .fromVal(allocator, constants, d2i.dst);
         const t: Type = .fromVal(symbols, d2i.src);
 
         const assembly = switch (t) {
@@ -279,7 +271,10 @@ pub const Cttsi2sd = struct {
                 .{ .Mov = .{ .type = .Long, .src = src, .dst = .{ .Reg = .ax } } },
                 .{ .Cttsi2sd = .{ .type = .Quad, .src = .{ .Reg = .ax }, .dst = dst } },
             }),
-            .Quad => unreachable,
+            .Quad => allocator.dupe(Instruction, &.{
+                .{ .Mov = .{ .type = .Long, .src = src, .dst = .{ .Reg = .ax } } },
+                .{ .Cttsi2sd = .{ .type = .Quad, .src = .{ .Reg = .ax }, .dst = dst } },
+            }),
             else => unreachable,
         } catch allocError();
 
@@ -305,10 +300,10 @@ pub const JmpCC = struct {
     condition: ConditionCode,
     target: []const u8,
 
-    pub fn toAssembly(allocator: Allocator, symbols: Symbol.Table, jmpInstr: TAC.Instruction) []Instruction {
+    pub fn toAssembly(allocator: Allocator, symbols: Symbol.Table, constants: *AutoHashMap(u64, StaticConstant), jmpInstr: TAC.Instruction) []Instruction {
         return switch (jmpInstr) {
             .JumpIfZero => |jz| blk: {
-                const arg2: Operand = .fromVal(jz.condition);
+                const arg2: Operand = .fromVal(allocator, constants, jz.condition);
                 const t: Type = .fromVal(symbols, jz.condition);
 
                 break :blk allocator.dupe(Instruction, &.{
@@ -317,7 +312,7 @@ pub const JmpCC = struct {
                 }) catch allocError();
             },
             .JumpIfNotZero => |jnz| blk: {
-                const arg2: Operand = .fromVal(jnz.condition);
+                const arg2: Operand = .fromVal(allocator, constants, jnz.condition);
                 const t: Type = .fromVal(symbols, jnz.condition);
 
                 break :blk allocator.dupe(Instruction, &.{
@@ -343,9 +338,9 @@ pub const Mov = struct {
     src: Operand,
     dst: Operand,
 
-    pub fn toAssembly(allocator: Allocator, symbols: Symbol.Table, copy: TAC.Copy) []Instruction {
-        const src: Operand = .fromVal(copy.src);
-        const dst: Operand = .fromVal(copy.dst);
+    pub fn toAssembly(allocator: Allocator, symbols: Symbol.Table, constants: *AutoHashMap(u64, StaticConstant), copy: TAC.Copy) []Instruction {
+        const src: Operand = .fromVal(allocator, constants, copy.src);
+        const dst: Operand = .fromVal(allocator, constants, copy.dst);
 
         return allocator.dupe(Instruction, &.{.{ .Mov = .inferType(symbols, src, dst) }}) catch allocError();
     }
@@ -372,8 +367,8 @@ pub const Push = struct { type: Type = .Quad, operand: Operand };
 pub const Ret = struct {
     type: Type,
 
-    pub fn toAssembly(allocator: Allocator, symbols: Symbol.Table, ret: TAC.Return) []Instruction {
-        const val: Operand = .fromVal(ret.val);
+    pub fn toAssembly(allocator: Allocator, symbols: Symbol.Table, constants: *AutoHashMap(u64, StaticConstant), ret: TAC.Return) []Instruction {
+        const val: Operand = .fromVal(allocator, constants, ret.val);
         const t: Type = .fromVal(symbols, ret.val);
 
         return allocator.dupe(Instruction, &.{
@@ -383,8 +378,13 @@ pub const Ret = struct {
     }
 };
 
-// G, GE, L, LE are condition code for signd comparison; A, AE, B, BE for unsigned
-const ConditionCode = enum { e, ne, g, ge, l, le, a, ae, b, be };
+const ConditionCode = enum {
+    // zig fmt: off
+    e, ne,
+    g, ge, l, le, // signed comparisons
+    a, ae, b, be, // unsigend/double comparisons
+};
+
 pub const SetCC = struct { condition: ConditionCode, operand: Operand };
 
 pub const Unary = struct {
@@ -394,8 +394,8 @@ pub const Unary = struct {
     operator: Operator,
     operand: Operand,
 
-    pub fn toAssembly(allocator: Allocator, symbols: Symbol.Table, unary: TAC.Unary) []Instruction {
-        const src: Operand = .fromVal(unary.src);
+    pub fn toAssembly(allocator: Allocator, symbols: Symbol.Table, constants: *AutoHashMap(u64, StaticConstant), unary: TAC.Unary) []Instruction {
+        const src: Operand = .fromVal(allocator, constants, unary.src);
         const srcType: Type = .fromVal(symbols, unary.src);
         const dst: Operand = .{ .Pseudo = unary.dst.Var };
         const dstType: Type = switch (unary.operator) {
@@ -431,21 +431,37 @@ pub const Operand = union(OperandTag) {
     Stack: isize,
     Data: []const u8,
 
-    pub fn fromVal(val: TAC.Val) Operand {
+    pub fn fromVal(allocator: Allocator, constants: *AutoHashMap(u64, StaticConstant), val: TAC.Val) Operand {
         return switch (val) {
-            .Constant => .{ .Imm = constantToImm(val.Constant) },
+            .Constant => constantToImm(allocator, constants, val.Constant),
             .Var => |pseudo| .{ .Pseudo = pseudo },
         };
     }
 
-    fn constantToImm(constant: TAC.Constant) usize {
+    fn constantToImm(allocator: Allocator, constants: *AutoHashMap(u64, StaticConstant), constant: TAC.Constant) Operand {
         return switch (constant) {
-            .double => unreachable,
-            .int => @bitCast(@as(isize, constant.int)),
-            .long => @intCast(constant.long),
-            .uint => @intCast(constant.uint),
-            .ulong => @intCast(constant.ulong),
+            .double => getStaticConst(allocator, constants, constant),
+            .int => .{ .Imm = @bitCast(@as(isize, constant.int)) },
+            .long => .{ .Imm = @intCast(constant.long) },
+            .uint => .{ .Imm = @intCast(constant.uint) },
+            .ulong => .{ .Imm = @intCast(constant.ulong) },
         };
+    }
+
+    fn getStaticConst(allocator: Allocator, constants: *AutoHashMap(u64, StaticConstant), constant: Parser.Constant) Operand {
+        const key: u64 = @bitCast(constant.double);
+        if (!constants.contains(key)) {
+            const name = allocator.print(".const{d}", .{constants.count()}) catch allocError();
+            const staticConst: StaticConstant = .{
+                .type = .Double,
+                .name = name,
+                .alignment = 8,
+                .initial = constant,
+            };
+            constants.put(key, staticConst) catch allocError();
+        }
+        const staticConst = constants.get(key).?;
+        return .{ .Data = staticConst.name };
     }
 
     pub fn getType(self: Operand, symbols: Symbol.Table) ?Type {
@@ -458,33 +474,15 @@ pub const Operand = union(OperandTag) {
 };
 
 pub const Reg = enum {
+    // zig fmt: off
     sp,
-    ax,
-    cx,
-    cl,
-    dx,
-    di,
-    si,
-    r8,
-    r9,
-    r10,
-    r11,
-    mmx0,
-    mmx1,
-    mmx2,
-    mmx3,
-    mmx4,
-    mmx5,
-    mmx6,
-    mmx7,
-    mmx8,
-    mmx9,
-    mmx10,
-    mmx11,
-    mmx12,
-    mmx13,
-    mmx14,
-    mmx15,
+    ax, cx, cl, dx,
+    di, si, r8,
+    r9, r10, r11,
+    mmx0, mmx1, mmx2, mmx3,
+    mmx4, mmx5, mmx6, mmx7,
+    mmx8, mmx9, mmx10, mmx11,
+    mmx12, mmx13, mmx14, mmx15,
 };
 
 pub const Type = enum {
@@ -508,12 +506,16 @@ pub const Type = enum {
     }
 
     pub fn fromVar(symbols: Symbol.Table, v: TAC.Var) Type {
-        return switch (symbols.get(v).?.type) {
-            .Double => .Double,
-            .Int, .UInt => .Long,
-            .Long, .ULong => .Quad,
-            .FunType => unreachable,
-        };
+        if (symbols.get(v)) |entry| {
+            return switch (entry.type) {
+                .Double => .Double,
+                .Int, .UInt => .Long,
+                .Long, .ULong => .Quad,
+                .FunType => unreachable,
+            };
+        } else {
+            return .Double;
+        }
     }
 
     pub fn fromConstant(constant: TAC.Constant) Type {
@@ -558,7 +560,7 @@ fn assertTypes(symbols: Symbol.Table, op1: Operand, op2: Operand) bool {
     return true;
 }
 
-fn funCallToAssembly(allocator: Allocator, symbols: Symbol.Table, funCall: TAC.FunCall) ![]Instruction {
+fn funCallToAssembly(allocator: Allocator, symbols: Symbol.Table, constants: *AutoHashMap(u64, StaticConstant), funCall: TAC.FunCall) ![]Instruction {
     var assembly: ArrayList(Instruction) = .empty;
 
     // Define and check how much we need to allocate initially to the stack to make sure it's
@@ -589,11 +591,11 @@ fn funCallToAssembly(allocator: Allocator, symbols: Symbol.Table, funCall: TAC.F
     while (i > ARG_INT_REGISTERS.len) { // Push stack arguments (arguments 6 and on) first in reverse order
         i -= 1;
         const operand: Operand = blk: switch (funCall.args[i]) {
-            .Constant => .fromVal(funCall.args[i]),
+            .Constant => .fromVal(allocator, constants, funCall.args[i]),
             .Var => |arg| {
                 switch (Type.fromVar(symbols, arg)) {
                     .Double => unreachable,
-                    .Quad => break :blk .fromVal(funCall.args[i]),
+                    .Quad => break :blk .fromVal(allocator, constants, funCall.args[i]),
                     .Long => {
                         // For long word vars, first move them into the lower bytes bytes of AX register,
                         // then push rax (quadword register)
@@ -613,7 +615,7 @@ fn funCallToAssembly(allocator: Allocator, symbols: Symbol.Table, funCall: TAC.F
         try assembly.append(allocator, .{
             .Mov = .{
                 .type = .fromVal(symbols, arg),
-                .src = .fromVal(arg),
+                .src = .fromVal(allocator, constants, arg),
                 .dst = .{ .Reg = ARG_INT_REGISTERS[i] },
             },
         });
@@ -642,24 +644,24 @@ fn funCallToAssembly(allocator: Allocator, symbols: Symbol.Table, funCall: TAC.F
     return try assembly.toOwnedSlice(allocator);
 }
 
-fn signExtend(allocator: Allocator, symbols: Symbol.Table, se: TAC.SignExtend) []Instruction {
-    const src: Operand = .fromVal(se.src);
-    const dst: Operand = .fromVal(se.dst);
+fn signExtend(allocator: Allocator, symbols: Symbol.Table, constants: *AutoHashMap(u64, StaticConstant), se: TAC.SignExtend) []Instruction {
+    const src: Operand = .fromVal(allocator, constants, se.src);
+    const dst: Operand = .fromVal(allocator, constants, se.dst);
     const t: Type = .fromVal(symbols, se.dst);
 
     return allocator.dupe(Instruction, &.{.{ .Movsx = .{ .type = t, .src = src, .dst = dst } }}) catch allocError();
 }
 
-fn truncate(allocator: Allocator, tr: TAC.Truncate) []Instruction {
-    const src: Operand = .fromVal(tr.src);
-    const dst: Operand = .fromVal(tr.dst);
+fn truncate(allocator: Allocator, constants: *AutoHashMap(u64, StaticConstant), tr: TAC.Truncate) []Instruction {
+    const src: Operand = .fromVal(allocator, constants, tr.src);
+    const dst: Operand = .fromVal(allocator, constants, tr.dst);
 
     return allocator.dupe(Instruction, &.{.{ .Mov = .{ .type = .Long, .src = src, .dst = dst } }}) catch allocError();
 }
 
-fn zeroExtend(allocator: Allocator, ze: TAC.ZeroExtend) []Instruction {
-    const src: Operand = .fromVal(ze.src);
-    const dst: Operand = .fromVal(ze.dst);
+fn zeroExtend(allocator: Allocator, constants: *AutoHashMap(u64, StaticConstant), ze: TAC.ZeroExtend) []Instruction {
+    const src: Operand = .fromVal(allocator, constants, ze.src);
+    const dst: Operand = .fromVal(allocator, constants, ze.dst);
 
     if (dst == .Reg) {
         return allocator.dupe(Instruction, &.{

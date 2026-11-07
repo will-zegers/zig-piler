@@ -47,7 +47,10 @@ const Program = struct {
         for (self.topLevel) |*topLevel| {
             switch (topLevel.*) {
                 .Function => |*function| function.deinit(),
-                .StaticConstant, .StaticVariable => {},
+                .StaticConstant => |sc| {
+                    self.allocator.free(sc.name);
+                },
+                .StaticVariable => {},
             }
         }
         self.allocator.free(self.topLevel);
@@ -76,35 +79,43 @@ const TopLevel = union(TopLevelTag) {
 pub fn assemble(allocator: Allocator, frontendSymbols: Symbol.Table, tree: TAC.Program) Assembly {
     var topLevelList: ArrayList(TopLevel) = .empty;
     var backendSymbols: StringHashMap(Entry) = .init(allocator);
+
+    var constants: AutoHashMap(u64, StaticConstant) = .init(allocator);
+    defer constants.deinit();
+
     var statics: ArrayList(TopLevel) = .empty;
     defer statics.deinit(allocator);
 
     for (tree.topLevel) |topLevel| {
         switch (topLevel) {
             .Function => |fun| {
-                const assembly = assembleFunction(allocator, frontendSymbols, topLevel.Function);
+                const assembly = assembleFunction(allocator, frontendSymbols, &constants, topLevel.Function);
                 topLevelList.append(allocator, .{ .Function = assembly }) catch allocError();
 
                 // Function has been defined here, add an entry to the backend table
                 backendSymbols.put(fun.name, .{ .Fun = .{ .defined = true } }) catch allocError();
             },
             .StaticVariable => |static| {
+                // Collect the static variables now but don't and them to the assembly just yet
                 const entry = frontendSymbols.get(static.identifier).?;
-                const def: TopLevel = if (static.type == .Double)
-                    .{ .StaticConstant = StaticConstant.init(entry.type, static) }
-                else
+                const def: TopLevel =
                     .{ .StaticVariable = StaticVariable.init(entry.type, static) };
                 statics.append(allocator, def) catch allocError();
             },
         }
     }
 
+    // After all the .text section (functions and their instruction), add all statics at the end
     for (statics.items) |item| {
-        // TODO: Add logic so we're not duplicating StaticConstants with the same value
         topLevelList.append(allocator, item) catch allocError();
     }
 
-    populateBackendSymbols(&backendSymbols, frontendSymbols);
+    var valueIt = constants.valueIterator();
+    while (valueIt.next()) |value_ptr| {
+        topLevelList.append(allocator, .{ .StaticConstant = value_ptr.* }) catch allocError();
+    }
+
+    populateBackendSymbols(&backendSymbols, frontendSymbols, constants);
 
     return .{
         .allocator = allocator,
@@ -113,7 +124,7 @@ pub fn assemble(allocator: Allocator, frontendSymbols: Symbol.Table, tree: TAC.P
     };
 }
 
-pub fn assembleFunction(allocator: Allocator, symbols: Symbol.Table, function: TAC.Function) Function {
+pub fn assembleFunction(allocator: Allocator, symbols: Symbol.Table, constants: *AutoHashMap(u64, StaticConstant), function: TAC.Function) Function {
     var instructionList: ArrayList(Instruction) = .empty;
 
     var pseudoMap = initStack(allocator, symbols, &instructionList, function.params) catch allocError();
@@ -121,7 +132,7 @@ pub fn assembleFunction(allocator: Allocator, symbols: Symbol.Table, function: T
 
     // First pass to build Assembly AST
     for (function.body) |instr| {
-        const assembly = Instruction.assemble(allocator, symbols, instr);
+        const assembly = Instruction.assemble(allocator, symbols, constants, instr);
         defer allocator.free(assembly);
 
         instructionList.appendSlice(allocator, assembly) catch allocError();
@@ -271,10 +282,9 @@ fn replaceIfPseudo(
     }
 }
 
-fn populateBackendSymbols(beSymbols: *StringHashMap(Entry), feSymbols: Symbol.Table) void {
-    var it = feSymbols.iterator();
-    while (it.next()) |entry| {
-
+fn populateBackendSymbols(beSymbols: *StringHashMap(Entry), feSymbols: Symbol.Table, constants: AutoHashMap(u64, StaticConstant)) void {
+    var symbolIt = feSymbols.iterator();
+    while (symbolIt.next()) |entry| {
         const key = entry.key_ptr.*;
         const value = entry.value_ptr.*;
 
@@ -282,22 +292,28 @@ fn populateBackendSymbols(beSymbols: *StringHashMap(Entry), feSymbols: Symbol.Ta
         if (beSymbols.contains(key)) continue;
 
         beSymbols.put(key, switch (value.type) {
-            .Double => switch (value.attrs) {
-                .Static => .{ .Obj = .{ .type = .Long, .isStatic = true, .isConstant = false } },
-                .Local => .{ .Obj = .{ .type = .Long, .isStatic = false, .isConstant = false } },
-                .Fun => unreachable,
-            },
             .Int, .UInt => switch (value.attrs) {
                 .Static => .{ .Obj = .{ .type = .Long, .isStatic = true, .isConstant = false } },
                 .Local => .{ .Obj = .{ .type = .Long, .isStatic = false, .isConstant = false } },
                 .Fun => unreachable,
             },
-            .Long, .ULong => switch (value.attrs) {
+            .Double, .Long, .ULong => switch (value.attrs) {
                 .Static => .{ .Obj = .{ .type = .Quad, .isStatic = true, .isConstant = false } },
                 .Local => .{ .Obj = .{ .type = .Quad, .isStatic = false, .isConstant = false } },
                 .Fun => unreachable,
             },
             .FunType => .{ .Fun = .{ .defined = false } },
+        }) catch allocError();
+    }
+
+    var constIt = constants.valueIterator();
+    while (constIt.next()) |value_ptr| {
+        const value = value_ptr.*;
+        const key = value.name;
+
+        beSymbols.put(key, switch (value.type) {
+            .Long => .{ .Obj = .{ .type = .Long, .isStatic = true, .isConstant = true } },
+            .Double, .Quad => .{ .Obj = .{ .type = .Quad, .isStatic = false, .isConstant = true } },
         }) catch allocError();
     }
 }
