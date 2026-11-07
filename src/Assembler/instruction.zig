@@ -1,6 +1,9 @@
+// TODO: break this file up
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const ArrayList = std.ArrayList;
+const AutoHashMap = std.AutoHashMap;
+const math = std.math;
 
 const Parser = @import("../Parser.zig");
 const TAC = @import("../TAC.zig");
@@ -9,9 +12,65 @@ const Symbol = @import("../Semantic.zig").Symbol;
 
 pub const InstructionList = ArrayList(Instruction);
 
-pub const ARG_REGISTERS = [_]Reg{ .di, .si, .dx, .cx, .r8, .r9 };
+pub const ARG_INT_REGISTERS = [_]Reg{ .di, .si, .dx, .cx, .r8, .r9 };
+pub const ARG_FP_REGISTERS = [_]Reg{
+    .mmx0, .mmx1, .mmx2, .mmx3,
+    .mmx4, .mmx5, .mmx6, .mmx7,
+};
 pub const LONGWORD_BYTES: isize = 4;
 pub const QUADWORD_BYTES: isize = 8;
+
+pub const StaticVariable = struct {
+    type: Type,
+    name: []const u8,
+    global: bool,
+    initial: Symbol.StaticInit,
+    alignment: usize,
+
+    pub fn init(tacType: Parser.Type, staticVar: TAC.StaticVariable) StaticVariable {
+        const t: Type = .fromTAC(tacType);
+        return .{
+            .type = t,
+            .name = staticVar.identifier,
+            .global = staticVar.global,
+            .alignment = t.alignment(),
+            .initial = staticVar.initial,
+        };
+    }
+
+    pub fn isZero(self: StaticVariable) bool {
+        return switch (self.initial) {
+            .double => self.initial.double == 0,
+            .int => self.initial.int == 0,
+            .uint => self.initial.uint == 0,
+            .long => self.initial.long == 0,
+            .ulong => self.initial.ulong == 0,
+        };
+    }
+};
+
+pub const StaticConstant = struct {
+    type: Type,
+    name: []const u8,
+    alignment: usize,
+    initial: Symbol.StaticInit,
+
+    pub fn init(tacType: Parser.Type, staticConst: TAC.StaticVariable) StaticConstant {
+        const t: Type = .fromTAC(tacType);
+        return .{
+            .type = t,
+            .name = staticConst.identifier,
+            .initial = staticConst.initial,
+            .alignment = t.alignment(),
+        };
+    }
+};
+const QUAD_UPPER_BOUND: f64 = 9223372036854775808.0;
+pub const UPPER_BOUND_STATIC: StaticConstant = .{
+    .name = "UPPER_BOUND",
+    .alignment = 8,
+    .initial = .{ .double = QUAD_UPPER_BOUND },
+};
 
 const InstructionTag = enum {
     Binary,
@@ -59,7 +118,7 @@ pub const Instruction = union(InstructionTag) {
             .Binary => Binary.toAssembly(allocator, symbols, instruction.Binary),
             .Copy => Mov.toAssembly(allocator, symbols, instruction.Copy),
             .DoubleToInt => Cttsd2si.toAssemblySigned(allocator, symbols, instruction.DoubleToInt),
-            .DoubleToUInt => Cttsd2si.toAssemblySigned(allocator, symbols, instruction.DoubleToInt),
+            .DoubleToUInt => Cttsd2si.toAssemblyUnsigned(allocator, symbols, instruction.DoubleToUInt),
             .FunCall => funCallToAssembly(allocator, symbols, instruction.FunCall) catch allocError(),
             .IntToDouble => Cttsi2sd.toAssemblySigned(allocator, symbols, instruction.IntToDouble),
             .Jump => Jmp.toAssembly(allocator, instruction.Jump),
@@ -174,35 +233,26 @@ pub const Cttsd2si = struct {
     fn toAssemblySigned(allocator: Allocator, symbols: Symbol.Table, d2i: TAC.DoubleToInt) []Instruction {
         const src: Operand = .fromVal(d2i.src);
         const dst: Operand = .fromVal(d2i.dst);
-        std.debug.assert(assertTypes(symbols, src, dst));
         const t: Type = .fromVal(symbols, d2i.dst);
 
-        switch (t) {
-            .Long => {},
-            .Quad => {},
-            else => unreachable,
-        }
-
-        return allocator.dupe(Instruction, &.{
-            .{ .Cttsd2si = .{ .type = t, .src = src, .dst = dst } },
-        }) catch allocError();
+        return allocator.dupe(Instruction, &.{.{ .Cttsd2si = .{ .type = t, .src = src, .dst = dst } }}) catch allocError();
     }
 
-    fn toAssemblyUnsigned(allocator: Allocator, symbols: Symbol.Table, d2i: TAC.DoubleToUInt) []Instruction {
-        const src: Operand = .fromVal(d2i.src);
-        const dst: Operand = .fromVal(d2i.dst);
-        std.debug.assert(assertTypes(symbols, src, dst));
-        const t: Type = .fromVal(symbols, d2i.dst);
+    fn toAssemblyUnsigned(allocator: Allocator, symbols: Symbol.Table, d2u: TAC.DoubleToUInt) []Instruction {
+        const src: Operand = .fromVal(d2u.src);
+        const dst: Operand = .fromVal(d2u.dst);
+        const t: Type = .fromVal(symbols, d2u.dst);
 
-        switch (t) {
-            .Long => {},
-            .Quad => {},
+        const assembly = switch (t) {
+            .Long => allocator.dupe(Instruction, &.{
+                .{ .Cttsd2si = .{ .type = .Quad, .src = src, .dst = .{ .Reg = .ax } } },
+                .{ .Mov = .{ .type = .Long, .src = .{ .Reg = .ax }, .dst = dst } },
+            }),
+            .Quad => unreachable,
             else => unreachable,
-        }
+        } catch allocError();
 
-        return allocator.dupe(Instruction, &.{
-            .{ .Cttsd2si = .{ .type = t, .src = src, .dst = dst } },
-        }) catch allocError();
+        return assembly;
     }
 };
 
@@ -214,35 +264,26 @@ pub const Cttsi2sd = struct {
     fn toAssemblySigned(allocator: Allocator, symbols: Symbol.Table, d2i: TAC.IntToDouble) []Instruction {
         const src: Operand = .fromVal(d2i.src);
         const dst: Operand = .fromVal(d2i.dst);
-        std.debug.assert(assertTypes(symbols, src, dst));
-        const t: Type = .fromVal(symbols, d2i.dst);
+        const t: Type = .fromVal(symbols, d2i.src);
 
-        switch (t) {
-            .Long => {},
-            .Quad => {},
-            else => unreachable,
-        }
-
-        return allocator.dupe(Instruction, &.{
-            .{ .Cttsd2si = .{ .type = t, .src = src, .dst = dst } },
-        }) catch allocError();
+        return allocator.dupe(Instruction, &.{.{ .Cttsi2sd = .{ .type = t, .src = src, .dst = dst } }}) catch allocError();
     }
 
     fn toAssemblyUnsigned(allocator: Allocator, symbols: Symbol.Table, d2i: TAC.UIntToDouble) []Instruction {
         const src: Operand = .fromVal(d2i.src);
         const dst: Operand = .fromVal(d2i.dst);
-        std.debug.assert(assertTypes(symbols, src, dst));
         const t: Type = .fromVal(symbols, d2i.src);
 
-        switch (t) {
-            .Long => {},
-            .Quad => {},
+        const assembly = switch (t) {
+            .Long => allocator.dupe(Instruction, &.{
+                .{ .Mov = .{ .type = .Long, .src = src, .dst = .{ .Reg = .ax } } },
+                .{ .Cttsi2sd = .{ .type = .Quad, .src = .{ .Reg = .ax }, .dst = dst } },
+            }),
+            .Quad => unreachable,
             else => unreachable,
-        }
+        } catch allocError();
 
-        return allocator.dupe(Instruction, &.{
-            .{ .Cttsd2si = .{ .type = t, .src = src, .dst = dst } },
-        }) catch allocError();
+        return assembly;
     }
 };
 
@@ -417,6 +458,7 @@ pub const Operand = union(OperandTag) {
 };
 
 pub const Reg = enum {
+    sp,
     ax,
     cx,
     cl,
@@ -427,7 +469,6 @@ pub const Reg = enum {
     r9,
     r10,
     r11,
-    sp,
     mmx0,
     mmx1,
     mmx2,
@@ -450,6 +491,21 @@ pub const Type = enum {
     Long,
     Quad,
     Double,
+
+    pub fn alignment(self: Type) usize {
+        return switch (self) {
+            .Long => 4,
+            .Double, .Quad => 8,
+        };
+    }
+
+    pub fn fromTAC(v: Parser.Type) Type {
+        return switch (v) {
+            .Int, .UInt => .Long,
+            .Double, .Long, .ULong => .Quad,
+            .FunType => unreachable,
+        };
+    }
 
     pub fn fromVar(symbols: Symbol.Table, v: TAC.Var) Type {
         return switch (symbols.get(v).?.type) {
@@ -508,13 +564,13 @@ fn funCallToAssembly(allocator: Allocator, symbols: Symbol.Table, funCall: TAC.F
     // Define and check how much we need to allocate initially to the stack to make sure it's
     // aligned to 16-bytes on function call, per Sys V ABI
     var allocatedStack: usize = undefined;
-    if (funCall.args.len <= ARG_REGISTERS.len) {
+    if (funCall.args.len <= ARG_INT_REGISTERS.len) {
         // No stack arguments, so no alignment needed
         allocatedStack = 0;
     } else {
         // Check if we have an even or odd number of stack allocations. If odd, we'll need
         // to allocate an additional 8-bytes to make sure the stack is 16-byte aligned
-        if ((funCall.args.len - ARG_REGISTERS.len) % 2 == 0) {
+        if ((funCall.args.len - ARG_INT_REGISTERS.len) % 2 == 0) {
             allocatedStack = 0;
         } else {
             allocatedStack = QUADWORD_BYTES;
@@ -530,7 +586,7 @@ fn funCallToAssembly(allocator: Allocator, symbols: Symbol.Table, funCall: TAC.F
     // This process in reverse of the Sys V ABI, pushing stack arguments (if any) first in their reverse
     // order, and then register arguments (if any) (similar to GCC)
     var i = funCall.args.len;
-    while (i > ARG_REGISTERS.len) { // Push stack arguments (arguments 6 and on) first in reverse order
+    while (i > ARG_INT_REGISTERS.len) { // Push stack arguments (arguments 6 and on) first in reverse order
         i -= 1;
         const operand: Operand = blk: switch (funCall.args[i]) {
             .Constant => .fromVal(funCall.args[i]),
@@ -558,7 +614,7 @@ fn funCallToAssembly(allocator: Allocator, symbols: Symbol.Table, funCall: TAC.F
             .Mov = .{
                 .type = .fromVal(symbols, arg),
                 .src = .fromVal(arg),
-                .dst = .{ .Reg = ARG_REGISTERS[i] },
+                .dst = .{ .Reg = ARG_INT_REGISTERS[i] },
             },
         });
     }

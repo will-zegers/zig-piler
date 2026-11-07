@@ -260,52 +260,6 @@ fn printExpression(expr: Parser.Expression, indent: usize) void {
     }
 }
 
-fn printFESymbolTable(symbolTable: Symbol.Table) void {
-    print("-------Symbol Table-------\n", .{});
-    var it = symbolTable.iterator();
-    while (it.next()) |entry| {
-        const t = entry.value_ptr.*.type;
-        const attrs = entry.value_ptr.*.attrs;
-        print("{s}:\n", .{entry.key_ptr.*});
-        print("  type: {s}\n", .{@tagName(t)});
-        switch (t) {
-            .FunType => {
-                if (t.FunType.params.len > 0) {
-                    print("    params:", .{});
-                    for (t.FunType.params) |param| {
-                        print(" {s}", .{@tagName(param.*)});
-                    }
-                    print("\n", .{});
-                }
-                print("    ret: {s}\n", .{@tagName(t.FunType.ret.*)});
-            },
-            .Double, .Int, .Long, .UInt, .ULong => {},
-        }
-        print("  attrs: {s}\n", .{@tagName(attrs)});
-        switch (attrs) {
-            .Fun => |fun| {
-                print("  global: {any}\n", .{fun.global});
-                print("  defined: {any}\n", .{fun.defined});
-            },
-            .Static => |static| {
-                print("  global: {any}\n", .{static.global});
-                print("  initialValue: ", .{});
-                switch (static.initialValue) {
-                    .Tentative, .None => print("{s}\n", .{@tagName(static.initialValue)}),
-                    .Initial => |init| switch (init) {
-                        .double => |double| print("{any}: {d}", .{ @tagName(static.initialValue), double }),
-                        .int => |int| print("{any}: {d}", .{ @tagName(static.initialValue), int }),
-                        .long => |long| print("{any}: {d}", .{ @tagName(static.initialValue), long }),
-                        .uint => |uint| print("{any}: {d}", .{ @tagName(static.initialValue), uint }),
-                        .ulong => |ulong| print("{any}: {d}", .{ @tagName(static.initialValue), ulong }),
-                    },
-                }
-            },
-            .Local => {},
-        }
-    }
-}
-
 pub fn printTAC(ir: TAC.Program, symbolTable: Symbol.Table) void {
     const program = ir;
     print("{any} (\n", .{@TypeOf(program)});
@@ -424,7 +378,7 @@ fn printTACFunction(function: TAC.Function) void {
 fn printVal(prefix: []const u8, val: TAC.Val, suffix: []const u8) void {
     switch (val) {
         .Constant => switch (val.Constant) {
-            .double => print("{s}int {d}{s}", .{ prefix, val.Constant.double, suffix }),
+            .double => print("{s}double {d}{s}", .{ prefix, val.Constant.double, suffix }),
             .int => print("{s}int {d}{s}", .{ prefix, val.Constant.int, suffix }),
             .long => print("{s}long {d}{s}", .{ prefix, val.Constant.long, suffix }),
             .uint => print("{s}uint {d}{s}", .{ prefix, val.Constant.uint, suffix }),
@@ -464,6 +418,18 @@ pub fn printAssemblerAST(ast: Assembler.Assembly) void {
                     .long => print("    long: {d}\n", .{staticVar.initial.long}),
                     .uint => print("    uint: {d}\n", .{staticVar.initial.uint}),
                     .ulong => print("    ulong: {d}\n", .{staticVar.initial.ulong}),
+                }
+                print("  )\n", .{});
+            },
+            .StaticConstant => |staticConst| {
+                print("  {any} (\n", .{@TypeOf(staticConst)});
+                print("    identifier: {s}\n", .{staticConst.name});
+                switch (staticConst.initial) {
+                    .double => print("    double: {d}\n", .{staticConst.initial.double}),
+                    .int => print("    int: {d}\n", .{staticConst.initial.int}),
+                    .long => print("    long: {d}\n", .{staticConst.initial.long}),
+                    .uint => print("    uint: {d}\n", .{staticConst.initial.uint}),
+                    .ulong => print("    ulong: {d}\n", .{staticConst.initial.ulong}),
                 }
                 print("  )\n", .{});
             },
@@ -560,7 +526,54 @@ fn printType(t: Assembler.Type) void {
     }
 }
 
+fn printFESymbolTable(symbolTable: Symbol.Table) void {
+    print("-------Frontend Symbol Table-------\n", .{});
+    var it = symbolTable.iterator();
+    while (it.next()) |entry| {
+        const t = entry.value_ptr.*.type;
+        const attrs = entry.value_ptr.*.attrs;
+        print("{s}:\n", .{entry.key_ptr.*});
+        print("  type: {s}\n", .{@tagName(t)});
+        switch (t) {
+            .FunType => {
+                if (t.FunType.params.len > 0) {
+                    print("    params:", .{});
+                    for (t.FunType.params) |param| {
+                        print(" {s}", .{@tagName(param.*)});
+                    }
+                    print("\n", .{});
+                }
+                print("    ret: {s}\n", .{@tagName(t.FunType.ret.*)});
+            },
+            .Double, .Int, .Long, .UInt, .ULong => {},
+        }
+        print("  attrs: {s}\n", .{@tagName(attrs)});
+        switch (attrs) {
+            .Fun => |fun| {
+                print("  global: {any}\n", .{fun.global});
+                print("  defined: {any}\n", .{fun.defined});
+            },
+            .Static => |static| {
+                print("  global: {any}\n", .{static.global});
+                print("  initialValue: ", .{});
+                switch (static.initialValue) {
+                    .Tentative, .None => print("{s}\n", .{@tagName(static.initialValue)}),
+                    .Initial => |init| switch (init) {
+                        .double => |double| print("{any}: {d}", .{ @tagName(static.initialValue), double }),
+                        .int => |int| print("{any}: {d}", .{ @tagName(static.initialValue), int }),
+                        .long => |long| print("{any}: {d}", .{ @tagName(static.initialValue), long }),
+                        .uint => |uint| print("{any}: {d}", .{ @tagName(static.initialValue), uint }),
+                        .ulong => |ulong| print("{any}: {d}", .{ @tagName(static.initialValue), ulong }),
+                    },
+                }
+            },
+            .Local => {},
+        }
+    }
+}
+
 fn printBESymbolTable(symbols: StringHashMap(Assembler.Entry)) void {
+    print("-------Backend Symbol Table-------\n", .{});
     var it = symbols.iterator();
     while (it.next()) |entry| {
         const t = entry.value_ptr.*;

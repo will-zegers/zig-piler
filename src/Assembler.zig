@@ -2,6 +2,7 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const ArrayList = std.ArrayList;
+const AutoHashMap = std.AutoHashMap;
 const StringHashMap = std.StringHashMap;
 
 const Parser = @import("Parser.zig");
@@ -13,8 +14,10 @@ const instruction = @import("Assembler/instruction.zig");
 pub const Instruction = instruction.Instruction;
 pub const Operand = instruction.Operand;
 pub const Reg = instruction.Reg;
+pub const StaticConstant = instruction.StaticConstant;
+pub const StaticVariable = instruction.StaticVariable;
 pub const Type = instruction.Type;
-const ARG_REGISTERS = instruction.ARG_REGISTERS;
+const ARG_INT_REGISTERS = instruction.ARG_INT_REGISTERS;
 const LONGWORD_BYTES = instruction.LONGWORD_BYTES;
 const QUADWORD_BYTES = instruction.QUADWORD_BYTES;
 const Binary = instruction.Binary;
@@ -31,8 +34,8 @@ pub const Assembly = Program;
 
 const EntryTag = enum {Obj, Fun};
 pub const Entry = union(EntryTag) {
-    Obj: struct { type: Type, isStatic: bool },
-     Fun: struct { defined: bool },
+    Obj: struct { type: Type, isStatic: bool, isConstant: bool },
+    Fun: struct { defined: bool },
 };
 
 const Program = struct {
@@ -44,7 +47,7 @@ const Program = struct {
         for (self.topLevel) |*topLevel| {
             switch (topLevel.*) {
                 .Function => |*function| function.deinit(),
-                .StaticVariable => {},
+                .StaticConstant, .StaticVariable => {},
             }
         }
         self.allocator.free(self.topLevel);
@@ -63,53 +66,18 @@ pub const Function = struct {
     }
 };
 
-pub const StaticVariable = struct {
-    type: Parser.Type,
-    name: []const u8,
-    global: bool,
-    initial: Symbol.StaticInit,
-    alignment: usize,
-
-    pub fn init(varType: Parser.Type, staticVar: TAC.StaticVariable) StaticVariable {
-        return .{
-            .type = varType,
-            .name = staticVar.identifier,
-            .global = staticVar.global,
-            .alignment = switch (varType) {
-                .Int, .UInt => 4,
-                .Double, .Long, .ULong => 8,
-                .FunType => unreachable,
-            },
-            .initial = staticVar.initial,
-        };
-    }
-
-    pub fn isZero(self: StaticVariable) bool {
-        return switch (self.initial) {
-            .double => self.initial.double == 0,
-            .int => self.initial.int == 0,
-            .uint => self.initial.uint == 0,
-            .long => self.initial.long == 0,
-            .ulong => self.initial.ulong == 0,
-        };
-    }
-};
-
-pub const StaticConstant = struct {
-    name: []const u8,
-    alignment: usize,
-    initial: Symbol.StaticInit, 
-};
-
-const TopLevelTag = enum { Function, StaticVariable };
+const TopLevelTag = enum { Function, StaticConstant, StaticVariable };
 const TopLevel = union(TopLevelTag) {
     Function: Function,
+    StaticConstant: StaticConstant,
     StaticVariable: StaticVariable,
 };
 
 pub fn assemble(allocator: Allocator, frontendSymbols: Symbol.Table, tree: TAC.Program) Assembly {
     var topLevelList: ArrayList(TopLevel) = .empty;
     var backendSymbols: StringHashMap(Entry) = .init(allocator);
+    var statics: ArrayList(TopLevel) = .empty;
+    defer statics.deinit(allocator);
 
     for (tree.topLevel) |topLevel| {
         switch (topLevel) {
@@ -120,14 +88,22 @@ pub fn assemble(allocator: Allocator, frontendSymbols: Symbol.Table, tree: TAC.P
                 // Function has been defined here, add an entry to the backend table
                 backendSymbols.put(fun.name, .{ .Fun = .{ .defined = true } }) catch allocError();
             },
-            .StaticVariable => |staticVar| {
-                const entry = frontendSymbols.get(staticVar.identifier).?;
-                topLevelList.append(allocator, .{ .StaticVariable =
-                    StaticVariable.init(entry.type, staticVar),
-                } ) catch allocError();
+            .StaticVariable => |static| {
+                const entry = frontendSymbols.get(static.identifier).?;
+                const def: TopLevel = if (static.type == .Double)
+                    .{ .StaticConstant = StaticConstant.init(entry.type, static) }
+                else
+                    .{ .StaticVariable = StaticVariable.init(entry.type, static) };
+                statics.append(allocator, def) catch allocError();
             },
         }
     }
+
+    for (statics.items) |item| {
+        // TODO: Add logic so we're not duplicating StaticConstants with the same value
+        topLevelList.append(allocator, item) catch allocError();
+    }
+
     populateBackendSymbols(&backendSymbols, frontendSymbols);
 
     return .{
@@ -137,7 +113,6 @@ pub fn assemble(allocator: Allocator, frontendSymbols: Symbol.Table, tree: TAC.P
     };
 }
 
-// TODO: break this function up
 pub fn assembleFunction(allocator: Allocator, symbols: Symbol.Table, function: TAC.Function) Function {
     var instructionList: ArrayList(Instruction) = .empty;
 
@@ -152,8 +127,8 @@ pub fn assembleFunction(allocator: Allocator, symbols: Symbol.Table, function: T
         instructionList.appendSlice(allocator, assembly) catch allocError();
     }
 
-    // Second pass, replace Pseudo registers with stack locations and prepend the prelude
-    setupStack(allocator, symbols, &instructionList, &pseudoMap) catch allocError();
+    // Second pass, replace Pseudo registers with stack locations and prepend the stack allocation calculus
+    convertPseudoToMemory(allocator, symbols, &instructionList, &pseudoMap) catch allocError();
 
     // Find illegal instructions (see specifications in the Patcher module)
     var instructions = instructionList.toOwnedSlice(allocator) catch allocError();
@@ -180,9 +155,9 @@ fn initStack(
 
     var stackPointerOffset: isize = 2 * QUADWORD_BYTES; // return-address + caller base-pointer
     for (params, 0..) |param, i| {
-        if (i < ARG_REGISTERS.len) { // register arguments
+        if (i < ARG_INT_REGISTERS.len) { // register arguments
             const name = param.unique.?;
-            const src: Operand = .{ .Reg = ARG_REGISTERS[i] };
+            const src: Operand = .{ .Reg = ARG_INT_REGISTERS[i] };
             const dst: Operand = .{ .Pseudo = name };
             const t: Type = .fromVar(symbols, name);
             try instructions.append(allocator, .{ .Mov = .{ .type = t, .src = src, .dst = dst } });
@@ -196,7 +171,7 @@ fn initStack(
     return pseudoMap;
 }
 
-fn setupStack(
+fn convertPseudoToMemory(
     allocator: Allocator,
     symbols: Symbol.Table,
     instructions: *ArrayList(Instruction),
@@ -283,11 +258,10 @@ fn replaceIfPseudo(
                 .Int, .UInt => {
                     stackPointer.* += LONGWORD_BYTES;
                 },
-                .Long, .ULong => {
+                .Double, .Long, .ULong => {
                     stackPointer.* += QUADWORD_BYTES;
                     stackPointer.* = 8 * @divCeil(stackPointer.*, 8);
                 },
-                .Double => unreachable, // this could probably be merge with longs
                 .FunType => unreachable,
             }
             try map.put(key, -stackPointer.*);
@@ -308,15 +282,19 @@ fn populateBackendSymbols(beSymbols: *StringHashMap(Entry), feSymbols: Symbol.Ta
         if (beSymbols.contains(key)) continue;
 
         beSymbols.put(key, switch (value.type) {
-            .Double => unreachable,
+            .Double => switch (value.attrs) {
+                .Static => .{ .Obj = .{ .type = .Long, .isStatic = true, .isConstant = false } },
+                .Local => .{ .Obj = .{ .type = .Long, .isStatic = false, .isConstant = false } },
+                .Fun => unreachable,
+            },
             .Int, .UInt => switch (value.attrs) {
-                .Static => .{ .Obj = .{ .type = .Long, .isStatic = true } },
-                .Local => .{ .Obj = .{ .type = .Long, .isStatic = false } },
+                .Static => .{ .Obj = .{ .type = .Long, .isStatic = true, .isConstant = false } },
+                .Local => .{ .Obj = .{ .type = .Long, .isStatic = false, .isConstant = false } },
                 .Fun => unreachable,
             },
             .Long, .ULong => switch (value.attrs) {
-                .Static => .{ .Obj = .{ .type = .Quad, .isStatic = true } },
-                .Local => .{ .Obj = .{ .type = .Quad, .isStatic = false } },
+                .Static => .{ .Obj = .{ .type = .Quad, .isStatic = true, .isConstant = false } },
+                .Local => .{ .Obj = .{ .type = .Quad, .isStatic = false, .isConstant = false } },
                 .Fun => unreachable,
             },
             .FunType => .{ .Fun = .{ .defined = false } },

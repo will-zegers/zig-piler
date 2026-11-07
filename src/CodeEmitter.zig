@@ -29,6 +29,7 @@ pub fn init(allocator: Allocator, ast: Assembler.Assembly) !CodeEmitter {
         const slice = switch (topLevel) {
             .Function => |function| try emitFunction(arenaAllocator, function, ast.symbols),
             .StaticVariable => |staticVar| try emitStaticVar(arenaAllocator, staticVar),
+            .StaticConstant => unreachable,
         };
 
         try instructions.appendSlice(arenaAllocator, slice);
