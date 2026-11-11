@@ -120,7 +120,7 @@ pub fn emitFunction(allocator: Allocator, function: Assembler.Function, symbols:
 
     const functionDefinition = try allocator.print(functionDefTemplate, .{function.name});
     const labelPrefix = switch (builtin.os.tag) {
-        .linux => ".L",
+        .linux => ".L_",
         else => unreachable, // only running this on linux atm
     };
 
