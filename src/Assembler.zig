@@ -18,10 +18,12 @@ pub const Reg = instruction.Reg;
 pub const StaticConstant = instruction.StaticConstant;
 pub const StaticVariable = instruction.StaticVariable;
 pub const Type = instruction.Type;
+const ARG_FP_REGISTERS = instruction.ARG_FP_REGISTERS;
 const ARG_INT_REGISTERS = instruction.ARG_INT_REGISTERS;
 const LONGWORD_BYTES = instruction.LONGWORD_BYTES;
 const QUADWORD_BYTES = instruction.QUADWORD_BYTES;
 const Binary = instruction.Binary;
+const FunCallArgs = instruction.FunCallArgs;
 const Jmp = instruction.Jmp;
 const JmpCC = instruction.JmpCC;
 const Label = instruction.Label;
@@ -154,15 +156,24 @@ fn initStack(
 ) Allocator.Error!StringHashMap(isize) {
     var pseudoMap: StringHashMap(isize) = .init(allocator);
 
+    var intIdx: usize, var doubleIdx: usize = .{0, 0};
     var stackPointerOffset: isize = 2 * QUADWORD_BYTES; // return-address + caller base-pointer
-    for (params, 0..) |param, i| {
-        if (i < ARG_INT_REGISTERS.len) { // register arguments
-            const name = param.unique.?;
-            const src: Operand = .{ .Reg = ARG_INT_REGISTERS[i] };
+    for (params) |param| {
+        const name = param.unique.?;
+        const t: Type = .fromVar(symbols, name);
+        if (t == .Double and doubleIdx < ARG_FP_REGISTERS.len) {
+            const src: Operand = .{ .Reg = ARG_FP_REGISTERS[doubleIdx] };
             const dst: Operand = .{ .Pseudo = name };
-            const t: Type = .fromVar(symbols, name);
+
+            doubleIdx += 1;
             try instructions.append(allocator, .{ .Mov = .{ .type = t, .src = src, .dst = dst } });
-        } else { // stack arguments
+        } else if (intIdx < ARG_INT_REGISTERS.len) {
+            const src: Operand = .{ .Reg = ARG_INT_REGISTERS[intIdx] };
+            const dst: Operand = .{ .Pseudo = name };
+
+            intIdx += 1;
+            try instructions.append(allocator, .{ .Mov = .{ .type = t, .src = src, .dst = dst } });
+        } else {
             // Since the stack args already exist in memory, add an entry to the pseudo
             // table for the already existing stack offsets
             try pseudoMap.put(param.unique.?, stackPointerOffset);

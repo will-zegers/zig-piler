@@ -435,9 +435,13 @@ pub const Ret = struct {
     pub fn toAssembly(allocator: Allocator, symbols: Symbol.Table, staticConsts: *AutoHashMap(u64, StaticConstant), ret: TAC.Return) []Instruction {
         const val: Operand = .fromVal(allocator, staticConsts, ret.val);
         const t: Type = .fromVal(symbols, ret.val);
+        const dst: Operand = switch (t) {
+            .Long, .Quad => .{ .Reg = .ax },
+            .Double => .{ .Reg = .xmm0 },
+        };
 
         return allocator.dupe(Instruction, &.{
-            .{ .Mov = .{ .type = t, .src = val, .dst = .{ .Reg = .ax } } },
+            .{ .Mov = .{ .type = t, .src = val, .dst = dst } },
             .{ .Ret = .{ .type = t } },
         }) catch allocError();
     }
@@ -557,7 +561,7 @@ pub const TypedOperand = struct {
     operand: Operand,
 };
 
-const FunCallArgs = struct {
+pub const FunCallArgs = struct {
     intRegArgs: []const TypedOperand,
     doubleRegArgs: []const TypedOperand,
     stackArgs: []const TypedOperand,
