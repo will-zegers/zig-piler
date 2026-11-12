@@ -16,8 +16,8 @@ var counter: usize = 0;
 
 pub const ARG_INT_REGISTERS = [_]Reg{ .di, .si, .dx, .cx, .r8, .r9 };
 pub const ARG_FP_REGISTERS = [_]Reg{
-    .mmx0, .mmx1, .mmx2, .mmx3,
-    .mmx4, .mmx5, .mmx6, .mmx7,
+    .xmm0, .xmm1, .xmm2, .xmm3,
+    .xmm4, .xmm5, .xmm6, .xmm7,
 };
 pub const LONGWORD_BYTES: isize = 4;
 pub const QUADWORD_BYTES: isize = 8;
@@ -552,6 +552,63 @@ pub const Operand = union(OperandTag) {
     }
 };
 
+pub const TypedOperand = struct {
+    type: Type,
+    operand: Operand,
+};
+
+const FunCallArgs = struct {
+    intRegArgs: []const TypedOperand,
+    doubleRegArgs: []const TypedOperand,
+    stackArgs: []const TypedOperand,
+
+    fn init(
+        allocator: Allocator,
+        params: []TAC.Val,
+        symbols: Symbol.Table,
+        staticConsts: *AutoHashMap(u64, StaticConstant)
+    ) !FunCallArgs {
+        var intRegArgs: ArrayList(TypedOperand) = .empty;
+        var doubleRegArgs: ArrayList(TypedOperand) = .empty;
+        var stackArgs: ArrayList(TypedOperand) = .empty;
+
+        for (params) |param| {
+            const operand: Operand = .fromVal(allocator, staticConsts, param);
+            const t: Type = switch (param) {
+                .Constant => switch (param.Constant) {
+                    .int, .uint => .Long,
+                    .long, .ulong => .Quad,
+                    .double => .Double,
+                },
+                .Var => .fromVar(symbols, param.Var),
+            };
+
+            switch (t) {
+                .Double => {
+                    if (doubleRegArgs.items.len < ARG_FP_REGISTERS.len) {
+                        try doubleRegArgs.append(allocator, .{ .type = t, .operand = operand });
+                    } else {
+                        try stackArgs.append(allocator, .{ .type = t, .operand = operand });
+                    }
+                },
+                .Long, .Quad => {
+                    if (intRegArgs.items.len < ARG_INT_REGISTERS.len) {
+                        try intRegArgs.append(allocator, .{ .type = t, .operand = operand });
+                    } else {
+                        try stackArgs.append(allocator, .{ .type = t, .operand = operand });
+                    }
+                },
+            }
+        }
+
+        return .{
+            .intRegArgs = try intRegArgs.toOwnedSlice(allocator),
+            .doubleRegArgs = try doubleRegArgs.toOwnedSlice(allocator),
+            .stackArgs = try stackArgs.toOwnedSlice(allocator),
+        };
+    }
+};
+
 pub const Reg = enum {
     // zig fmt: off
     sp,
@@ -637,18 +694,23 @@ fn funCallToAssembly(allocator: Allocator, symbols: Symbol.Table, staticConsts: 
     var allocatedStack: usize = 0;
     var assembly: ArrayList(Instruction) = .empty;
 
-    const stackAlign = alignStack(funCall);
+    const args = try FunCallArgs.init(allocator, funCall.args, symbols, staticConsts);
+
+    const stackAlign = alignStack(args.stackArgs);
     if (stackAlign) |a| {
         try assembly.append(allocator, a);
         allocatedStack += QUADWORD_BYTES;
     }
 
-    const pushToStack = try pushStackArgs(allocator, symbols, staticConsts, funCall);
+    const pushToStack = try pushStackArgs(allocator, args.stackArgs);
     try assembly.appendSlice(allocator, pushToStack);
     allocatedStack = pushToStack.len * QUADWORD_BYTES;
 
-    const moveToRegisters = try movRegisterArgs(allocator, symbols, staticConsts, funCall);
-    try assembly.appendSlice(allocator, moveToRegisters);
+    const intRegisters = try moveRegisterArgs(allocator, &ARG_INT_REGISTERS, args.intRegArgs);
+    try assembly.appendSlice(allocator, intRegisters);
+
+    const doubleRegisters = try moveRegisterArgs(allocator, &ARG_FP_REGISTERS, args.doubleRegArgs);
+    try assembly.appendSlice(allocator, doubleRegisters);
 
     try assembly.append(allocator, .{ .Call = .{ .identifier = funCall.name } });
 
@@ -671,77 +733,67 @@ fn funCallToAssembly(allocator: Allocator, symbols: Symbol.Table, staticConsts: 
     return try assembly.toOwnedSlice(allocator);
 }
 
-fn alignStack(funCall: TAC.FunCall) ?Instruction {
+fn alignStack(stackArgs: []const TypedOperand) ?Instruction {
     // Define and check how much we need to allocate initially to the stack to make sure it's
     // aligned to 16-bytes on function call, per Sys V ABI
-    if (funCall.args.len > ARG_INT_REGISTERS.len) {
+    //
         // Check if we have an even or odd number of stack allocations. If odd, we'll need
         // to allocate an additional 8-bytes to make sure the stack is 16-byte aligned
-        if ((funCall.args.len - ARG_INT_REGISTERS.len) % 2 != 0) {
-            return .{ .Binary = .{
-                .type = .Quad,
-                .operator = .Sub,
-                .src = .{ .Imm = QUADWORD_BYTES },
-                .dst = .{ .Reg = .sp },
-            } };
-        }
+    if (stackArgs.len % 2 != 0) {
+        return .{ .Binary = .{
+            .type = .Quad,
+            .operator = .Sub,
+            .src = .{ .Imm = QUADWORD_BYTES },
+            .dst = .{ .Reg = .sp },
+        } };
     }
     return null;
 }
 
 fn pushStackArgs(
     allocator: Allocator,
-    symbols: Symbol.Table,
-    staticConsts: *AutoHashMap(u64, StaticConstant),
-    funCall: TAC.FunCall
+    stackArgs: []const TypedOperand,
 ) ![]Instruction {
     var assembly: ArrayList(Instruction) = .empty;
 
     // This process in reverse of the Sys V ABI, pushing stack arguments (if any) first in their reverse
     // order, and then register arguments (if any) (similar to GCC)
-    var i = funCall.args.len;
-    while (i > ARG_INT_REGISTERS.len) { // Push stack arguments (arguments 6 and on) first in reverse order
+    var i = stackArgs.len;
+    while (i > 0) { // Push stack arguments (arguments 6 and on) first in reverse order
         i -= 1;
-        var operand: Operand = undefined;
-        switch (funCall.args[i]) {
-            .Constant => operand = .fromVal(allocator, staticConsts, funCall.args[i]),
-            .Var => |arg|
-                switch (Type.fromVar(symbols, arg)) {
-                    .Double, .Quad => operand = .fromVal(allocator, staticConsts, funCall.args[i]),
-                    .Long => {
-                        // For long word vars, first move them into the lower bytes bytes of AX register,
-                        // then push rax (quadword register)
-                        operand = .{ .Reg = .ax };
-                        try assembly.append(allocator,
-                            .{ .Mov = .{ .type = .Long, .src = .{ .Pseudo = arg }, .dst = operand } }
-                        );
-                },
-            },
+        const operand: Operand = stackArgs[i].operand;
+        if (stackArgs[i].operand == .Imm or stackArgs[i].operand == .Reg or
+            stackArgs[i].type == .Double or stackArgs[i].type == .Quad) {
+                try assembly.append(allocator, .{ .Push = .{ .operand = operand } });
+        } else {
+            try assembly.appendSlice(allocator, &.{
+                .{ .Mov = .{ .type = .Long, .src = operand, .dst = .{ .Reg = .ax } } },
+                .{ .Push = .{ .operand = .{ .Reg = .ax } } },
+            });
         }
-        try assembly.append(allocator, .{ .Push = .{ .operand = operand } });
     }
+
     return assembly.toOwnedSlice(allocator);
 }
 
-fn movRegisterArgs(
+fn moveRegisterArgs(
     allocator: Allocator,
-    symbols: Symbol.Table,
-    staticConsts: *AutoHashMap(u64, StaticConstant),
-    funCall: TAC.FunCall
+    registers: []const Reg,
+    registerArgs: []const TypedOperand,
 ) ![]Instruction {
     var assembly: ArrayList(Instruction) = .empty;
 
-    var i = @min(ARG_INT_REGISTERS.len, funCall.args.len);
+    var i = registerArgs.len;
     while (i > 0) { // Move arguments in corresponding stack registers
         i -= 1;
-        const arg = funCall.args[i];
-        try assembly.append(allocator, .{
-            .Mov = .{
-                .type = .fromVal(symbols, arg),
-                .src = .fromVal(allocator, staticConsts, arg),
-                .dst = .{ .Reg = ARG_INT_REGISTERS[i] },
-            },
-        });
+        const arg = registerArgs[i];
+        try assembly.append(allocator,
+            .{ .Mov = .{
+                .type = arg.type,
+                .src = arg.operand,
+                .dst = .{ .Reg = registers[i] } }
+            }
+        );
     }
 
     return assembly.toOwnedSlice(allocator);
