@@ -16,6 +16,10 @@ const UnitSize = enum {
     Long,
     Quad,
 };
+    const LOCAL_PREFIX = switch (builtin.os.tag) {
+        .linux => ".L",
+        else => unreachable, // only running this on linux atm
+    };
 
 arena: ArenaAllocator,
 instructions: ArrayList([]const u8),
@@ -26,13 +30,20 @@ pub fn init(allocator: Allocator, ast: Assembler.Assembly) !CodeEmitter {
 
     var instructions: ArrayList([]const u8) = .empty;
     for (ast.topLevel) |topLevel| {
-        const slice = switch (topLevel) {
-            .Function => |function| try emitFunction(arenaAllocator, function, ast.symbols),
-            .StaticVariable => |staticVar| try emitStaticVar(arenaAllocator, staticVar),
-            .StaticConstant => unreachable,
-        };
-
-        try instructions.appendSlice(arenaAllocator, slice);
+        switch (topLevel) {
+            .Function => |function|{
+                const slice = try emitFunction(arenaAllocator, function, ast.symbols);
+                try instructions.appendSlice(arenaAllocator, slice);
+            },
+             .StaticVariable => |staticVar| {
+                const slice = try emitStaticVar(arenaAllocator, staticVar);
+                try instructions.appendSlice(arenaAllocator, slice);
+             },
+            .StaticConstant => |staticConst| {
+                const static = try emitStaticConstant(arenaAllocator, staticConst);
+                try instructions.append(arenaAllocator, static);
+            }
+        }
     }
 
     switch (builtin.os.tag) {
@@ -54,7 +65,6 @@ pub fn  emitStaticVar(allocator: Allocator, staticVar: Assembler.StaticVariable)
 
     var code: []const u8 = undefined;
     switch (staticVar.initial) {
-        .double => unreachable,
         .int, .uint => if (staticVar.isZero()) {
             const template =
                 \\  .bss
@@ -75,7 +85,7 @@ pub fn  emitStaticVar(allocator: Allocator, staticVar: Assembler.StaticVariable)
             else
                 try allocator.print(template, .{staticVar.name, staticVar.initial.uint});
         },
-        .long, .ulong => if (staticVar.isZero()) {
+        .double, .long, .ulong => if (staticVar.isZero()) {
             const template =
                 \\  .bss
                 \\  .align 8
@@ -90,15 +100,28 @@ pub fn  emitStaticVar(allocator: Allocator, staticVar: Assembler.StaticVariable)
                 \\{s}:
                 \\  .quad {d}
             ;
-            code = if (staticVar.initial == .long)
-                try allocator.print(template, .{staticVar.name, staticVar.initial.long})
-            else
-                try allocator.print(template, .{staticVar.name, staticVar.initial.ulong});
+            code = switch (staticVar.initial) {
+                .double => try allocator.print(template, .{staticVar.name, staticVar.initial.double}),
+                .long => try allocator.print(template, .{staticVar.name, staticVar.initial.long}),
+                .ulong => try allocator.print(template, .{staticVar.name, staticVar.initial.ulong}),
+                else => unreachable,
+            };
         },
     }
     try instructions.append(allocator, code);
 
     return try instructions.toOwnedSlice(allocator);
+}
+
+fn emitStaticConstant(allocator: Allocator, staticConst: Assembler.StaticConstant) ![]const u8 {
+    const template =
+        \\  .section .rodata
+        \\  .align {d}
+        \\{s}{s}:
+        \\  .double {d}
+    ;
+
+    return allocator.print(template, .{staticConst.alignment, LOCAL_PREFIX, staticConst.name, staticConst.initial.double});
 }
 
 pub fn emitFunction(allocator: Allocator, function: Assembler.Function, symbols: StringHashMap(Assembler.Entry)) ![][]const u8 {
@@ -119,10 +142,6 @@ pub fn emitFunction(allocator: Allocator, function: Assembler.Function, symbols:
     ;
 
     const functionDefinition = try allocator.print(functionDefTemplate, .{function.name});
-    const labelPrefix = switch (builtin.os.tag) {
-        .linux => ".L_",
-        else => unreachable, // only running this on linux atm
-    };
 
     try instructions.append(allocator, functionDefinition);
 
@@ -130,22 +149,23 @@ pub fn emitFunction(allocator: Allocator, function: Assembler.Function, symbols:
         const code = code: switch (instruction) {
             .Binary => |binary| {
                 const template =
-                    \\  {s}{c}    {s}, {s}
+                    \\  {s}{s}    {s}, {s}
                 ;
                 const operator = switch (binary.operator) {
                     .Add => "add",
-                    .Sub => "sub",
-                    .Mul => "imul",
                     .AndB => "and",
+                    .Div => "div",
+                    .Mul => if (binary.type == .Double) "mul" else "imul",
                     .OrB => "or",
-                    .Xor => "xor",
                     .SAL => "sal",
                     .SAR => "sar",
                     .SHL => "shl",
                     .SHR => "shr",
+                    .Sub => "sub",
+                    .Xor => "xor",
                     else => unreachable,
                 };
-                const suffix = getSuffix(binary.type);
+                const suffix = if (binary.type == .Double) "ps" else getSuffix(binary.type);
                 const src = getOperandString(allocator, binary.src, binary.type);
                 const dst = getOperandString(allocator, binary.dst, binary.type);
 
@@ -171,20 +191,39 @@ pub fn emitFunction(allocator: Allocator, function: Assembler.Function, symbols:
                 break :code allocator.dupe(u8, template);
             },
             .Cmp => |cmp| {
-                const template =
-                    \\  cmp{c}    {s}, {s}
-                ;
                 const suffix = getSuffix(cmp.type);
                 const arg1 = getOperandString(allocator, cmp.arg1, cmp.type);
                 const arg2 = getOperandString(allocator, cmp.arg2, cmp.type);
+                const template: []const u8 = switch (cmp.type) {
+                    .Long, .Quad => break :code allocator.print("  cmp{s}    {s}, {s}", .{suffix, arg1, arg2}),
+                    .Double => break :code allocator.print("  comi{s}    {s}, {s}", .{suffix, arg1, arg2}),
+                };
 
                 break :code allocator.print(template, .{suffix, arg1, arg2});
             },
-            .Cvttsd2si => unreachable,
-            .Cvtsi2sd => unreachable,
+            .Cvtsi2sd => |cvt| {
+                const template =
+                    \\  cvtsi2sd{s} {s}, {s}
+                ;
+                const suffix = getSuffix(cvt.type);
+                const src = getOperandString(allocator, cvt.src, cvt.type);
+                const dst = getOperandString(allocator, cvt.dst, cvt.type);
+
+                break :code allocator.print(template, .{suffix, src, dst});
+            },
+            .Cvttsd2si => |cvt| {
+                const template =
+                    \\  cvttsd2si{s} {s}, {s}
+                ;
+                const suffix = getSuffix(cvt.type);
+                const src = getOperandString(allocator, cvt.src, cvt.type);
+                const dst = getOperandString(allocator, cvt.dst, cvt.type);
+
+                break :code allocator.print(template, .{suffix, src, dst});
+            },
             .Div => |div| {
                 const template =
-                    \\  div{c}   {s}
+                    \\  div{s}   {s}
                 ;
                 const suffix = getSuffix(div.type);
                 const operand = getOperandString(allocator, div.operand, div.type);
@@ -193,7 +232,7 @@ pub fn emitFunction(allocator: Allocator, function: Assembler.Function, symbols:
             },
             .Idiv => |idiv| {
                 const template =
-                    \\  idiv{c}   {s}
+                    \\  idiv{s}   {s}
                 ;
                 const suffix = getSuffix(idiv.type);
                 const operand = getOperandString(allocator, idiv.operand, idiv.type);
@@ -205,7 +244,7 @@ pub fn emitFunction(allocator: Allocator, function: Assembler.Function, symbols:
                     \\  jmp    {s}{s}
                 ;
 
-                break :code allocator.print(template, .{labelPrefix, jmp.target});
+                break :code allocator.print(template, .{LOCAL_PREFIX, jmp.target});
             },
             .JmpCC => |jmp| {
                 const template =
@@ -213,17 +252,17 @@ pub fn emitFunction(allocator: Allocator, function: Assembler.Function, symbols:
                 ;
                 const condCode = @tagName(jmp.condition); // will only be 'e' or 'ne';
 
-                break :code allocator.print(template, .{condCode, labelPrefix, jmp.target});
+                break :code allocator.print(template, .{condCode, LOCAL_PREFIX, jmp.target});
             },
             .Label => |label| {
                 const template =
                     \\{s}{s}:
                 ;
-                break :code allocator.print(template, .{labelPrefix, label.id});
+                break :code allocator.print(template, .{LOCAL_PREFIX, label.id});
             },
             .Mov => |mov| {
                 const template =
-                    \\  mov{c}    {s}, {s}
+                    \\  mov{s}    {s}, {s}
                 ;
                 const suffix = getSuffix(mov.type);
                 const src = getOperandString(allocator, mov.src, mov.type);
@@ -271,7 +310,7 @@ pub fn emitFunction(allocator: Allocator, function: Assembler.Function, symbols:
             },
             .Unary => |unary| {
                 const template =
-                    \\  {s}{c}    {s}
+                    \\  {s}{s}    {s}
                 ;
                 const operator = switch (unary.operator) {
                     .Complement => "not",
@@ -292,11 +331,11 @@ pub fn emitFunction(allocator: Allocator, function: Assembler.Function, symbols:
     return try instructions.toOwnedSlice(allocator);
 }
 
-fn getSuffix(t: Assembler.Type) u8 {
+fn getSuffix(t: Assembler.Type) []const u8 {
     return switch (t) {
-        .Double => unreachable,
-        .Long => 'l',
-        .Quad => 'q',
+        .Double => "sd",
+        .Long => "l",
+        .Quad => "q",
     };
 }
 
@@ -305,7 +344,7 @@ fn getOperandString(allocator: Allocator, operand: Assembler.Operand, t: Assembl
         .Imm => |op| allocator.print("{c}{d}", .{'$', op}),
         .Reg => |op| getRegisterName(allocator, op, t),
         .Stack => |op| allocator.print("{d}(%rbp)", .{op}),
-        .Data => |op| allocator.print("{s}(%rip)", .{op}),
+        .Data => |op| allocator.print("{s}{s}(%rip)", .{LOCAL_PREFIX, op}),
         .Pseudo => unreachable,
     } catch allocError();
 }
@@ -314,16 +353,16 @@ fn getRegisterName(allocator: Allocator, reg: Assembler.Reg, t: Assembler.Type) 
     switch(reg) {
         .ax, .cx, .dx, .di, .si => {
             return switch (t) {
-                .Double =>  unreachable,
                 .Long => allocator.print("%e{s}", .{@tagName(reg)}),
                 .Quad => allocator.print("%r{s}", .{@tagName(reg)}),
+                .Double =>  unreachable,
             } catch allocError();
         },
         .r8, .r9, .r10, .r11 => {
             return switch (t) {
-                .Double =>  unreachable,
                 .Long => allocator.print("%{s}d", .{@tagName(reg)}),
                 .Quad => allocator.print("%{s}", .{@tagName(reg)}),
+                .Double =>  unreachable,
             } catch allocError();
         },
         .cl => return allocator.print("%{s}", .{@tagName(reg)}) catch allocError(),

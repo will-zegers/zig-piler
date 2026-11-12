@@ -161,13 +161,13 @@ fn initStack(
     for (params) |param| {
         const name = param.unique.?;
         const t: Type = .fromVar(symbols, name);
-        if (t == .Double and doubleIdx < ARG_FP_REGISTERS.len) {
+        if (doubleIdx < ARG_FP_REGISTERS.len and t == .Double) {
             const src: Operand = .{ .Reg = ARG_FP_REGISTERS[doubleIdx] };
             const dst: Operand = .{ .Pseudo = name };
 
             doubleIdx += 1;
             try instructions.append(allocator, .{ .Mov = .{ .type = t, .src = src, .dst = dst } });
-        } else if (intIdx < ARG_INT_REGISTERS.len) {
+        } else if (intIdx < ARG_INT_REGISTERS.len and t == .Long or t == .Quad) {
             const src: Operand = .{ .Reg = ARG_INT_REGISTERS[intIdx] };
             const dst: Operand = .{ .Pseudo = name };
 
