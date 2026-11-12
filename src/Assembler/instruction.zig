@@ -210,7 +210,7 @@ pub const Binary = struct {
                 };
                 break :blk allocator.dupe(Instruction, &.{
                     .{ .Cmp = .{ .type = t, .arg1 = src2, .arg2 = src1 } },
-                    .{ .Mov = .{ .type = t, .src = .{ .Imm = 0 }, .dst = dst } },
+                    .{ .Mov = .{ .type = .Long, .src = .{ .Imm = 0 }, .dst = dst } },
                     .{ .SetCC = .{ .condition = cCode, .operand = dst } },
                 });
             },
@@ -250,8 +250,8 @@ pub const Cvtsi2sd = struct {
         switch (t) {
             .Long => {
                 return allocator.dupe(Instruction, &.{
-                    .{ .Movsx = .{ .type = .Long, .src = src, .dst = .{ .Reg = .ax } } },
-                    .{ .Cvtsi2sd = .{ .type = .Quad, .src = .{ .Reg = .ax }, .dst = dst } },
+                    .{ .Movsx = .{ .type = t, .src = src, .dst = .{ .Reg = .ax } } },
+                    .{ .Cvtsi2sd = .{ .type = t, .src = .{ .Reg = .ax }, .dst = dst } },
                 }) catch allocError();
             },
             .Quad => {
@@ -260,14 +260,14 @@ pub const Cvtsi2sd = struct {
                 counter += 1;
 
                 return allocator.dupe(Instruction, &.{
-                    .{ .Cmp = .{ .type = .Quad, .arg1 = .{ .Imm = 0 }, .arg2 = src } },
+                    .{ .Cmp = .{ .type = t, .arg1 = .{ .Imm = 0 }, .arg2 = src } },
                     .{ .JmpCC = .{ .condition = .l, .target = outOfRangeLabel } },
-                    .{ .Cvtsi2sd = .{ .type = .Quad, .src = src, .dst = dst } },
+                    .{ .Cvtsi2sd = .{ .type = t, .src = src, .dst = dst } },
                     .{ .Jmp = .{ .target = endLabel } },
                     .{ .Label = .{ .id = outOfRangeLabel } },
-                    .{ .Mov = .{ .type = .Quad, .src = src, .dst = .{ .Reg = .ax } } },
-                    .{ .Binary = .{ .type = .Quad, .operator = .SHR, .src = .{ .Reg = .ax }, .dst = .{ .Reg = .ax } } },
-                    .{ .Cvtsi2sd = .{ .type = .Quad, .src = .{ .Reg = .ax }, .dst = dst } },
+                    .{ .Mov = .{ .type = t, .src = src, .dst = .{ .Reg = .ax } } },
+                    .{ .Binary = .{ .type = t, .operator = .SHR, .src = .{ .Reg = .ax }, .dst = .{ .Reg = .ax } } },
+                    .{ .Cvtsi2sd = .{ .type = t, .src = .{ .Reg = .ax }, .dst = dst } },
                     .{ .Binary = .{ .type = .Double, .operator = .Add, .src = dst, .dst = dst } },
                     .{ .Label = .{ .id = endLabel } },
                 }) catch allocError();
@@ -298,8 +298,8 @@ pub const Cvttsd2si = struct {
         switch (t) {
             .Long => {
                 return allocator.dupe(Instruction, &.{
-                    .{ .Cvttsd2si = .{ .type = .Quad, .src = src, .dst = .{ .Reg = .ax } } },
-                    .{ .Mov = .{ .type = .Long, .src = .{ .Reg = .ax }, .dst = dst } },
+                    .{ .Cvttsd2si = .{ .type = t, .src = src, .dst = .{ .Reg = .ax } } },
+                    .{ .Mov = .{ .type = t, .src = .{ .Reg = .ax }, .dst = dst } },
                 }) catch allocError();
             },
             .Quad => {
@@ -317,14 +317,14 @@ pub const Cvttsd2si = struct {
                 return allocator.dupe(Instruction, &.{
                     .{ .Cmp = .{ .type = .Double, .arg1 = .{ .Data = "UPPER_BOUND" }, .arg2 = src } },
                     .{ .JmpCC = .{ .condition = .ae, .target = outOfRangeLabel } },
-                    .{ .Cvttsd2si = .{ .type = .Quad, .src = src, .dst = dst } },
+                    .{ .Cvttsd2si = .{ .type = t, .src = src, .dst = dst } },
                     .{ .Jmp = .{ .target = endLabel } },
                     .{ .Label = .{ .id = outOfRangeLabel } },
                     .{ .Mov = .{ .type = .Double, .src = src, .dst = .{ .Reg = .xmm1 } } },
                     .{ .Binary = .{ .type = .Double, .operator = .Sub, .src = .{ .Data = "UPPER_BOUND" }, .dst = .{ .Reg = .xmm1 } } },
-                    .{ .Cvttsd2si = .{ .type = .Quad, .src = .{ .Reg = .xmm1 }, .dst = dst } },
-                    .{ .Mov = .{ .type = .Quad, .src = .{ .Imm = UPPER_BOUND_Q }, .dst = .{ .Reg = .dx } } },
-                    .{ .Binary = .{ .type = .Quad, .operator = .Add, .src = .{ .Reg = .dx }, .dst = .{ .Reg = .ax } } },
+                    .{ .Cvttsd2si = .{ .type = t, .src = .{ .Reg = .xmm1 }, .dst = dst } },
+                    .{ .Mov = .{ .type = t, .src = .{ .Imm = UPPER_BOUND_Q }, .dst = .{ .Reg = .dx } } },
+                    .{ .Binary = .{ .type = t, .operator = .Add, .src = .{ .Reg = .dx }, .dst = .{ .Reg = .ax } } },
                     .{ .Label = .{ .id = endLabel } },
                 }) catch allocError();
             },
@@ -470,11 +470,23 @@ pub const Unary = struct {
 
         switch (unary.operator) {
             .Not => {
-                return allocator.dupe(Instruction, &.{
-                    .{ .Cmp = .{ .type = t, .arg1 = .{ .Imm = 0 }, .arg2 = src } },
-                    .{ .Mov = .{ .type = .Long, .src = .{ .Imm = 0 }, .dst = dst } },
-                    .{ .SetCC = .{ .condition = .e, .operand = dst } },
-                }) catch allocError();
+                switch (t) {
+                    .Double => {
+                        return allocator.dupe(Instruction, &.{
+                            .{ .Binary = .{ .type = .Double, .operator = .Xor, .src = .{ .Reg = .xmm0 }, .dst = .{ .Reg = .xmm0 } } },
+                            .{ .Cmp = .{ .type = t, .arg1 = .{ .Reg = .xmm0 }, .arg2 = src } },
+                            .{ .Mov = .{ .type = .Long, .src = .{ .Imm = 0 }, .dst = dst } },
+                            .{ .SetCC = .{ .condition = .e, .operand = dst } },
+                        }) catch allocError();
+                    },
+                    .Long, .Quad => {
+                        return allocator.dupe(Instruction, &.{
+                            .{ .Cmp = .{ .type = t, .arg1 = .{ .Imm = 0 }, .arg2 = src } },
+                            .{ .Mov = .{ .type = .Long, .src = .{ .Imm = 0 }, .dst = dst } },
+                            .{ .SetCC = .{ .condition = .e, .operand = dst } },
+                        }) catch allocError();
+                    }
+                }
             },
             .Dec, .Inc => {
                 return allocator.dupe(Instruction, &.{
@@ -534,7 +546,7 @@ pub const Operand = union(OperandTag) {
         // to preserve it's unique value but make it hashable
         const key: u64 = @bitCast(constant.double);
         if (!staticConsts.contains(key)) {
-            const name = allocator.print(".const{d}", .{staticConsts.count()}) catch allocError();
+            const name = allocator.print("C{d}", .{staticConsts.count()}) catch allocError();
             const staticConst: StaticConstant = .{
                 .type = .Double,
                 .name = name,
@@ -731,7 +743,11 @@ fn funCallToAssembly(allocator: Allocator, symbols: Symbol.Table, staticConsts: 
 
     const dst = funCall.dst.Var;
     const t: Type = .fromVar(symbols, dst);
-    try assembly.append(allocator, .{ .Mov = .{ .type = t, .src = .{ .Reg = .ax }, .dst = .{ .Pseudo = dst } } });
+    const src: Operand = switch (t) {
+        .Double => .{ .Reg = .xmm0 },
+        .Long, .Quad => .{ .Reg = .ax },
+    };
+    try assembly.append(allocator, .{ .Mov = .{ .type = t, .src = src, .dst = .{ .Pseudo = dst } } });
 
 
     return try assembly.toOwnedSlice(allocator);

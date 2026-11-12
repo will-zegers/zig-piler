@@ -58,8 +58,8 @@ pub fn patchInstructions(allocator: Allocator, unpatched: []Instruction) []Instr
                     .{ .Mov = .{ .type = .Double, .src = .{ .Reg = .xmm15 }, .dst = instr.Cvtsi2sd.dst } },
                 },
                 .Ill_Cvttsd2si_Operands => &.{
-                    .{ .Mov = .{ .type = t, .src = instr.Cvttsd2si.dst, .dst = .{ .Reg = .r11 } } },
-                    .{ .Cvttsd2si = .{ .type = t, .src = .{ .Reg = .r11 }, .dst = instr.Cvttsd2si.dst } },
+                    .{ .Cvttsd2si = .{ .type = t, .src = instr.Cvttsd2si.src, .dst = .{ .Reg = .r11 } } },
+                    .{ .Mov = .{ .type = t, .src = .{ .Reg = .r11 }, .dst = instr.Cvttsd2si.dst } },
                 },
                 // Operand (i.e. the divisor) of idiv must not be an immediate value
                 .Ill_Div_Operand => &.{
@@ -184,7 +184,7 @@ fn isIllegalBinaryOperands(bin: Binary) bool {
 
 fn isIllegalBinaryDouble(bin: Binary) bool {
     switch (bin.operator) {
-        .Add, .Div, .Mul, .Sub => {
+        .Add, .Div, .Mul, .Sub, .Xor => {
             return bin.type == .Double and bin.dst != .Reg;
         },
         else => return false,

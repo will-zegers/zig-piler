@@ -201,6 +201,14 @@ fn convertPseudoToMemory(
                 try replaceIfPseudo(symbols, pseudoMap, &localStack, &cmp.arg1);
                 try replaceIfPseudo(symbols, pseudoMap, &localStack, &cmp.arg2);
             },
+            .Cvtsi2sd => |*cvt| {
+                try replaceIfPseudo(symbols, pseudoMap, &localStack, &cvt.src);
+                try replaceIfPseudo(symbols, pseudoMap, &localStack, &cvt.dst);
+            },
+            .Cvttsd2si => |*cvt| {
+                try replaceIfPseudo(symbols, pseudoMap, &localStack, &cvt.src);
+                try replaceIfPseudo(symbols, pseudoMap, &localStack, &cvt.dst);
+            },
             .Div => |*div| {
                 try replaceIfPseudo(symbols, pseudoMap, &localStack, &div.operand);
             },

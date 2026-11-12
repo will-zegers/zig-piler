@@ -328,10 +328,7 @@ fn getRegisterName(allocator: Allocator, reg: Assembler.Reg, t: Assembler.Type) 
         },
         .cl => return allocator.print("%{s}", .{@tagName(reg)}) catch allocError(),
         .sp => return allocator.print("%rsp", .{}) catch allocError(),
-        else => {
-            std.debug.print("{any}\n", .{reg});
-            unreachable;
-        }
+        else => return allocator.print("%{s}", .{@tagName(reg)}) catch allocError(),
     }
 }
 
