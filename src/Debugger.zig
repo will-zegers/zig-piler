@@ -451,12 +451,12 @@ fn printAssemblerFunction(instr: Assembler.Instruction) void {
         .Cmp => |cmp| {
             print("arg1: {any}, arg2: {any}", .{ cmp.arg1, cmp.arg2 });
         },
-        .Cttsd2si => |ctt| {
+        .Cvttsd2si => |ctt| {
             printType(ctt.type);
             printOperand("src: ", ctt.src, ", ");
             printOperand("dst: ", ctt.dst, null);
         },
-        .Cttsi2sd => |ctt| {
+        .Cvtsi2sd => |ctt| {
             printType(ctt.type);
             printOperand("src: ", ctt.src, ", ");
             printOperand("dst: ", ctt.dst, null);

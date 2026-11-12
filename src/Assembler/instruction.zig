@@ -12,6 +12,8 @@ const Symbol = @import("../Semantic.zig").Symbol;
 
 pub const InstructionList = ArrayList(Instruction);
 
+var counter: usize = 0;
+
 pub const ARG_INT_REGISTERS = [_]Reg{ .di, .si, .dx, .cx, .r8, .r9 };
 pub const ARG_FP_REGISTERS = [_]Reg{
     .mmx0, .mmx1, .mmx2, .mmx3,
@@ -65,58 +67,64 @@ pub const StaticConstant = struct {
         };
     }
 };
-const QUAD_UPPER_BOUND: f64 = 9223372036854775808.0;
-pub const UPPER_BOUND_STATIC: StaticConstant = .{
-    .name = "UPPER_BOUND",
-    .alignment = 8,
-    .initial = .{ .double = QUAD_UPPER_BOUND },
-};
+const UPPER_BOUND_Q: f64 = 9223372036854775808.0;
 
 const InstructionTag = enum {
-    // zig fmt: off
-    Unary, Binary,
+    Binary,
     Call,
     Cdq,
     Cmp,
-    Cttsd2si, Cttsi2sd,
-    Div, Idiv,
-    Jmp, JmpCC,
+    Cvtsi2sd,
+    Cvttsd2si,
+    Div,
+    Idiv,
+    Jmp,
+    JmpCC,
     Label,
-    Mov, Movsx, Movzx,
+    Mov,
+    Movsx,
+    Movzx,
     Push,
     Ret,
     SetCC,
+    Unary,
 };
 pub const Instruction = union(InstructionTag) {
-    Unary: Unary, Binary: Binary,
+    Binary: Binary,
     Call: Call,
     Cdq: Cdq,
     Cmp: Cmp,
-    Cttsd2si: Cttsd2si, Cttsi2sd: Cttsi2sd,
-    Div: Div, Idiv: Idiv,
-    Jmp: Jmp, JmpCC: JmpCC,
+    Cvtsi2sd: Cvtsi2sd,
+    Cvttsd2si: Cvttsd2si,
+    Div: Div,
+    Idiv: Idiv,
+    Jmp: Jmp,
+    JmpCC: JmpCC,
     Label: Label,
-    Mov: Mov, Movsx: Movsx, Movzx: Movzx,
+    Mov: Mov,
+    Movsx: Movsx,
+    Movzx: Movzx,
     Push: Push,
     Ret: Ret,
     SetCC: SetCC,
+    Unary: Unary,
 
     // TODO: see about making this 'toAssembly' funcation non-pub
     pub fn assemble(allocator: Allocator, symbols: Symbol.Table, staticConsts: *AutoHashMap(u64, StaticConstant), instruction: TAC.Instruction) []Instruction {
         return switch (instruction) {
             .Binary => Binary.toAssembly(allocator, symbols, staticConsts, instruction.Binary),
             .Copy => Mov.toAssembly(allocator, symbols, staticConsts, instruction.Copy),
-            .DoubleToInt => Cttsd2si.toAssemblySigned(allocator, symbols, staticConsts, instruction.DoubleToInt),
-            .DoubleToUInt => Cttsd2si.toAssemblyUnsigned(allocator, symbols, staticConsts, instruction.DoubleToUInt),
+            .DoubleToInt => Cvttsd2si.toAssemblySigned(allocator, symbols, staticConsts, instruction.DoubleToInt),
+            .DoubleToUInt => Cvttsd2si.toAssemblyUnsigned(allocator, symbols, staticConsts, instruction.DoubleToUInt),
             .FunCall => funCallToAssembly(allocator, symbols, staticConsts, instruction.FunCall) catch allocError(),
-            .IntToDouble => Cttsi2sd.toAssemblySigned(allocator, symbols, staticConsts, instruction.IntToDouble),
+            .IntToDouble => Cvtsi2sd.toAssemblySigned(allocator, symbols, staticConsts, instruction.IntToDouble),
             .Jump => Jmp.toAssembly(allocator, instruction.Jump),
             .JumpIfZero, .JumpIfNotZero => JmpCC.toAssembly(allocator, symbols, staticConsts, instruction),
             .Label => Label.toAssembly(allocator, instruction.Label),
             .Return => Ret.toAssembly(allocator, symbols, staticConsts, instruction.Return),
             .SignExtend => signExtend(allocator, symbols, staticConsts, instruction.SignExtend),
             .Truncate => truncate(allocator, staticConsts, instruction.Truncate),
-            .UIntToDouble => Cttsi2sd.toAssemblyUnsigned(allocator, symbols, staticConsts, instruction.UIntToDouble),
+            .UIntToDouble => Cvtsi2sd.toAssemblyUnsigned(allocator, symbols, staticConsts, instruction.UIntToDouble),
             .Unary => Unary.toAssembly(allocator, symbols, staticConsts, instruction.Unary),
             .ZeroExtend => zeroExtend(allocator, staticConsts, instruction.ZeroExtend),
         };
@@ -127,8 +135,8 @@ pub const Instruction = union(InstructionTag) {
             .Binary => self.Binary.type,
             .Cdq => self.Cdq.type,
             .Cmp => self.Cmp.type,
-            .Cttsd2si => self.Cttsd2si.type,
-            .Cttsi2sd => self.Cttsi2sd.type,
+            .Cvtsi2sd => self.Cvtsi2sd.type,
+            .Cvttsd2si => self.Cvttsd2si.type,
             .Div => self.Div.type,
             .Idiv => self.Idiv.type,
             .Mov => self.Mov.type,
@@ -154,41 +162,48 @@ pub const Binary = struct {
         const src1: Operand = .fromVal(allocator, staticConsts, binary.src1);
         const src2: Operand = .fromVal(allocator, staticConsts, binary.src2);
         const dst: Operand = .{ .Pseudo = binary.dst.Var };
-        std.debug.assert(assertTypes(symbols, src1, dst));
-        std.debug.assert(assertTypes(symbols, src2, dst));
+        std.debug.assert(checkTypes(symbols, src1, dst));
+        std.debug.assert(checkTypes(symbols, src2, dst));
 
         const signed = symbols.get(binary.dst.Var).?.type.signed();
         const t: Type = .fromVar(symbols, binary.dst.Var);
 
         return switch (binary.operator) {
             .Div, .Mod => blk: {
-                const result: Operand = switch (binary.operator) {
-                    .Div => .{ .Reg = .ax },
-                    .Mod => .{ .Reg = .dx },
-                    else => unreachable,
-                };
-                if (signed) { // sign-extend and issue idiv (signed) instruction
+                if (t == .Double) {
                     break :blk allocator.dupe(Instruction, &.{
-                        .{ .Mov = .{ .type = t, .src = src1, .dst = .{ .Reg = .ax } } },
-                        .{ .Cdq = .{ .type = t } },
-                        .{ .Idiv = .{ .type = t, .operand = src2 } },
-                        .{ .Mov = .{ .type = t, .src = result, .dst = dst } },
+                        .{ .Mov = .{ .type = t, .src = src1, .dst = dst } },
+                        .{ .Binary = .{ .type = t, .operator = binary.operator, .src = src2, .dst = dst } },
                     });
-                } else { // zero-extend and issue div (unsigned) instruction
-                    break :blk allocator.dupe(Instruction, &.{
-                        .{ .Mov = .{ .type = t, .src = src1, .dst = .{ .Reg = .ax } } },
-                        .{ .Mov = .{ .type = t, .src = .{ .Imm = 0 }, .dst = .{ .Reg = .dx } } },
-                        .{ .Div = .{ .type = t, .operand = src2 } },
-                        .{ .Mov = .{ .type = t, .src = result, .dst = dst } },
-                    });
+                } else {
+                    const result: Operand = switch (binary.operator) {
+                        .Div => .{ .Reg = .ax },
+                        .Mod => .{ .Reg = .dx },
+                        else => unreachable,
+                    };
+                    if (signed) { // sign-extend and issue idiv (signed) instruction
+                        break :blk allocator.dupe(Instruction, &.{
+                            .{ .Mov = .{ .type = t, .src = src1, .dst = .{ .Reg = .ax } } },
+                            .{ .Cdq = .{ .type = t } },
+                            .{ .Idiv = .{ .type = t, .operand = src2 } },
+                            .{ .Mov = .{ .type = t, .src = result, .dst = dst } },
+                        });
+                    } else { // zero-extend and issue div (unsigned) instruction
+                        break :blk allocator.dupe(Instruction, &.{
+                            .{ .Mov = .{ .type = t, .src = src1, .dst = .{ .Reg = .ax } } },
+                            .{ .Mov = .{ .type = t, .src = .{ .Imm = 0 }, .dst = .{ .Reg = .dx } } },
+                            .{ .Div = .{ .type = t, .operand = src2 } },
+                            .{ .Mov = .{ .type = t, .src = result, .dst = dst } },
+                        });
+                    }
                 }
             },
             .Eq, .Gt, .Gte, .Lt, .Lte, .Neq => |op| blk: {
                 const cCode: ConditionCode = switch (op) {
                     .Eq => .e,
-                    .Gt =>  if (signed) .g else .a,
+                    .Gt => if (signed) .g else .a,
                     .Gte => if (signed) .ge else .ae,
-                    .Lt =>  if (signed) .l else .b,
+                    .Lt => if (signed) .l else .b,
                     .Lte => if (signed) .le else .be,
                     .Neq => .ne,
                     else => unreachable,
@@ -214,7 +229,7 @@ pub const Cdq = struct { type: Type }; // nX:AX:= sign-extend of AX.
 
 pub const Cmp = struct { type: Type, arg1: Operand, arg2: Operand };
 
-pub const Cttsd2si = struct {
+pub const Cvttsd2si = struct {
     type: Type,
     src: Operand,
     dst: Operand,
@@ -224,7 +239,7 @@ pub const Cttsd2si = struct {
         const dst: Operand = .fromVal(allocator, staticConsts, d2i.dst);
         const t: Type = .fromVal(symbols, d2i.dst);
 
-        return allocator.dupe(Instruction, &.{.{ .Cttsd2si = .{ .type = t, .src = src, .dst = dst } }}) catch allocError();
+        return allocator.dupe(Instruction, &.{.{ .Cvttsd2si = .{ .type = t, .src = src, .dst = dst } }}) catch allocError();
     }
 
     fn toAssemblyUnsigned(allocator: Allocator, symbols: Symbol.Table, staticConsts: *AutoHashMap(u64, StaticConstant), d2u: TAC.DoubleToUInt) []Instruction {
@@ -232,24 +247,45 @@ pub const Cttsd2si = struct {
         const dst: Operand = .fromVal(allocator, staticConsts, d2u.dst);
         const t: Type = .fromVal(symbols, d2u.dst);
 
-        const assembly = switch (t) {
-            .Long => allocator.dupe(Instruction, &.{
-                .{ .Cttsd2si = .{ .type = .Quad, .src = src, .dst = .{ .Reg = .ax } } },
-                .{ .Mov = .{ .type = .Long, .src = .{ .Reg = .ax }, .dst = dst } },
-            }),
-            .Quad => allocator.dupe(Instruction, &.{
-                .{ .Cmp = .{ .type = .Double, .arg1 = .{ .Data = "UPPER_BOUND" }, .arg2 = src } },
-                .{ .JmpCC = .{ .condition = .ae, .target = "out_of_range" } },
-                .{ .Cttsd2si = .{ .type = .Quad, .src = .{ .Reg = .xmm0 }, .dst = .{ .Reg = .ax } } },
-            }),
-            else => unreachable,
-        } catch allocError();
+        switch (t) {
+            .Long => {
+                return allocator.dupe(Instruction, &.{
+                    .{ .Cvttsd2si = .{ .type = .Quad, .src = src, .dst = .{ .Reg = .ax } } },
+                    .{ .Mov = .{ .type = .Long, .src = .{ .Reg = .ax }, .dst = dst } },
+                }) catch allocError();
+            },
+            .Quad => {
+                const outOfRangeLabel = allocator.print("cttsd2si.out_of_range.{d}", .{counter}) catch allocError();
+                const endLabel = allocator.print("cttsd2si.end.{d}", .{counter}) catch allocError();
+                counter += 1;
 
-        return assembly;
+                staticConsts.put(@bitCast(UPPER_BOUND_Q), .{
+                    .type = .Double,
+                    .name = "UPPER_BOUND",
+                    .alignment = 8,
+                    .initial = .{ .double = UPPER_BOUND_Q },
+                }) catch allocError();
+
+                return allocator.dupe(Instruction, &.{
+                    .{ .Cmp = .{ .type = .Double, .arg1 = .{ .Data = "UPPER_BOUND" }, .arg2 = src } },
+                    .{ .JmpCC = .{ .condition = .ae, .target = outOfRangeLabel } },
+                    .{ .Cvttsd2si = .{ .type = .Quad, .src = src, .dst = dst } },
+                    .{ .Jmp = .{ .target = endLabel } },
+                    .{ .Label = .{ .id = outOfRangeLabel } },
+                    .{ .Mov = .{ .type = .Double, .src = src, .dst = .{ .Reg = .xmm1 } } },
+                    .{ .Binary = .{ .type = .Double, .operator = .Sub, .src = .{ .Data = "UPPER_BOUND" }, .dst = .{ .Reg = .xmm1 } } },
+                    .{ .Cvttsd2si = .{ .type = .Quad, .src = .{ .Reg = .xmm1 }, .dst = dst } },
+                    .{ .Mov = .{ .type = .Quad, .src = .{ .Imm = UPPER_BOUND_Q }, .dst = .{ .Reg = .dx } } },
+                    .{ .Binary = .{ .type = .Quad, .operator = .Add, .src = .{ .Reg = .dx }, .dst = .{ .Reg = .ax } } },
+                    .{ .Label = .{ .id = endLabel } },
+                }) catch allocError();
+            },
+            else => unreachable,
+        }
     }
 };
 
-pub const Cttsi2sd = struct {
+pub const Cvtsi2sd = struct {
     type: Type,
     src: Operand,
     dst: Operand,
@@ -259,7 +295,7 @@ pub const Cttsi2sd = struct {
         const dst: Operand = .fromVal(allocator, staticConsts, d2i.dst);
         const t: Type = .fromVal(symbols, d2i.src);
 
-        return allocator.dupe(Instruction, &.{.{ .Cttsi2sd = .{ .type = t, .src = src, .dst = dst } }}) catch allocError();
+        return allocator.dupe(Instruction, &.{.{ .Cvtsi2sd = .{ .type = t, .src = src, .dst = dst } }}) catch allocError();
     }
 
     fn toAssemblyUnsigned(allocator: Allocator, symbols: Symbol.Table, staticConsts: *AutoHashMap(u64, StaticConstant), d2i: TAC.UIntToDouble) []Instruction {
@@ -267,19 +303,33 @@ pub const Cttsi2sd = struct {
         const dst: Operand = .fromVal(allocator, staticConsts, d2i.dst);
         const t: Type = .fromVal(symbols, d2i.src);
 
-        const assembly = switch (t) {
-            .Long => allocator.dupe(Instruction, &.{
-                .{ .Mov = .{ .type = .Long, .src = src, .dst = .{ .Reg = .ax } } },
-                .{ .Cttsi2sd = .{ .type = .Quad, .src = .{ .Reg = .ax }, .dst = dst } },
-            }),
-            .Quad => allocator.dupe(Instruction, &.{
-                .{ .Mov = .{ .type = .Long, .src = src, .dst = .{ .Reg = .ax } } },
-                .{ .Cttsi2sd = .{ .type = .Quad, .src = .{ .Reg = .ax }, .dst = dst } },
-            }),
-            else => unreachable,
-        } catch allocError();
+        switch (t) {
+            .Long => {
+                return allocator.dupe(Instruction, &.{
+                    .{ .Movsx = .{ .type = .Long, .src = src, .dst = .{ .Reg = .ax } } },
+                    .{ .Cvtsi2sd = .{ .type = .Quad, .src = .{ .Reg = .ax }, .dst = dst } },
+                }) catch allocError();
+            },
+            .Quad => {
+                const outOfRangeLabel = allocator.print("cttsi2sd.out_of_range.{d}", .{counter}) catch allocError();
+                const endLabel = allocator.print("cttsi2sd.end.{d}", .{counter}) catch allocError();
+                counter += 1;
 
-        return assembly;
+                return allocator.dupe(Instruction, &.{
+                    .{ .Cmp = .{ .type = .Quad, .arg1 = .{ .Imm = 0 }, .arg2 = src } },
+                    .{ .JmpCC = .{ .condition = .l, .target = outOfRangeLabel } },
+                    .{ .Cvtsi2sd = .{ .type = .Quad, .src = src, .dst = dst } },
+                    .{ .Jmp = .{ .target = endLabel } },
+                    .{ .Label = .{ .id = outOfRangeLabel } },
+                    .{ .Mov = .{ .type = .Quad, .src = src, .dst = .{ .Reg = .ax } } },
+                    .{ .Binary = .{ .type = .Quad, .operator = .SHR, .src = .{ .Reg = .ax }, .dst = .{ .Reg = .ax } } },
+                    .{ .Cvtsi2sd = .{ .type = .Quad, .src = .{ .Reg = .ax }, .dst = dst } },
+                    .{ .Binary = .{ .type = .Double, .operator = .Add, .src = dst, .dst = dst } },
+                    .{ .Label = .{ .id = endLabel } },
+                }) catch allocError();
+            },
+            else => unreachable,
+        }
     }
 };
 
@@ -302,26 +352,40 @@ pub const JmpCC = struct {
     target: []const u8,
 
     pub fn toAssembly(allocator: Allocator, symbols: Symbol.Table, staticConsts: *AutoHashMap(u64, StaticConstant), jmpInstr: TAC.Instruction) []Instruction {
-        return switch (jmpInstr) {
-            .JumpIfZero => |jz| blk: {
-                const arg2: Operand = .fromVal(allocator, staticConsts, jz.condition);
-                const t: Type = .fromVal(symbols, jz.condition);
-
-                break :blk allocator.dupe(Instruction, &.{
-                    .{ .Cmp = .{ .type = t, .arg1 = .{ .Imm = 0 }, .arg2 = arg2 } },
-                    .{ .JmpCC = .{ .condition = .e, .target = jz.target } },
-                }) catch allocError();
+        const arg2, const t, const condition, const target = switch (jmpInstr) {
+            .JumpIfZero => |jz| .{
+                Operand.fromVal(allocator, staticConsts, jz.condition),
+                Type.fromVal(symbols, jz.condition),
+                ConditionCode.e,
+                jz.target,
             },
-            .JumpIfNotZero => |jnz| blk: {
-                const arg2: Operand = .fromVal(allocator, staticConsts, jnz.condition);
-                const t: Type = .fromVal(symbols, jnz.condition);
-
-                break :blk allocator.dupe(Instruction, &.{
-                    .{ .Cmp = .{ .type = t, .arg1 = .{ .Imm = 0 }, .arg2 = arg2 } },
-                    .{ .JmpCC = .{ .condition = .ne, .target = jnz.target } },
-                }) catch allocError();
+            .JumpIfNotZero => |jnz| .{
+                Operand.fromVal(allocator, staticConsts, jnz.condition),
+                Type.fromVal(symbols, jnz.condition),
+                ConditionCode.ne,
+                jnz.target,
             },
             else => unreachable,
+        };
+
+        return allocator.dupe(Instruction, switch (t) {
+            .Double => &double(arg2, t, condition, target),
+            .Long, .Quad => &integer(arg2, t, condition, target),
+        }) catch allocError();
+    }
+
+    fn integer(arg2: Operand, t: Type, condition: ConditionCode, target: []const u8) [2]Instruction {
+        return .{
+            .{ .Cmp = .{ .type = t, .arg1 = .{ .Imm = 0 }, .arg2 = arg2 } },
+            .{ .JmpCC = .{ .condition = condition, .target = target } },
+        };
+    }
+
+    fn double(arg2: Operand, t: Type, condition: ConditionCode, target: []const u8) [3]Instruction {
+        return .{
+            .{ .Binary = .{ .type = t, .operator = .Xor, .src = .{ .Reg = .xmm0 }, .dst = .{ .Reg = .xmm0 } } },
+            .{ .Cmp = .{ .type = t, .arg1 = .{ .Reg = .xmm0 }, .arg2 = arg2 } },
+            .{ .JmpCC = .{ .condition = condition, .target = target } },
         };
     }
 };
@@ -347,7 +411,7 @@ pub const Mov = struct {
     }
 
     pub fn inferType(symbols: Symbol.Table, src: Operand, dst: Operand) Mov {
-        std.debug.assert(assertTypes(symbols, src, dst));
+        std.debug.assert(checkTypes(symbols, src, dst));
 
         var t = dst.getType(symbols);
         if (t == null) t = src.getType(symbols);
@@ -397,30 +461,42 @@ pub const Unary = struct {
 
     pub fn toAssembly(allocator: Allocator, symbols: Symbol.Table, staticConsts: *AutoHashMap(u64, StaticConstant), unary: TAC.Unary) []Instruction {
         const src: Operand = .fromVal(allocator, staticConsts, unary.src);
-        const srcType: Type = .fromVal(symbols, unary.src);
         const dst: Operand = .{ .Pseudo = unary.dst.Var };
-        const dstType: Type = switch (unary.operator) {
-            .Not => .Long, // 'not' always uses 4-byte operands
-            else => blk: {
-                std.debug.assert(assertTypes(symbols, src, dst));
-                break :blk .fromVal(symbols, unary.dst);
-            },
-        };
+        const t: Type = .fromVal(symbols, unary.src);
 
-        return allocator.dupe(Instruction, switch (unary.operator) {
-            .Not => &.{
-                .{ .Cmp = .{ .type = srcType, .arg1 = .{ .Imm = 0 }, .arg2 = src } },
-                .{ .Mov = .{ .type = dstType, .src = .{ .Imm = 0 }, .dst = dst } },
-                .{ .SetCC = .{ .condition = .e, .operand = dst } },
+        switch (unary.operator) {
+            .Not => {
+                return allocator.dupe(Instruction, &.{
+                    .{ .Cmp = .{ .type = t, .arg1 = .{ .Imm = 0 }, .arg2 = src } },
+                    .{ .Mov = .{ .type = .Long, .src = .{ .Imm = 0 }, .dst = dst } },
+                    .{ .SetCC = .{ .condition = .e, .operand = dst } },
+                }) catch allocError();
             },
-            .Negate, .Complement => &.{
-                .{ .Mov = .inferType(symbols, src, dst) },
-                .{ .Unary = .{ .type = dstType, .operator = unary.operator, .operand = dst } },
+            .Dec, .Inc => {
+                return allocator.dupe(Instruction, &.{
+                    .{ .Unary = .{ .type = t, .operator = unary.operator, .operand = src } },
+                }) catch allocError();
             },
-            .Dec, .Inc => &.{
-                .{ .Unary = .{ .type = srcType, .operator = unary.operator, .operand = src } },
+            .Negate, .Complement =>
+                if (t == .Double) {
+                    const key: f64 = -0.0;
+                    staticConsts.put(@bitCast(key), .{
+                        .type = .Double,
+                        .name = "notd",
+                        .alignment = 16,
+                        .initial = .{ .double = key },
+                    }) catch allocError();
+                    return allocator.dupe(Instruction, &.{
+                        .{ .Mov = .{ .type = t, .src = src, .dst = dst} },
+                        .{ .Binary = .{ .type = .Double, .operator = .Xor, .src = src, .dst = dst } },
+                    }) catch allocError();
+                } else {
+                    return allocator.dupe(Instruction, &.{
+                        .{ .Mov = .inferType(symbols, src, dst) },
+                        .{ .Unary = .{ .type = t, .operator = unary.operator, .operand = dst } },
+                    }) catch allocError();
             },
-        }) catch allocError();
+        }
     }
 };
 
@@ -537,13 +613,7 @@ pub const Type = enum {
     }
 };
 
-pub fn allocError() noreturn {
-    std.log.err("Memory allocation error", .{});
-    std.debug.dumpCurrentStackTrace(.{ .first_address = @returnAddress() });
-    std.process.exit(1);
-}
-
-fn assertTypes(symbols: Symbol.Table, op1: Operand, op2: Operand) bool {
+fn checkTypes(symbols: Symbol.Table, op1: Operand, op2: Operand) bool {
     const type1 = op1.getType(symbols);
     const type2 = op2.getType(symbols);
 
@@ -564,65 +634,21 @@ fn assertTypes(symbols: Symbol.Table, op1: Operand, op2: Operand) bool {
 }
 
 fn funCallToAssembly(allocator: Allocator, symbols: Symbol.Table, staticConsts: *AutoHashMap(u64, StaticConstant), funCall: TAC.FunCall) ![]Instruction {
+    var allocatedStack: usize = 0;
     var assembly: ArrayList(Instruction) = .empty;
 
-    // Define and check how much we need to allocate initially to the stack to make sure it's
-    // aligned to 16-bytes on function call, per Sys V ABI
-    var allocatedStack: usize = undefined;
-    if (funCall.args.len <= ARG_INT_REGISTERS.len) {
-        // No stack arguments, so no alignment needed
-        allocatedStack = 0;
-    } else {
-        // Check if we have an even or odd number of stack allocations. If odd, we'll need
-        // to allocate an additional 8-bytes to make sure the stack is 16-byte aligned
-        if ((funCall.args.len - ARG_INT_REGISTERS.len) % 2 == 0) {
-            allocatedStack = 0;
-        } else {
-            allocatedStack = QUADWORD_BYTES;
-            try assembly.append(allocator, .{ .Binary = .{
-                .type = .Quad,
-                .operator = .Sub,
-                .src = .{ .Imm = allocatedStack },
-                .dst = .{ .Reg = .sp },
-            } });
-        }
-    }
-
-    // This process in reverse of the Sys V ABI, pushing stack arguments (if any) first in their reverse
-    // order, and then register arguments (if any) (similar to GCC)
-    var i = funCall.args.len;
-    while (i > ARG_INT_REGISTERS.len) { // Push stack arguments (arguments 6 and on) first in reverse order
-        i -= 1;
-        const operand: Operand = blk: switch (funCall.args[i]) {
-            .Constant => .fromVal(allocator, staticConsts, funCall.args[i]),
-            .Var => |arg| {
-                switch (Type.fromVar(symbols, arg)) {
-                    .Double => break :blk .fromVal(allocator, staticConsts, funCall.args[i]), // TODO: fix later
-                    .Quad => break :blk .fromVal(allocator, staticConsts, funCall.args[i]),
-                    .Long => {
-                        // For long word vars, first move them into the lower bytes bytes of AX register,
-                        // then push rax (quadword register)
-                        try assembly.append(allocator, .{ .Mov = .inferType(symbols, .{ .Pseudo = arg }, .{ .Reg = .ax }) });
-                        break :blk .{ .Reg = .ax };
-                    },
-                }
-            },
-        };
-        try assembly.append(allocator, .{ .Push = .{ .operand = operand } });
-
+    const stackAlign = alignStack(funCall);
+    if (stackAlign) |a| {
+        try assembly.append(allocator, a);
         allocatedStack += QUADWORD_BYTES;
     }
-    while (i > 0) { // Move arguments in corresponding stack registers
-        i -= 1;
-        const arg = funCall.args[i];
-        try assembly.append(allocator, .{
-            .Mov = .{
-                .type = .fromVal(symbols, arg),
-                .src = .fromVal(allocator, staticConsts, arg),
-                .dst = .{ .Reg = ARG_INT_REGISTERS[i] },
-            },
-        });
-    }
+
+    const pushToStack = try pushStackArgs(allocator, symbols, staticConsts, funCall);
+    try assembly.appendSlice(allocator, pushToStack);
+    allocatedStack = pushToStack.len * QUADWORD_BYTES;
+
+    const moveToRegisters = try movRegisterArgs(allocator, symbols, staticConsts, funCall);
+    try assembly.appendSlice(allocator, moveToRegisters);
 
     try assembly.append(allocator, .{ .Call = .{ .identifier = funCall.name } });
 
@@ -637,14 +663,88 @@ fn funCallToAssembly(allocator: Allocator, symbols: Symbol.Table, staticConsts: 
         });
     }
 
-    switch (funCall.dst) {
-        .Var => |dst| {
-            try assembly.append(allocator, .{ .Mov = .inferType(symbols, .{ .Reg = .ax }, .{ .Pseudo = dst }) });
-        },
-        .Constant => unreachable,
-    }
+    const dst = funCall.dst.Var;
+    const t: Type = .fromVar(symbols, dst);
+    try assembly.append(allocator, .{ .Mov = .{ .type = t, .src = .{ .Reg = .ax }, .dst = .{ .Pseudo = dst } } });
+
 
     return try assembly.toOwnedSlice(allocator);
+}
+
+fn alignStack(funCall: TAC.FunCall) ?Instruction {
+    // Define and check how much we need to allocate initially to the stack to make sure it's
+    // aligned to 16-bytes on function call, per Sys V ABI
+    if (funCall.args.len > ARG_INT_REGISTERS.len) {
+        // Check if we have an even or odd number of stack allocations. If odd, we'll need
+        // to allocate an additional 8-bytes to make sure the stack is 16-byte aligned
+        if ((funCall.args.len - ARG_INT_REGISTERS.len) % 2 != 0) {
+            return .{ .Binary = .{
+                .type = .Quad,
+                .operator = .Sub,
+                .src = .{ .Imm = QUADWORD_BYTES },
+                .dst = .{ .Reg = .sp },
+            } };
+        }
+    }
+    return null;
+}
+
+fn pushStackArgs(
+    allocator: Allocator,
+    symbols: Symbol.Table,
+    staticConsts: *AutoHashMap(u64, StaticConstant),
+    funCall: TAC.FunCall
+) ![]Instruction {
+    var assembly: ArrayList(Instruction) = .empty;
+
+    // This process in reverse of the Sys V ABI, pushing stack arguments (if any) first in their reverse
+    // order, and then register arguments (if any) (similar to GCC)
+    var i = funCall.args.len;
+    while (i > ARG_INT_REGISTERS.len) { // Push stack arguments (arguments 6 and on) first in reverse order
+        i -= 1;
+        var operand: Operand = undefined;
+        switch (funCall.args[i]) {
+            .Constant => operand = .fromVal(allocator, staticConsts, funCall.args[i]),
+            .Var => |arg|
+                switch (Type.fromVar(symbols, arg)) {
+                    .Double, .Quad => operand = .fromVal(allocator, staticConsts, funCall.args[i]),
+                    .Long => {
+                        // For long word vars, first move them into the lower bytes bytes of AX register,
+                        // then push rax (quadword register)
+                        operand = .{ .Reg = .ax };
+                        try assembly.append(allocator,
+                            .{ .Mov = .{ .type = .Long, .src = .{ .Pseudo = arg }, .dst = operand } }
+                        );
+                },
+            },
+        }
+        try assembly.append(allocator, .{ .Push = .{ .operand = operand } });
+    }
+    return assembly.toOwnedSlice(allocator);
+}
+
+fn movRegisterArgs(
+    allocator: Allocator,
+    symbols: Symbol.Table,
+    staticConsts: *AutoHashMap(u64, StaticConstant),
+    funCall: TAC.FunCall
+) ![]Instruction {
+    var assembly: ArrayList(Instruction) = .empty;
+
+    var i = @min(ARG_INT_REGISTERS.len, funCall.args.len);
+    while (i > 0) { // Move arguments in corresponding stack registers
+        i -= 1;
+        const arg = funCall.args[i];
+        try assembly.append(allocator, .{
+            .Mov = .{
+                .type = .fromVal(symbols, arg),
+                .src = .fromVal(allocator, staticConsts, arg),
+                .dst = .{ .Reg = ARG_INT_REGISTERS[i] },
+            },
+        });
+    }
+
+    return assembly.toOwnedSlice(allocator);
 }
 
 fn signExtend(allocator: Allocator, symbols: Symbol.Table, staticConsts: *AutoHashMap(u64, StaticConstant), se: TAC.SignExtend) []Instruction {
@@ -676,4 +776,10 @@ fn zeroExtend(allocator: Allocator, staticConsts: *AutoHashMap(u64, StaticConsta
             .{ .Mov = .{ .type = .Quad, .src = .{ .Reg = .r11 }, .dst = dst } },
         }) catch allocError();
     }
+}
+
+pub fn allocError() noreturn {
+    std.log.err("Memory allocation error", .{});
+    std.debug.dumpCurrentStackTrace(.{ .first_address = @returnAddress() });
+    std.process.exit(1);
 }

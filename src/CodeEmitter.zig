@@ -180,8 +180,8 @@ pub fn emitFunction(allocator: Allocator, function: Assembler.Function, symbols:
 
                 break :code allocator.print(template, .{suffix, arg1, arg2});
             },
-            .Cttsd2si => unreachable,
-            .Cttsi2sd => unreachable,
+            .Cvttsd2si => unreachable,
+            .Cvtsi2sd => unreachable,
             .Div => |div| {
                 const template =
                     \\  div{c}   {s}

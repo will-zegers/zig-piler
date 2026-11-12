@@ -1,6 +1,7 @@
 // zig fmt: off
 const std = @import("std");
 const Allocator = std.mem.Allocator;
+const ArenaAllocator = std.heap.ArenaAllocator;
 const ArrayList = std.ArrayList;
 const AutoHashMap = std.AutoHashMap;
 const StringHashMap = std.StringHashMap;
@@ -39,22 +40,12 @@ pub const Entry = union(EntryTag) {
 };
 
 const Program = struct {
-    allocator: Allocator,
+    arena: ArenaAllocator,
     topLevel: []TopLevel,
     symbols: StringHashMap(Entry),
 
     pub fn deinit(self: *Assembly) void {
-        for (self.topLevel) |*topLevel| {
-            switch (topLevel.*) {
-                .Function => |*function| function.deinit(),
-                .StaticConstant => |sc| {
-                    self.allocator.free(sc.name);
-                },
-                .StaticVariable => {},
-            }
-        }
-        self.allocator.free(self.topLevel);
-        self.symbols.deinit();
+        self.arena.deinit();
     }
 };
 
@@ -63,10 +54,6 @@ pub const Function = struct {
     name: []const u8,
     global: bool,
     instructions: []Instruction,
-
-    pub fn deinit(self: *Function) void {
-        defer self.allocator.free(self.instructions);
-    }
 };
 
 const TopLevelTag = enum { Function, StaticConstant, StaticVariable };
@@ -77,20 +64,23 @@ const TopLevel = union(TopLevelTag) {
 };
 
 pub fn assemble(allocator: Allocator, frontendSymbols: Symbol.Table, tree: TAC.Program) Assembly {
-    var topLevelList: ArrayList(TopLevel) = .empty;
-    var backendSymbols: StringHashMap(Entry) = .init(allocator);
+    var arena: ArenaAllocator = .init(allocator);
+    const arenaAllocator = arena.allocator();
 
-    var staticConsts: AutoHashMap(u64, StaticConstant) = .init(allocator);
+    var topLevelList: ArrayList(TopLevel) = .empty;
+    var backendSymbols: StringHashMap(Entry) = .init(arenaAllocator);
+
+    var staticConsts: AutoHashMap(u64, StaticConstant) = .init(arenaAllocator);
     defer staticConsts.deinit();
 
     var staticVars: ArrayList(TopLevel) = .empty;
-    defer staticVars.deinit(allocator);
+    defer staticVars.deinit(arenaAllocator);
 
     for (tree.topLevel) |topLevel| {
         switch (topLevel) {
             .Function => |fun| {
-                const assembly = assembleFunction(allocator, frontendSymbols, &staticConsts, topLevel.Function);
-                topLevelList.append(allocator, .{ .Function = assembly }) catch allocError();
+                const assembly = assembleFunction(arenaAllocator, frontendSymbols, &staticConsts, topLevel.Function);
+                topLevelList.append(arenaAllocator, .{ .Function = assembly }) catch allocError();
 
                 // Function has been defined here, add an entry to the backend table
                 backendSymbols.put(fun.name, .{ .Fun = .{ .defined = true } }) catch allocError();
@@ -100,26 +90,26 @@ pub fn assemble(allocator: Allocator, frontendSymbols: Symbol.Table, tree: TAC.P
                 const entry = frontendSymbols.get(static.identifier).?;
                 const def: TopLevel =
                     .{ .StaticVariable = StaticVariable.init(entry.type, static) };
-                staticVars.append(allocator, def) catch allocError();
+                staticVars.append(arenaAllocator, def) catch allocError();
             },
         }
     }
 
     // After all the .text section (functions and their instruction), add all static variables at the end
     for (staticVars.items) |item| {
-        topLevelList.append(allocator, item) catch allocError();
+        topLevelList.append(arenaAllocator, item) catch allocError();
     }
 
     var valueIt = staticConsts.valueIterator();
     while (valueIt.next()) |value_ptr| {
-        topLevelList.append(allocator, .{ .StaticConstant = value_ptr.* }) catch allocError();
+        topLevelList.append(arenaAllocator, .{ .StaticConstant = value_ptr.* }) catch allocError();
     }
 
     populateBackendSymbols(&backendSymbols, frontendSymbols, staticConsts);
 
     return .{
-        .allocator = allocator,
-        .topLevel = topLevelList.toOwnedSlice(allocator) catch allocError(),
+        .arena = arena,
+        .topLevel = topLevelList.toOwnedSlice(arenaAllocator) catch allocError(),
         .symbols = backendSymbols,
     };
 }
