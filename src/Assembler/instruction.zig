@@ -229,6 +229,54 @@ pub const Cdq = struct { type: Type }; // nX:AX:= sign-extend of AX.
 
 pub const Cmp = struct { type: Type, arg1: Operand, arg2: Operand };
 
+pub const Cvtsi2sd = struct {
+    type: Type,
+    src: Operand,
+    dst: Operand,
+
+    fn toAssemblySigned(allocator: Allocator, symbols: Symbol.Table, staticConsts: *AutoHashMap(u64, StaticConstant), d2i: TAC.IntToDouble) []Instruction {
+        const src: Operand = .fromVal(allocator, staticConsts, d2i.src);
+        const dst: Operand = .fromVal(allocator, staticConsts, d2i.dst);
+        const t: Type = .fromVal(symbols, d2i.src);
+
+        return allocator.dupe(Instruction, &.{.{ .Cvtsi2sd = .{ .type = t, .src = src, .dst = dst } }}) catch allocError();
+    }
+
+    fn toAssemblyUnsigned(allocator: Allocator, symbols: Symbol.Table, staticConsts: *AutoHashMap(u64, StaticConstant), d2i: TAC.UIntToDouble) []Instruction {
+        const src: Operand = .fromVal(allocator, staticConsts, d2i.src);
+        const dst: Operand = .fromVal(allocator, staticConsts, d2i.dst);
+        const t: Type = .fromVal(symbols, d2i.src);
+
+        switch (t) {
+            .Long => {
+                return allocator.dupe(Instruction, &.{
+                    .{ .Movsx = .{ .type = .Long, .src = src, .dst = .{ .Reg = .ax } } },
+                    .{ .Cvtsi2sd = .{ .type = .Quad, .src = .{ .Reg = .ax }, .dst = dst } },
+                }) catch allocError();
+            },
+            .Quad => {
+                const outOfRangeLabel = allocator.print("cttsi2sd.out_of_range.{d}", .{counter}) catch allocError();
+                const endLabel = allocator.print("cttsi2sd.end.{d}", .{counter}) catch allocError();
+                counter += 1;
+
+                return allocator.dupe(Instruction, &.{
+                    .{ .Cmp = .{ .type = .Quad, .arg1 = .{ .Imm = 0 }, .arg2 = src } },
+                    .{ .JmpCC = .{ .condition = .l, .target = outOfRangeLabel } },
+                    .{ .Cvtsi2sd = .{ .type = .Quad, .src = src, .dst = dst } },
+                    .{ .Jmp = .{ .target = endLabel } },
+                    .{ .Label = .{ .id = outOfRangeLabel } },
+                    .{ .Mov = .{ .type = .Quad, .src = src, .dst = .{ .Reg = .ax } } },
+                    .{ .Binary = .{ .type = .Quad, .operator = .SHR, .src = .{ .Reg = .ax }, .dst = .{ .Reg = .ax } } },
+                    .{ .Cvtsi2sd = .{ .type = .Quad, .src = .{ .Reg = .ax }, .dst = dst } },
+                    .{ .Binary = .{ .type = .Double, .operator = .Add, .src = dst, .dst = dst } },
+                    .{ .Label = .{ .id = endLabel } },
+                }) catch allocError();
+            },
+            else => unreachable,
+        }
+    }
+};
+
 pub const Cvttsd2si = struct {
     type: Type,
     src: Operand,
@@ -277,54 +325,6 @@ pub const Cvttsd2si = struct {
                     .{ .Cvttsd2si = .{ .type = .Quad, .src = .{ .Reg = .xmm1 }, .dst = dst } },
                     .{ .Mov = .{ .type = .Quad, .src = .{ .Imm = UPPER_BOUND_Q }, .dst = .{ .Reg = .dx } } },
                     .{ .Binary = .{ .type = .Quad, .operator = .Add, .src = .{ .Reg = .dx }, .dst = .{ .Reg = .ax } } },
-                    .{ .Label = .{ .id = endLabel } },
-                }) catch allocError();
-            },
-            else => unreachable,
-        }
-    }
-};
-
-pub const Cvtsi2sd = struct {
-    type: Type,
-    src: Operand,
-    dst: Operand,
-
-    fn toAssemblySigned(allocator: Allocator, symbols: Symbol.Table, staticConsts: *AutoHashMap(u64, StaticConstant), d2i: TAC.IntToDouble) []Instruction {
-        const src: Operand = .fromVal(allocator, staticConsts, d2i.src);
-        const dst: Operand = .fromVal(allocator, staticConsts, d2i.dst);
-        const t: Type = .fromVal(symbols, d2i.src);
-
-        return allocator.dupe(Instruction, &.{.{ .Cvtsi2sd = .{ .type = t, .src = src, .dst = dst } }}) catch allocError();
-    }
-
-    fn toAssemblyUnsigned(allocator: Allocator, symbols: Symbol.Table, staticConsts: *AutoHashMap(u64, StaticConstant), d2i: TAC.UIntToDouble) []Instruction {
-        const src: Operand = .fromVal(allocator, staticConsts, d2i.src);
-        const dst: Operand = .fromVal(allocator, staticConsts, d2i.dst);
-        const t: Type = .fromVal(symbols, d2i.src);
-
-        switch (t) {
-            .Long => {
-                return allocator.dupe(Instruction, &.{
-                    .{ .Movsx = .{ .type = .Long, .src = src, .dst = .{ .Reg = .ax } } },
-                    .{ .Cvtsi2sd = .{ .type = .Quad, .src = .{ .Reg = .ax }, .dst = dst } },
-                }) catch allocError();
-            },
-            .Quad => {
-                const outOfRangeLabel = allocator.print("cttsi2sd.out_of_range.{d}", .{counter}) catch allocError();
-                const endLabel = allocator.print("cttsi2sd.end.{d}", .{counter}) catch allocError();
-                counter += 1;
-
-                return allocator.dupe(Instruction, &.{
-                    .{ .Cmp = .{ .type = .Quad, .arg1 = .{ .Imm = 0 }, .arg2 = src } },
-                    .{ .JmpCC = .{ .condition = .l, .target = outOfRangeLabel } },
-                    .{ .Cvtsi2sd = .{ .type = .Quad, .src = src, .dst = dst } },
-                    .{ .Jmp = .{ .target = endLabel } },
-                    .{ .Label = .{ .id = outOfRangeLabel } },
-                    .{ .Mov = .{ .type = .Quad, .src = src, .dst = .{ .Reg = .ax } } },
-                    .{ .Binary = .{ .type = .Quad, .operator = .SHR, .src = .{ .Reg = .ax }, .dst = .{ .Reg = .ax } } },
-                    .{ .Cvtsi2sd = .{ .type = .Quad, .src = .{ .Reg = .ax }, .dst = dst } },
-                    .{ .Binary = .{ .type = .Double, .operator = .Add, .src = dst, .dst = dst } },
                     .{ .Label = .{ .id = endLabel } },
                 }) catch allocError();
             },

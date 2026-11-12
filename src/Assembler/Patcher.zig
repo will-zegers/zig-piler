@@ -8,6 +8,8 @@ const instructions = @import("instruction.zig");
 const InstructionList = instructions.InstructionList;
 const Binary = instructions.Binary;
 const Cmp = instructions.Cmp;
+const Cvttsd2si = instructions.Cvttsd2si;
+const Cvtsi2sd = instructions.Cvtsi2sd;
 const Div = instructions.Div;
 const Idiv = instructions.Idiv;
 const Instruction = instructions.Instruction;
@@ -31,6 +33,11 @@ pub fn patchInstructions(allocator: Allocator, unpatched: []Instruction) []Instr
             patched.appendSlice(allocator, switch (illegal) {
                 // Binary operations must not have memory as both its source and destination, or
                 // an immediate operand that cannot be represented in 4-bytes.
+                .Ill_Binary_Double => &.{
+                    .{ .Mov = .{ .type = t, .src = instr.Binary.dst, .dst = .{ .Reg = .xmm15 } } },
+                    .{ .Binary = .{ .type = t, .operator = instr.Binary.operator, .src = instr.Binary.src, .dst = .{ .Reg = .xmm15 } } },
+                    .{ .Mov = .{ .type = t, .src = .{ .Reg = .xmm15 }, .dst = instr.Binary.dst } },
+                },
                 .Ill_Binary_Operands => &.{
                     .{ .Mov = .{ .type = t, .src = instr.Binary.src, .dst = .{ .Reg = .r10 } } },
                     .{ .Binary = .{ .type = t, .operator = instr.Binary.operator, .src = .{ .Reg = .r10 }, .dst = instr.Binary.dst } },
@@ -40,6 +47,19 @@ pub fn patchInstructions(allocator: Allocator, unpatched: []Instruction) []Instr
                     .{ .Mov = .{ .type = t, .src = instr.Cmp.arg1, .dst = .{ .Reg = .r10 } } },
                     .{ .Mov = .{ .type = t, .src = instr.Cmp.arg2, .dst = .{ .Reg = .r11 } } },
                     .{ .Cmp = .{ .type = t, .arg1 = .{ .Reg = .r10 }, .arg2 = .{ .Reg = .r11 } } },
+                },
+                .Ill_Cmp_Double => &.{
+                    .{ .Mov = .{ .type = t, .src = instr.Cmp.arg2, .dst = .{ .Reg = .xmm15 } } },
+                    .{ .Cmp = .{ .type = t, .arg1 = instr.Cmp.arg1, .arg2 = .{ .Reg = .xmm15 } } },
+                },
+                .Ill_Cvtsi2sd_Operands => &.{
+                    .{ .Mov = .{ .type = t, .src = instr.Cvtsi2sd.src, .dst = .{ .Reg = .r10 } } },
+                    .{ .Cvtsi2sd = .{ .type = t, .src = .{ .Reg = .r10 }, .dst = .{ .Reg = .xmm15 } } },
+                    .{ .Mov = .{ .type = .Double, .src = .{ .Reg = .xmm15 }, .dst = instr.Cvtsi2sd.dst } },
+                },
+                .Ill_Cvttsd2si_Operands => &.{
+                    .{ .Mov = .{ .type = t, .src = instr.Cvttsd2si.dst, .dst = .{ .Reg = .r11 } } },
+                    .{ .Cvttsd2si = .{ .type = t, .src = .{ .Reg = .r11 }, .dst = instr.Cvttsd2si.dst } },
                 },
                 // Operand (i.e. the divisor) of idiv must not be an immediate value
                 .Ill_Div_Operand => &.{
@@ -51,6 +71,10 @@ pub fn patchInstructions(allocator: Allocator, unpatched: []Instruction) []Instr
                     .{ .Idiv = .{ .type = t, .operand = .{ .Reg = .r10 } } },
                 },
                 // Mov may not have memory (i.e. stack or data) as both its source and destination
+                .Ill_Mov_Double => &.{
+                    .{ .Mov = .{ .type = t, .src = instr.Mov.src, .dst = .{ .Reg = .xmm14 } } },
+                    .{ .Mov = .{ .type = t, .src = .{ .Reg = .xmm14 }, .dst = instr.Mov.dst } },
+                },
                 .Ill_Mov_Operands => &.{
                     .{ .Mov = .{ .type = t, .src = instr.Mov.src, .dst = .{ .Reg = .r10 } } },
                     .{ .Mov = .{ .type = t, .src = .{ .Reg = .r10 }, .dst = instr.Mov.dst } },
@@ -96,10 +120,15 @@ pub fn patchInstructions(allocator: Allocator, unpatched: []Instruction) []Instr
 }
 
 const IllegalInstruction = enum {
+    Ill_Binary_Double,
     Ill_Binary_Operands,
     Ill_Cmp_Operands,
+    Ill_Cmp_Double,
+    Ill_Cvttsd2si_Operands,
+    Ill_Cvtsi2sd_Operands,
     Ill_Div_Operand,
     Ill_Idiv_Operand,
+    Ill_Mov_Double,
     Ill_Mov_Operands,
     Ill_Movsx_Operands,
     Ill_Mul_Operands,
@@ -110,16 +139,31 @@ const IllegalInstruction = enum {
 fn detectIllegal(instr: Instruction) ?IllegalInstruction {
     switch (instr) {
         .Binary => |bin| {
-            // Order is important here, since an illegal binary instruction is more
-            // general than an illegal mul. So specific cases should come first
-            if (isIllegalMul(bin)) return .Ill_Mul_Operands;
-            if (isIllegalShift(bin)) return .Ill_Shift_Rcx;
-            if (isIllegalBinaryOperands(bin)) return .Ill_Binary_Operands;
+            switch (bin.type) {
+                .Double => {
+                    if (isIllegalBinaryDouble(bin)) return .Ill_Binary_Double;
+                },
+                .Long, .Quad => {
+                    // Order is important here, since an illegal binary instruction is more
+                    // general than an illegal mul. So specific cases should come first
+                    if (isIllegalMul(bin)) return .Ill_Mul_Operands;
+                    if (isIllegalShift(bin)) return .Ill_Shift_Rcx;
+                    if (isIllegalBinaryOperands(bin)) return .Ill_Binary_Operands;
+                },
+            }
         },
-        .Cmp => |cmp| if (isIllegalCmp(cmp)) return .Ill_Cmp_Operands,
+        .Cmp => |cmp| {
+            if (isIllegalCmpDouble(cmp)) return .Ill_Cmp_Double;
+            if (isIllegalCmp(cmp)) return .Ill_Cmp_Operands;
+        },
+        .Cvtsi2sd => |cvt| if (isIllegalCvtsi2sd(cvt)) return .Ill_Cvtsi2sd_Operands,
+        .Cvttsd2si => |cvt| if (isIllegalCvttsd2si(cvt)) return .Ill_Cvttsd2si_Operands,
         .Div => |div| if (isIllegalDiv(div)) return .Ill_Div_Operand,
         .Idiv => |idiv| if (isIllegalIdiv(idiv)) return .Ill_Idiv_Operand,
-        .Mov => |mov| if (isIllegalMove(mov)) return .Ill_Mov_Operands,
+        .Mov => |mov| {
+            if (isIllegalMoveDouble(mov)) return .Ill_Mov_Double;
+            if (isIllegalMove(mov)) return .Ill_Mov_Operands;
+        },
         .Movsx => |movsx| if (isIllegalMovsxOperands(movsx)) return .Ill_Movsx_Operands,
         .Push => |push| if (isIllegalPushImmQuad(push)) return .Ill_Push_Imm_Quad,
         else => return null,
@@ -138,6 +182,15 @@ fn isIllegalBinaryOperands(bin: Binary) bool {
     return isIllegalBinaryQuadword(bin) or (isMemoryAddress(bin.src) and isMemoryAddress(bin.dst));
 }
 
+fn isIllegalBinaryDouble(bin: Binary) bool {
+    switch (bin.operator) {
+        .Add, .Div, .Mul, .Sub => {
+            return bin.type == .Double and bin.dst != .Reg;
+        },
+        else => return false,
+    }
+}
+
 // Binary instructions cannot handle immediate values that won't fit into 4 bytes
 fn isIllegalBinaryQuadword(bin: Binary) bool {
     if (bin.type != .Quad) return false;
@@ -152,7 +205,7 @@ fn isIllegalBinaryQuadword(bin: Binary) bool {
 }
 
 fn isIllegalCmp(cmp: Cmp) bool {
-    return isIllegalCmpImmDst(cmp) or isIllegalCmpOperands(cmp);
+    return cmp.type != .Double and isIllegalCmpImmDst(cmp) or isIllegalCmpOperands(cmp);
 }
 
 // The second operand of a 'cmp' instruction must not be a constant (i.e. immediate value)
@@ -166,6 +219,10 @@ fn isIllegalCmpOperands(cmp: Cmp) bool {
         (cmp.arg1 == .Imm and cmp.arg1.Imm > math.maxInt(i32));
 }
 
+fn isIllegalCmpDouble(cmp: Cmp) bool {
+    return cmp.type == .Double and cmp.arg2 != .Reg;
+}
+
 // Operand of div-type instructions must not be an immediate value
 fn isIllegalDiv(div: Div) bool {
     return div.operand == .Imm;
@@ -176,6 +233,10 @@ fn isIllegalIdiv(idiv: Idiv) bool {
 
 fn isIllegalMove(mov: Mov) bool {
     return isIllegalMoveMemory(mov) or isIllegalMoveQuadImm(mov);
+}
+
+fn isIllegalMoveDouble(mov: Mov) bool {
+    return mov.type == .Double and isIllegalMoveMemory(mov);
 }
 
 // Mov cannot move an 8-byte immediate into memory
@@ -218,6 +279,14 @@ fn isIllegalShift(bin: Binary) bool {
         .SAL, .SAR, .SHL, .SHR => isMemoryAddress(bin.dst),
         else => false,
     };
+}
+
+fn isIllegalCvtsi2sd(cvt: Cvtsi2sd) bool {
+    return cvt.src == .Imm or isMemoryAddress(cvt.dst);
+}
+
+fn isIllegalCvttsd2si(cvt: Cvttsd2si) bool {
+    return isMemoryAddress(cvt.dst);
 }
 
 pub fn allocError() noreturn {
