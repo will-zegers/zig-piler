@@ -216,7 +216,7 @@ pub const Binary = struct {
             },
             .AndL, .OrL => unreachable, // logical AND and OR have no binary instruction, already handled in TACky
             else => allocator.dupe(Instruction, &.{
-                .{ .Mov = .inferType(symbols, src1, dst) },
+                .{ .Mov = .{ .type = t, .src = src1, .dst = dst } },
                 .{ .Binary = .{ .type = t, .operator = binary.operator, .src = src2, .dst = dst } },
             }),
         } catch allocError();

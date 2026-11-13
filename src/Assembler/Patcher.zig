@@ -273,12 +273,17 @@ fn isIllegalPushImmQuad(push: Push) bool {
     return push.operand == .Imm and push.operand.Imm > math.maxInt(i32);
 }
 
-// Shift instructions must not have the destination as a memory address (i.e. stack)
+// Shift instructions have a few constraints; mainly, they an have memory
+// address as the dst, the valid src register is the lower bytes of cx
 fn isIllegalShift(bin: Binary) bool {
-    return switch (bin.operator) {
-        .SAL, .SAR, .SHL, .SHR => isMemoryAddress(bin.dst),
-        else => false,
-    };
+    switch (bin.operator) {
+        .SAL, .SAR, .SHL, .SHR => {
+            if (isMemoryAddress(bin.dst)) return true;
+            if (bin.src == .Reg and bin.src.Reg != .cl) return true;
+        },
+        else => {},
+    }
+    return false;
 }
 
 fn isIllegalCvtsi2sd(cvt: Cvtsi2sd) bool {
