@@ -43,8 +43,10 @@ pub const Entry = union(EntryTag) {
 
 const Program = struct {
     arena: ArenaAllocator,
-    topLevel: []TopLevel,
+    topLevel: []Function,
     symbols: StringHashMap(Entry),
+    staticVars: StringHashMap(StaticVariable),
+    staticConsts: StringHashMap(StaticConstant),
 
     pub fn deinit(self: *Assembly) void {
         self.arena.deinit();
@@ -58,65 +60,54 @@ pub const Function = struct {
     instructions: []Instruction,
 };
 
-const TopLevelTag = enum { Function, StaticConstant, StaticVariable };
-const TopLevel = union(TopLevelTag) {
-    Function: Function,
-    StaticConstant: StaticConstant,
-    StaticVariable: StaticVariable,
-};
-
 pub fn assemble(allocator: Allocator, frontendSymbols: Symbol.Table, tree: TAC.Program) Assembly {
     var arena: ArenaAllocator = .init(allocator);
     const arenaAllocator = arena.allocator();
 
-    var topLevelList: ArrayList(TopLevel) = .empty;
+    var topLevelList: ArrayList(Function) = .empty;
     var backendSymbols: StringHashMap(Entry) = .init(arenaAllocator);
 
-    var staticConsts: AutoHashMap(u64, StaticConstant) = .init(arenaAllocator);
-    defer staticConsts.deinit();
+    var staticConstsByValue: AutoHashMap(u64, StaticConstant) = .init(arenaAllocator);
+    defer staticConstsByValue.deinit();
 
-    var staticVars: ArrayList(TopLevel) = .empty;
-    defer staticVars.deinit(arenaAllocator);
+    var staticVars: StringHashMap(StaticVariable) = .init(arenaAllocator);
 
     for (tree.topLevel) |topLevel| {
         switch (topLevel) {
             .Function => |fun| {
-                const assembly = assembleFunction(arenaAllocator, frontendSymbols, &staticConsts, topLevel.Function);
-                topLevelList.append(arenaAllocator, .{ .Function = assembly }) catch allocError();
+                const assembly = assembleFunction(arenaAllocator, frontendSymbols, &staticConstsByValue, topLevel.Function);
+                topLevelList.append(arenaAllocator, assembly) catch allocError();
 
                 // Function has been defined here, add an entry to the backend table
                 backendSymbols.put(fun.name, .{ .Fun = .{ .defined = true } }) catch allocError();
             },
-            .StaticVariable => |static| {
+            .StaticVariable => |staticVar| {
                 // Static variables will be added to the end after .text. For now, just keep track of them
-                const entry = frontendSymbols.get(static.identifier).?;
-                const def: TopLevel =
-                    .{ .StaticVariable = StaticVariable.init(entry.type, static) };
-                staticVars.append(arenaAllocator, def) catch allocError();
+                const entry = frontendSymbols.get(staticVar.identifier).?;
+                staticVars.put(staticVar.identifier, .init(entry.type, staticVar)) catch allocError();
             },
         }
     }
 
-    // After all the .text section (functions and their instruction), add all static variables at the end
-    for (staticVars.items) |item| {
-        topLevelList.append(arenaAllocator, item) catch allocError();
-    }
+    var staticConstsByName: StringHashMap(StaticConstant) = .init(arenaAllocator);
 
-    var valueIt = staticConsts.valueIterator();
+    var valueIt = staticConstsByValue.valueIterator();
     while (valueIt.next()) |value_ptr| {
-        topLevelList.append(arenaAllocator, .{ .StaticConstant = value_ptr.* }) catch allocError();
+        staticConstsByName.put(value_ptr.*.name, value_ptr.*) catch allocError();
     }
 
-    populateBackendSymbols(&backendSymbols, frontendSymbols, staticConsts);
+    populateBackendSymbols(&backendSymbols, frontendSymbols, staticConstsByValue);
 
     return .{
         .arena = arena,
         .topLevel = topLevelList.toOwnedSlice(arenaAllocator) catch allocError(),
         .symbols = backendSymbols,
+        .staticVars = staticVars,
+        .staticConsts = staticConstsByName,
     };
 }
 
-pub fn assembleFunction(allocator: Allocator, symbols: Symbol.Table, staticConsts: *AutoHashMap(u64, StaticConstant), function: TAC.Function) Function {
+pub fn assembleFunction(allocator: Allocator, symbols: Symbol.Table, staticConstsByValue: *AutoHashMap(u64, StaticConstant), function: TAC.Function) Function {
     var instructionList: ArrayList(Instruction) = .empty;
 
     var pseudoMap = initStack(allocator, symbols, &instructionList, function.params) catch allocError();
@@ -124,7 +115,7 @@ pub fn assembleFunction(allocator: Allocator, symbols: Symbol.Table, staticConst
 
     // First pass to build Assembly AST
     for (function.body) |instr| {
-        const assembly = Instruction.assemble(allocator, symbols, staticConsts, instr);
+        const assembly = Instruction.assemble(allocator, symbols, staticConstsByValue, instr);
         defer allocator.free(assembly);
 
         instructionList.appendSlice(allocator, assembly) catch allocError();

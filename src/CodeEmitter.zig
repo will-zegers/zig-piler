@@ -12,6 +12,8 @@ const Assembler = @import("Assembler.zig");
 
 const CodeEmitter = @This();
 
+var LocalStatics: StringHashMap(Assembler.StaticConstant) = undefined;
+
 const UnitSize = enum {
     Long,
     Quad,
@@ -28,22 +30,27 @@ pub fn init(allocator: Allocator, ast: Assembler.Assembly) !CodeEmitter {
     var arena: ArenaAllocator = .init(allocator);
     const arenaAllocator = arena.allocator();
 
+    LocalStatics = ast.staticConsts;
     var instructions: ArrayList([]const u8) = .empty;
-    for (ast.topLevel) |topLevel| {
-        switch (topLevel) {
-            .Function => |function|{
-                const slice = try emitFunction(arenaAllocator, function, ast.symbols);
-                try instructions.appendSlice(arenaAllocator, slice);
-            },
-             .StaticVariable => |staticVar| {
-                const slice = try emitStaticVar(arenaAllocator, staticVar);
-                try instructions.appendSlice(arenaAllocator, slice);
-             },
-            .StaticConstant => |staticConst| {
-                const static = try emitStaticConstant(arenaAllocator, staticConst);
-                try instructions.append(arenaAllocator, static);
-            }
-        }
+
+    // Start with code in the .text section
+    for (ast.topLevel) |function| {
+        const slice = try emitFunction(arenaAllocator, ast.symbols, function);
+        try instructions.appendSlice(arenaAllocator, slice);
+    }
+
+    // Followed by the static variables
+    var svIter = ast.staticVars.valueIterator();
+    while (svIter.next()) |value_ptr| {
+        const staticVar = try emitStaticVar(arenaAllocator, value_ptr.*);
+        try instructions.appendSlice(arenaAllocator, staticVar);
+    }
+
+    // Finally add the static constants to the end
+    var scIter = ast.staticConsts.valueIterator();
+    while (scIter.next()) |value_ptr| {
+        const staticConst = try emitStaticConstant(arenaAllocator, value_ptr.*);
+        try instructions.append(arenaAllocator, staticConst);
     }
 
     switch (builtin.os.tag) {
@@ -63,6 +70,8 @@ pub fn  emitStaticVar(allocator: Allocator, staticVar: Assembler.StaticVariable)
         try instructions.append(allocator, global);
     }
 
+    const fullName = staticVar.name;
+
     var code: []const u8 = undefined;
     switch (staticVar.initial) {
         .int, .uint => if (staticVar.isZero()) {
@@ -72,7 +81,7 @@ pub fn  emitStaticVar(allocator: Allocator, staticVar: Assembler.StaticVariable)
                 \\{s}:
                 \\  .zero 4
             ;
-            code = try allocator.print(template, .{staticVar.name});
+            code = try allocator.print(template, .{fullName});
         } else {
             const template =
                 \\  .data
@@ -81,9 +90,9 @@ pub fn  emitStaticVar(allocator: Allocator, staticVar: Assembler.StaticVariable)
                 \\  .long {d}
             ;
             code = if (staticVar.initial == .int)
-                try allocator.print(template, .{staticVar.name, staticVar.initial.int})
+                try allocator.print(template, .{fullName, staticVar.initial.int})
             else
-                try allocator.print(template, .{staticVar.name, staticVar.initial.uint});
+                try allocator.print(template, .{fullName, staticVar.initial.uint});
         },
         .double, .long, .ulong => if (staticVar.isZero()) {
             const template =
@@ -92,18 +101,18 @@ pub fn  emitStaticVar(allocator: Allocator, staticVar: Assembler.StaticVariable)
                 \\{s}:
                 \\  .zero 8
             ;
-            code = try allocator.print(template, .{staticVar.name});
+            code = try allocator.print(template, .{fullName});
         } else {
             const template =
                 \\  .data
                 \\  .align 8
                 \\{s}:
-                \\  .quad {d}
+                \\  .{s} {d}
             ;
             code = switch (staticVar.initial) {
-                .double => try allocator.print(template, .{staticVar.name, staticVar.initial.double}),
-                .long => try allocator.print(template, .{staticVar.name, staticVar.initial.long}),
-                .ulong => try allocator.print(template, .{staticVar.name, staticVar.initial.ulong}),
+                .double => try allocator.print(template, .{fullName, "double", staticVar.initial.double}),
+                .long => try allocator.print(template, .{fullName, "quad", staticVar.initial.long}),
+                .ulong => try allocator.print(template, .{fullName, "quad", staticVar.initial.ulong}),
                 else => unreachable,
             };
         },
@@ -124,7 +133,7 @@ fn emitStaticConstant(allocator: Allocator, staticConst: Assembler.StaticConstan
     return allocator.print(template, .{staticConst.alignment, LOCAL_PREFIX, staticConst.name, staticConst.initial.double});
 }
 
-pub fn emitFunction(allocator: Allocator, function: Assembler.Function, symbols: StringHashMap(Assembler.Entry)) ![][]const u8 {
+pub fn emitFunction(allocator: Allocator, symbols: StringHashMap(Assembler.Entry), function: Assembler.Function) ![][]const u8 {
     const assembly = function.instructions;
 
     var instructions: ArrayList([] const u8) = .empty;
@@ -165,7 +174,7 @@ pub fn emitFunction(allocator: Allocator, function: Assembler.Function, symbols:
                     .Xor => "xor",
                     else => unreachable,
                 };
-                const suffix = if (binary.type == .Double) "ps" else getSuffix(binary.type);
+                const suffix = if (binary.type == .Double and binary.operator == .Xor) "ps" else getSuffix(binary.type);
                 const src = getOperandString(allocator, binary.src, binary.type);
                 const dst = getOperandString(allocator, binary.dst, binary.type);
 
@@ -344,7 +353,12 @@ fn getOperandString(allocator: Allocator, operand: Assembler.Operand, t: Assembl
         .Imm => |op| allocator.print("{c}{d}", .{'$', op}),
         .Reg => |op| getRegisterName(allocator, op, t),
         .Stack => |op| allocator.print("{d}(%rbp)", .{op}),
-        .Data => |op| allocator.print("{s}{s}(%rip)", .{LOCAL_PREFIX, op}),
+        .Data => |op| {
+            return if (LocalStatics.contains(operand.Data))
+                allocator.print("{s}{s}(%rip)", .{LOCAL_PREFIX, op}) catch allocError()
+            else
+                allocator.print("{s}(%rip)", .{op}) catch allocError();
+        },
         .Pseudo => unreachable,
     } catch allocError();
 }

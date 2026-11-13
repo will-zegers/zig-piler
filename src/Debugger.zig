@@ -395,45 +395,45 @@ fn printTACStaticVariable(staticVar: TAC.StaticVariable) void {
 pub fn printAssemblerAST(ast: Assembler.Assembly) void {
     const program = ast;
     print("{any} (\n", .{@TypeOf(program)});
-    for (program.topLevel) |topLevel| {
-        switch (topLevel) {
-            .Function => |function| {
-                print("  {any} (\n", .{@TypeOf(function)});
-                print("    name: {s}\n", .{function.name});
-                print("    instructions: [\n", .{});
+    for (program.topLevel) |function| {
+        print("  {any} (\n", .{@TypeOf(function)});
+        print("    name: {s}\n", .{function.name});
+        print("    instructions: [\n", .{});
 
-                for (function.instructions) |instr| {
-                    printAssemblerFunction(instr);
-                }
-                print("    ]\n", .{});
-                print("  )\n", .{});
-            },
-            .StaticVariable => |staticVar| {
-                print("  {any} (\n", .{@TypeOf(staticVar)});
-                print("    identifier: {s}\n", .{staticVar.name});
-                print("    global: {any}\n", .{staticVar.global});
-                switch (staticVar.initial) {
-                    .double => print("    double: {d}\n", .{staticVar.initial.double}),
-                    .int => print("    int: {d}\n", .{staticVar.initial.int}),
-                    .long => print("    long: {d}\n", .{staticVar.initial.long}),
-                    .uint => print("    uint: {d}\n", .{staticVar.initial.uint}),
-                    .ulong => print("    ulong: {d}\n", .{staticVar.initial.ulong}),
-                }
-                print("  )\n", .{});
-            },
-            .StaticConstant => |staticConst| {
-                print("  {any} (\n", .{@TypeOf(staticConst)});
-                print("    identifier: {s}\n", .{staticConst.name});
-                switch (staticConst.initial) {
-                    .double => print("    double: {d}\n", .{staticConst.initial.double}),
-                    .int => print("    int: {d}\n", .{staticConst.initial.int}),
-                    .long => print("    long: {d}\n", .{staticConst.initial.long}),
-                    .uint => print("    uint: {d}\n", .{staticConst.initial.uint}),
-                    .ulong => print("    ulong: {d}\n", .{staticConst.initial.ulong}),
-                }
-                print("  )\n", .{});
-            },
+        for (function.instructions) |instr| {
+            printAssemblerFunction(instr);
         }
+        print("    ]\n", .{});
+        print("  )\n", .{});
+    }
+
+    var svIter = program.staticVars.valueIterator();
+    while (svIter.next()) |staticVar| {
+        print("  {any} (\n", .{@TypeOf(staticVar)});
+        print("    identifier: {s}\n", .{staticVar.name});
+        print("    global: {any}\n", .{staticVar.global});
+        switch (staticVar.initial) {
+            .double => print("    double: {d}\n", .{staticVar.initial.double}),
+            .int => print("    int: {d}\n", .{staticVar.initial.int}),
+            .long => print("    long: {d}\n", .{staticVar.initial.long}),
+            .uint => print("    uint: {d}\n", .{staticVar.initial.uint}),
+            .ulong => print("    ulong: {d}\n", .{staticVar.initial.ulong}),
+        }
+        print("  )\n", .{});
+    }
+
+    var scIter = program.staticConsts.valueIterator();
+    while (scIter.next()) |staticConst| {
+        print("  {any} (\n", .{@TypeOf(staticConst)});
+        print("    identifier: {s}\n", .{staticConst.name});
+        switch (staticConst.initial) {
+            .double => print("    double: {d}\n", .{staticConst.initial.double}),
+            .int => print("    int: {d}\n", .{staticConst.initial.int}),
+            .long => print("    long: {d}\n", .{staticConst.initial.long}),
+            .uint => print("    uint: {d}\n", .{staticConst.initial.uint}),
+            .ulong => print("    ulong: {d}\n", .{staticConst.initial.ulong}),
+        }
+        print("  )\n", .{});
     }
     print(")\n", .{});
     printBESymbolTable(ast.symbols);
