@@ -210,7 +210,7 @@ pub const Binary = struct {
                 };
                 break :blk allocator.dupe(Instruction, &.{
                     .{ .Cmp = .{ .type = t, .arg1 = src2, .arg2 = src1 } },
-                    .{ .Mov = .{ .type = .Long, .src = .{ .Imm = 0 }, .dst = dst } },
+                    .{ .Mov = .{ .type = t, .src = .{ .Imm = 0 }, .dst = dst } },
                     .{ .SetCC = .{ .condition = cCode, .operand = dst } },
                 });
             },

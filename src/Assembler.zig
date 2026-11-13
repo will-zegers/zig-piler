@@ -167,7 +167,7 @@ fn initStack(
 
             doubleIdx += 1;
             try instructions.append(allocator, .{ .Mov = .{ .type = t, .src = src, .dst = dst } });
-        } else if (intIdx < ARG_INT_REGISTERS.len and t == .Long or t == .Quad) {
+        } else if (intIdx < ARG_INT_REGISTERS.len and (t == .Long or t == .Quad)) {
             const src: Operand = .{ .Reg = ARG_INT_REGISTERS[intIdx] };
             const dst: Operand = .{ .Pseudo = name };
 
