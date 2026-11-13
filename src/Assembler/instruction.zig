@@ -267,8 +267,8 @@ pub const Cvtsi2sd = struct {
         switch (t) {
             .Long => {
                 return allocator.dupe(Instruction, &.{
-                    .{ .Movsx = .{ .type = t, .src = src, .dst = .{ .Reg = .ax } } },
-                    .{ .Cvtsi2sd = .{ .type = t, .src = .{ .Reg = .ax }, .dst = dst } },
+                    .{ .Mov = .{ .type = t, .src = src, .dst = .{ .Reg = .ax } } },
+                    .{ .Cvtsi2sd = .{ .type = .Quad, .src = .{ .Reg = .ax }, .dst = dst } },
                 }) catch allocError();
             },
             .Quad => {
@@ -283,7 +283,10 @@ pub const Cvtsi2sd = struct {
                     .{ .Jmp = .{ .target = endLabel } },
                     .{ .Label = .{ .id = outOfRangeLabel } },
                     .{ .Mov = .{ .type = t, .src = src, .dst = .{ .Reg = .ax } } },
-                    .{ .Binary = .{ .type = t, .operator = .SHR, .src = .{ .Reg = .ax }, .dst = .{ .Reg = .ax } } },
+                    .{ .Mov = .{ .type = t, .src = .{ .Reg = .ax }, .dst = .{ .Reg = .dx } } },
+                    .{ .Binary = .{ .type = t, .operator = .SHR, .src = .{ .Imm = 1 }, .dst = .{ .Reg = .dx } } },
+                    .{ .Binary = .{ .type = t, .operator = .AndB, .src = .{ .Imm = 1 }, .dst = .{ .Reg = .ax } } },
+                    .{ .Binary = .{ .type = t, .operator = .OrB, .src = .{ .Reg = .dx }, .dst = .{ .Reg = .ax } } },
                     .{ .Cvtsi2sd = .{ .type = t, .src = .{ .Reg = .ax }, .dst = dst } },
                     .{ .Binary = .{ .type = .Double, .operator = .Add, .src = dst, .dst = dst } },
                     .{ .Label = .{ .id = endLabel } },
