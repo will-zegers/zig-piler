@@ -208,6 +208,23 @@ pub const Binary = struct {
                     .Neq => .ne,
                     else => unreachable,
                 };
+                switch (t) {
+                    .Double => {
+                        break :blk allocator.dupe(Instruction, &.{
+                            .{ .Cmp = .{ .type = t, .arg1 = src2, .arg2 = src1 } },
+                            .{ .Binary = .{ .type = t, .operator = .Xor, .src = .{ .Reg = .xmm0 }, .dst = .{ .Reg = .xmm0 } } },
+                            .{ .Mov = .{ .type = t, .src = .{ .Reg = .xmm0 }, .dst = dst } },
+                            .{ .SetCC = .{ .condition = cCode, .operand = dst } },
+                        });
+                    },
+                    .Long, .Quad => {
+                        break :blk allocator.dupe(Instruction, &.{
+                            .{ .Cmp = .{ .type = t, .arg1 = src2, .arg2 = src1 } },
+                            .{ .Mov = .{ .type = t, .src = .{ .Imm = 0 }, .dst = dst } },
+                            .{ .SetCC = .{ .condition = cCode, .operand = dst } },
+                        });
+                    },
+                }
                 break :blk allocator.dupe(Instruction, &.{
                     .{ .Cmp = .{ .type = t, .arg1 = src2, .arg2 = src1 } },
                     .{ .Mov = .{ .type = t, .src = .{ .Imm = 0 }, .dst = dst } },
