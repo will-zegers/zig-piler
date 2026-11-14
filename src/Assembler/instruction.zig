@@ -158,15 +158,22 @@ pub const Binary = struct {
     src: Operand,
     dst: Operand,
 
+    // TODO: this all could use some cleanup
     pub fn toAssembly(allocator: Allocator, symbols: Symbol.Table, staticConstsByValue: *AutoHashMap(u64, StaticConstant), binary: TAC.Binary) []Instruction {
         const src1: Operand = .fromVal(allocator, staticConstsByValue, binary.src1);
         const src2: Operand = .fromVal(allocator, staticConstsByValue, binary.src2);
         const dst: Operand = .{ .Pseudo = binary.dst.Var };
-        std.debug.assert(checkTypes(symbols, src1, dst));
-        std.debug.assert(checkTypes(symbols, src2, dst));
 
-        const signed = symbols.get(binary.dst.Var).?.type.signed();
-        const t: Type = .fromVar(symbols, binary.dst.Var);
+        const isSigned: bool = switch (binary.src1) {
+            .Var => |v| symbols.get(v).?.type.isSignedInteger(),
+            .Constant => |c| switch (c) {
+                .double, .uint, .ulong => false,
+                .int, .long => true,
+            },
+        };
+        const t: Type = .fromVal(symbols, binary.src1);
+        const srcType: Type = .fromVal(symbols, binary.src1);
+        const dstType: Type = .fromVal(symbols, binary.dst);
 
         return switch (binary.operator) {
             .Div, .Mod => blk: {
@@ -181,7 +188,7 @@ pub const Binary = struct {
                         .Mod => .{ .Reg = .dx },
                         else => unreachable,
                     };
-                    if (signed) { // sign-extend and issue idiv (signed) instruction
+                    if (isSigned) { // sign-extend and issue idiv (isSigned) instruction
                         break :blk allocator.dupe(Instruction, &.{
                             .{ .Mov = .{ .type = t, .src = src1, .dst = .{ .Reg = .ax } } },
                             .{ .Cdq = .{ .type = t } },
@@ -201,40 +208,34 @@ pub const Binary = struct {
             .Eq, .Gt, .Gte, .Lt, .Lte, .Neq => |op| blk: {
                 const cCode: ConditionCode = switch (op) {
                     .Eq => .e,
-                    .Gt => if (signed) .g else .a,
-                    .Gte => if (signed) .ge else .ae,
-                    .Lt => if (signed) .l else .b,
-                    .Lte => if (signed) .le else .be,
+                    .Gt => if (!isSigned) .a else .g,
+                    .Gte => if (!isSigned) .ae else .ge,
+                    .Lt => if (!isSigned) .b else .l,
+                    .Lte => if (!isSigned) .be else .le,
                     .Neq => .ne,
                     else => unreachable,
                 };
                 switch (t) {
                     .Double => {
                         break :blk allocator.dupe(Instruction, &.{
-                            .{ .Cmp = .{ .type = t, .arg1 = src2, .arg2 = src1 } },
-                            .{ .Binary = .{ .type = t, .operator = .Xor, .src = .{ .Reg = .xmm0 }, .dst = .{ .Reg = .xmm0 } } },
-                            .{ .Mov = .{ .type = t, .src = .{ .Reg = .xmm0 }, .dst = dst } },
+                            .{ .Cmp = .{ .type = .Double, .arg1 = src2, .arg2 = src1 } },
+                            .{ .Mov = .{ .type = .Long, .src = .{ .Imm = 0 }, .dst = dst } },
                             .{ .SetCC = .{ .condition = cCode, .operand = dst } },
                         });
                     },
                     .Long, .Quad => {
                         break :blk allocator.dupe(Instruction, &.{
-                            .{ .Cmp = .{ .type = t, .arg1 = src2, .arg2 = src1 } },
-                            .{ .Mov = .{ .type = t, .src = .{ .Imm = 0 }, .dst = dst } },
+                            .{ .Cmp = .{ .type = srcType, .arg1 = src2, .arg2 = src1 } },
+                            .{ .Mov = .{ .type = dstType, .src = .{ .Imm = 0 }, .dst = dst } },
                             .{ .SetCC = .{ .condition = cCode, .operand = dst } },
                         });
                     },
                 }
-                break :blk allocator.dupe(Instruction, &.{
-                    .{ .Cmp = .{ .type = t, .arg1 = src2, .arg2 = src1 } },
-                    .{ .Mov = .{ .type = t, .src = .{ .Imm = 0 }, .dst = dst } },
-                    .{ .SetCC = .{ .condition = cCode, .operand = dst } },
-                });
             },
             .AndL, .OrL => unreachable, // logical AND and OR have no binary instruction, already handled in TACky
             else => allocator.dupe(Instruction, &.{
-                .{ .Mov = .{ .type = t, .src = src1, .dst = dst } },
-                .{ .Binary = .{ .type = t, .operator = binary.operator, .src = src2, .dst = dst } },
+                .{ .Mov = .{ .type = srcType, .src = src1, .dst = dst } },
+                .{ .Binary = .{ .type = dstType, .operator = binary.operator, .src = src2, .dst = dst } },
             }),
         } catch allocError();
     }

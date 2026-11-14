@@ -346,7 +346,12 @@ fn emitBinary(allocator: Allocator, context: *Context, instructions: *Instructio
             const src2 = emitExpression(allocator, context, instructions, binary.right.*);
             const tag = try newVariable(allocator, context, binary.type.?);
             const dst: Val = .{ .Var = tag };
-            try instructions.append(allocator, .{ .Binary = .{ .operator = binary.operator, .src1 = src1, .src2 = src2, .dst = dst } });
+            try instructions.append(allocator, .{ .Binary = .{
+                .operator = binary.operator,
+                .src1 = src1,
+                .src2 = src2,
+                .dst = dst,
+            } });
             return dst;
         },
     }
@@ -379,7 +384,7 @@ fn emitCast(allocator: Allocator, context: *Context, instructions: *Instructions
         instruction = .{ .Copy = .{ .src = expr, .dst = dst } };
     } else if (exprType.size() > to.size()) { // largers size to smaller: truncate
         instruction = .{ .Truncate = .{ .src = expr, .dst = dst } };
-    } else if (exprType.signed()) { // signed into a larger size needs sign extension
+    } else if (exprType.isSignedInteger()) { // signed into a larger size needs sign extension
         instruction = .{ .SignExtend = .{ .src = expr, .dst = dst } };
     } else { // unsigned into larger, zero extend (since unsigned always > 0)
         instruction = .{ .ZeroExtend = .{ .src = expr, .dst = dst } };

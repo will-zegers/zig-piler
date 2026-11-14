@@ -190,6 +190,13 @@ pub const Binary = struct {
         SHR,
         Sub,
         Xor,
+
+        pub fn isComparison(self: Operator) bool {
+            return switch (self) {
+                .AndL, .Eq, .Gt, .Gte, .Lt, .Lte, .Neq, .OrL => true,
+                else => false,
+            };
+        }
     };
 
     const OperatorMap = std.StaticStringMap(Operator).initComptime(.{
@@ -214,7 +221,7 @@ pub const Binary = struct {
     });
 
     lineIndex: usize,
-    type: ?Type = null,
+    type: ?Type = null, // set during type-checking
     operator: Operator,
     left: *Expression,
     right: *Expression,

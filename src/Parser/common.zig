@@ -84,7 +84,7 @@ pub const Type = union(TypeTag) {
         }
     }
 
-    pub fn signed(self: Type) bool {
+    pub fn isSignedInteger(self: Type) bool {
         return (self.equals(.Int) or self.equals(.Long));
     }
 
@@ -120,7 +120,7 @@ pub const Type = union(TypeTag) {
         if (type1.equals(.Double) or type2.equals(.Double)) return .Double;
         if (type1.size() > type2.size()) return type1;
         if (type1.size() < type2.size()) return type2;
-        if (!type1.signed()) return type1;
+        if (!type1.isSignedInteger()) return type1;
         return type2;
     }
 };

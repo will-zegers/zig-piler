@@ -302,14 +302,14 @@ fn typeCheckExpression(allocator: Allocator, symbols: *Symbol.Table, expr: *Expr
                 else => Type.getCommon(lType, rType),
             };
 
-            bin.type = commonType;
+            bin.type = if (bin.operator.isComparison()) .Int else commonType;
             bin.left.* = Cast.to(allocator, bin.left, commonType);
             bin.right.* = Cast.to(allocator, bin.right, commonType);
 
             if (bin.operator == .ShiftL) {
-                bin.operator = if (commonType.signed()) .SAL else .SHL;
+                bin.operator = if (commonType.isSignedInteger()) .SAL else .SHL;
             } else if (bin.operator == .ShiftR) {
-                bin.operator = if (commonType.signed()) .SAR else .SHR;
+                bin.operator = if (commonType.isSignedInteger()) .SAR else .SHR;
             }
 
             return bin.type.?;
@@ -349,12 +349,11 @@ fn typeCheckExpression(allocator: Allocator, symbols: *Symbol.Table, expr: *Expr
             return fcall.type.?;
         },
         .Ternary => |*tern| {
-            const ifType = typeCheckExpression(allocator, symbols, tern.condition);
+            _ = typeCheckExpression(allocator, symbols, tern.condition);
             const thenType = typeCheckExpression(allocator, symbols, tern.thenExpr);
             const elseType = typeCheckExpression(allocator, symbols, tern.elseExpr);
 
-            var commonType = Type.getCommon(ifType, thenType);
-            commonType = Type.getCommon(commonType, elseType);
+            const commonType = Type.getCommon(thenType, elseType);
 
             tern.type = commonType;
             tern.condition.* = Cast.to(allocator, tern.condition, commonType);
