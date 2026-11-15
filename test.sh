@@ -5,9 +5,16 @@ if [ -z $1 ]; then
   exit 1
 fi
 
+# skipping these files for now since they need an extra platform-specific source file
 SKIP="
   tests/chapter_9/valid/stack_arguments/stack_alignment.c
   tests/chapter_10/valid/push_arg_on_page_boundary.c
+"
+
+# tests with calls to <math.c> functions
+NEEDS_LIBMATH="
+  tests/chapter_13/valid/function_calls/standard_library_call.c
+  tests/chapter_13/valid/libraries/double_params_and_result.c
 "
 
 chapter=$(($1))
@@ -22,24 +29,44 @@ passed=0
 total=0
 function test_directory {
   local dir=$1
-  local expect_fail=$([[ $dir =~ "invalid" ]] && echo true || echo false)
+  local is_library_dir=false
   if [[ $dir =~ "libraries" ]]; then
-    echo "Skipping library tests in $dir"
-    return
+    is_library_dir=true
   fi
+  local expect_fail=$([[ $dir =~ "invalid" ]] && echo true || echo false)
 
   for file in $dir/*; do
+
     # recursive call on subdirectory
     if [ -d "$file" ]; then
       test_directory "$file"
 
     # run zig-piler on any .c files
     elif [[ $file =~ \.c$ ]] && ! [[ $SKIP =~ $file ]]; then
+      local basename=${file::-2} # remove the '.c' extension
+
+      local linked_libs=""
+      for f in $NEEDS_LIBMATH; do
+        if [[ $f == $file ]]; then
+          linked_libs="-lm"
+        fi
+      done
+
+      # ignore client files, just add them as an additional source for the base file
+      if $is_library_dir; then
+        if [[ $file =~ "_client" ]]; then
+          continue
+        else
+          file="$file ${basename}_client.c"
+        fi
+      fi
+
       total=$((total + 1))
-
-      zig-out/bin/zig-piler $stage "$file" &> results.txt
+      zig-out/bin/zig-piler $stage ${file} ${linked_libs} &> results.txt
       res=$?
+      rm -rf $basename ${basename}.s ${basename}_client.s
 
+      # check the error output for memory leak reports
       grep "error(SafeAllocator): leaked" results.txt &> /dev/null
       leak=$?
       if [ $leak -eq 0 ]; then
