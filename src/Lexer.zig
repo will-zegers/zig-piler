@@ -70,7 +70,7 @@ pub fn deinit(self: *Lexer) void {
     defer self.reMacro.deinit();
 }
 
-pub fn tokenize(self: *Lexer, text: [:0]const u8) !TokenIterator {
+pub fn tokenize(self: *Lexer, text: [:0]const u8) Allocator.Error!TokenIterator {
     var tokens: ArrayList(Token) = .empty;
 
     var tokenStart: usize = 0;
@@ -235,17 +235,11 @@ pub fn tokenize(self: *Lexer, text: [:0]const u8) !TokenIterator {
                 badToken("symbol", remainingText, lineIndex);
             },
         }
-        tokens.append(self.allocator, token) catch allocError();
+        try tokens.append(self.allocator, token);
         prevToken = token;
         tokenStart += token.symbol.len;
     }
-    return Token.iterate(self.allocator, tokens.toOwnedSlice(self.allocator) catch allocError());
-}
-
-pub fn allocError() noreturn {
-    std.log.err("Memory allocation error", .{});
-    std.debug.dumpCurrentStackTrace(.{ .first_address = @returnAddress() });
-    std.process.exit(1);
+    return Token.iterate(self.allocator, try tokens.toOwnedSlice(self.allocator));
 }
 
 /// From the remaining text, find the first non-whitespace sequence to report as the invalid token
