@@ -9,11 +9,10 @@ const Token = @import("Lexer.zig").Token;
 const TokenIterator = Token.Iterator;
 
 const common = @import("Parser/common.zig");
-const ParsingError = common.ParsingError;
+const Error = common.ParserError;
 const Specifiers = common.Specifiers;
 const StorageClass = common.StorageClass;
 pub const Type = common.Type;
-const allocError = common.allocError;
 const expect = common.expect;
 const identifier = common.identifier;
 
@@ -29,6 +28,8 @@ pub const Ternary = expression.Ternary;
 pub const Unary = expression.Unary;
 
 const Parser = @This();
+
+const ExpectedError = Allocator.Error || Parser.Error;
 
 pub const AST = Program;
 
@@ -54,12 +55,12 @@ pub const Program = struct {
     allocator: Allocator,
     declarations: []Declaration,
 
-    pub fn parse(allocator: Allocator, tokens: *TokenIterator) ParsingError!Program {
+    pub fn parse(allocator: Allocator, tokens: *TokenIterator) ExpectedError!Program {
         var declarations: ArrayList(Declaration) = .empty;
         while (!tokens.eofReached()) {
-            declarations.append(allocator, try .parse(allocator, tokens)) catch allocError();
+            try declarations.append(allocator, try .parse(allocator, tokens));
         }
-        return .{ .allocator = allocator, .declarations = declarations.toOwnedSlice(allocator) catch allocError() };
+        return .{ .allocator = allocator, .declarations = try declarations.toOwnedSlice(allocator) };
     }
 
     pub fn deinit(self: *Program, allocator: Allocator) void {
@@ -75,7 +76,7 @@ pub const Declaration = union(DeclarationTag) {
     FunDecl: FunDecl,
     VarDecl: VarDecl,
 
-    pub fn parse(allocator: Allocator, tokens: *TokenIterator) ParsingError!Declaration {
+    pub fn parse(allocator: Allocator, tokens: *TokenIterator) ExpectedError!Declaration {
         // We need to look a couple tokens ahead to determine if this is a function declaration,
         // which be of the form "int" <identifier> "(" (i.e., the 'marker' be an open paranthesis).
         // If not, assume it a variable declaration of the form "int" <identifier> (";" | "=") and
@@ -122,7 +123,7 @@ pub const FunDecl = struct {
     body: ?Block,
     storageClass: ?StorageClass,
 
-    pub fn parse(allocator: Allocator, tokens: *TokenIterator) ParsingError!FunDecl {
+    pub fn parse(allocator: Allocator, tokens: *TokenIterator) ExpectedError!FunDecl {
         const specifiers = try Specifiers.parse(tokens);
 
         const name = tokens.next();
@@ -139,17 +140,17 @@ pub const FunDecl = struct {
             break :blk null;
         };
 
-        var paramTypes = ArrayList(*const Type).initCapacity(allocator, params.len) catch allocError();
+        var paramTypes = try ArrayList(*const Type).initCapacity(allocator, params.len);
         for (params) |*param| {
             paramTypes.appendAssumeCapacity(&param.type);
         }
-        const ret = allocator.create(Type) catch allocError();
+        const ret = try allocator.create(Type);
         ret.* = specifiers.type.?;
 
         return .{
             .lineIndex = token.lineIndex,
             .type = .{ .FunType = .{
-                .params = paramTypes.toOwnedSlice(allocator) catch allocError(),
+                .params = try paramTypes.toOwnedSlice(allocator),
                 .ret = ret,
             } },
             .name = name.symbol,
@@ -172,7 +173,7 @@ pub const FunDecl = struct {
         allocator.destroy(self.type.FunType.ret);
     }
 
-    fn parseParamsList(allocator: Allocator, tokens: *TokenIterator) ParsingError![]VarDecl {
+    fn parseParamsList(allocator: Allocator, tokens: *TokenIterator) ExpectedError![]VarDecl {
         var params: ArrayList(VarDecl) = .empty;
 
         var nextToken = tokens.peek();
@@ -181,13 +182,13 @@ pub const FunDecl = struct {
                 const varDecl: VarDecl = try .parse(allocator, tokens);
                 if (varDecl.storageClass != null) {
                     log.err("Invalid storage class specifier in function declarator", .{});
-                    return ParsingError.InvalidStorageClass;
+                    return Parser.Error.InvalidStorageClass;
                 }
                 if (varDecl.init != null) {
                     log.err("C does not support default arguments", .{});
-                    return ParsingError.DefaultArgument;
+                    return Parser.Error.DefaultArgument;
                 }
-                params.append(allocator, varDecl) catch allocError();
+                try params.append(allocator, varDecl);
 
                 nextToken = tokens.peek();
 
@@ -198,7 +199,7 @@ pub const FunDecl = struct {
             tokens.skip(); // No params, skip the void token
         }
 
-        return params.toOwnedSlice(allocator) catch allocError();
+        return params.toOwnedSlice(allocator);
     }
 };
 
@@ -210,7 +211,7 @@ pub const VarDecl = struct {
     init: ?Expression = null,
     storageClass: ?StorageClass = null,
 
-    pub fn parse(allocator: Allocator, tokens: *TokenIterator) ParsingError!VarDecl {
+    pub fn parse(allocator: Allocator, tokens: *TokenIterator) ExpectedError!VarDecl {
         const specifiers = try Specifiers.parse(tokens);
 
         var token = tokens.next();
@@ -245,7 +246,7 @@ pub const BlockItem = union(BlockItemTag) {
     Declaration: Declaration,
     Statement: Statement,
 
-    pub fn parse(allocator: Allocator, tokens: *TokenIterator) ParsingError!BlockItem {
+    pub fn parse(allocator: Allocator, tokens: *TokenIterator) ExpectedError!BlockItem {
         const nextToken = tokens.peek();
         return switch (nextToken.type) {
             .Double, .Extern, .Int, .Long, .Signed, .Static, .Unsigned => .{ .Declaration = try .parse(allocator, tokens) },
@@ -265,17 +266,17 @@ pub const Block = struct {
     tag: ?[]const u8 = null,
     items: []BlockItem,
 
-    pub fn parse(allocator: Allocator, tokens: *TokenIterator) ParsingError!Block {
+    pub fn parse(allocator: Allocator, tokens: *TokenIterator) ExpectedError!Block {
         var blockList: ArrayList(BlockItem) = .empty;
 
         try expect(.OpenBrace, tokens.next());
         while (tokens.peek().type != .CloseBrace) {
             const blockItem = try BlockItem.parse(allocator, tokens);
-            blockList.append(allocator, blockItem) catch allocError();
+            try blockList.append(allocator, blockItem);
         }
         try expect(.CloseBrace, tokens.next());
 
-        const items = blockList.toOwnedSlice(allocator) catch allocError();
+        const items = try blockList.toOwnedSlice(allocator);
         return .{ .items = items };
     }
 
@@ -306,7 +307,7 @@ pub const Statement = union(StatementTag) {
     While: While,
     Null: void, // needed to represent empty semicolon-delimited statements
 
-    pub fn parse(allocator: Allocator, tokens: *TokenIterator) ParsingError!Statement {
+    pub fn parse(allocator: Allocator, tokens: *TokenIterator) ExpectedError!Statement {
         const nextToken = tokens.peek();
         return switch (nextToken.type) {
             .Break => .{ .Break = try .parse(tokens) },
@@ -364,7 +365,7 @@ pub const Break = struct {
     lineIndex: usize,
     tag: ?[]const u8 = null, // this will get set during semantic analysis
 
-    pub fn parse(tokens: *TokenIterator) ParsingError!Break {
+    pub fn parse(tokens: *TokenIterator) Parser.Error!Break {
         const token = tokens.next();
         try expect(.Semicolon, tokens.next());
         return .{ .lineIndex = token.lineIndex };
@@ -380,7 +381,7 @@ pub const Case = struct {
     body: ?*Statement,
     parent: ?*Switch = null,
 
-    pub fn parse(allocator: Allocator, tokens: *TokenIterator) ParsingError!Case {
+    pub fn parse(allocator: Allocator, tokens: *TokenIterator) ExpectedError!Case {
         var nextToken = tokens.next();
         const cond: ?Expression = switch (nextToken.type) {
             .Case => try .parse(allocator, tokens, 0),
@@ -394,22 +395,22 @@ pub const Case = struct {
         var body: ?*Statement = null;
         nextToken = tokens.peek();
         if (nextToken.type != .Case and nextToken.type != .Default) {
-            body = allocator.create(Statement) catch allocError();
+            body = try allocator.create(Statement);
             body.?.* = try .parse(allocator, tokens);
         }
 
         return .{ .lineIndex = lineIndex, .cond = cond, .body = body };
     }
 
-    pub fn registerToParentSwitch(self: *Case, allocator: Allocator) ParsingError!void {
-        self.tag = self.generateTag(allocator);
+    pub fn registerToParentSwitch(self: *Case, allocator: Allocator) ExpectedError!void {
+        self.tag = try self.generateTag(allocator);
         return self.parent.?.addCase(allocator, self);
     }
 
     // Generate a tag with parent tag and condition constant
     // In addition, assure we're comparing like-types between case condition
     // and switch cond types, truncating case conditions if need be
-    pub fn generateTag(self: *Case, allocator: Allocator) []const u8 {
+    pub fn generateTag(self: *Case, allocator: Allocator) Allocator.Error![]const u8 {
         std.debug.assert(self.parent != null); // This shouldn't occur, since we catch orphan case before tagging
 
         const parentType = self.parent.?.cond.getType();
@@ -418,11 +419,11 @@ pub const Case = struct {
                 .Constant => switch (parentType) {
                     .Int, .UInt => {
                         const value = cond.Constant.as(.UInt);
-                        return allocator.print("{s}.{d}", .{ self.parent.?.tag.?, value.uint }) catch allocError();
+                        return try allocator.print("{s}.{d}", .{ self.parent.?.tag.?, value.uint });
                     },
                     .Long, .ULong => {
                         const value = cond.Constant.as(.ULong);
-                        return allocator.print("{s}.{d}", .{ self.parent.?.tag.?, value.ulong }) catch allocError();
+                        return try allocator.print("{s}.{d}", .{ self.parent.?.tag.?, value.ulong });
                     },
                     .Double => unreachable,
                     .FunType => unreachable,
@@ -430,11 +431,11 @@ pub const Case = struct {
                 .Cast => switch (parentType) {
                     .Int, .UInt => {
                         const value = cond.Cast.exp.Constant.as(.UInt);
-                        return allocator.print("{s}.{d}", .{ self.parent.?.tag.?, value.uint }) catch allocError();
+                        return try allocator.print("{s}.{d}", .{ self.parent.?.tag.?, value.uint });
                     },
                     .Long, .ULong => {
                         const value = cond.Cast.exp.Constant.as(.ULong);
-                        return allocator.print("{s}.{d}", .{ self.parent.?.tag.?, value.ulong }) catch allocError();
+                        return try allocator.print("{s}.{d}", .{ self.parent.?.tag.?, value.ulong });
                     },
                     .Double => unreachable,
                     .FunType => unreachable,
@@ -466,7 +467,7 @@ pub const Continue = struct {
     lineIndex: usize,
     tag: ?[]const u8 = null, // this will get set during semantic analysis
 
-    pub fn parse(tokens: *TokenIterator) ParsingError!Continue {
+    pub fn parse(tokens: *TokenIterator) Parser.Error!Continue {
         const token = tokens.next();
         try expect(.Semicolon, tokens.next());
         return .{ .lineIndex = token.lineIndex };
@@ -480,10 +481,10 @@ pub const DoWhile = struct {
     body: *Statement,
     cond: Expression,
 
-    pub fn parse(allocator: Allocator, tokens: *TokenIterator) ParsingError!DoWhile {
+    pub fn parse(allocator: Allocator, tokens: *TokenIterator) ExpectedError!DoWhile {
         try expect(.Do, tokens.next());
 
-        const body = allocator.create(Statement) catch allocError();
+        const body = try allocator.create(Statement);
         body.* = try .parse(allocator, tokens);
 
         try expect(.While, tokens.next());
@@ -509,14 +510,14 @@ const ForInit = union(ForInitTag) {
     Declaration: Declaration,
     Expression: ?Expression,
 
-    pub fn parse(allocator: Allocator, tokens: *TokenIterator) ParsingError!ForInit {
+    pub fn parse(allocator: Allocator, tokens: *TokenIterator) ExpectedError!ForInit {
         const nextToken = tokens.peek();
         switch (nextToken.type) {
             .Double, .Int, .Long, .Extern, .Signed, .Static, .Unsigned => {
                 const decl: Declaration = try .parse(allocator, tokens);
                 if (decl == .FunDecl) {
                     log.err("Expected variable declarator or expression", .{});
-                    return ParsingError.ForLoopFunDecl;
+                    return Parser.Error.ForLoopFunDecl;
                 }
 
                 return .{ .Declaration = decl };
@@ -548,7 +549,7 @@ pub const For = struct {
     post: ?Expression,
     body: *Statement,
 
-    pub fn parse(allocator: Allocator, tokens: *TokenIterator) ParsingError!For {
+    pub fn parse(allocator: Allocator, tokens: *TokenIterator) ExpectedError!For {
         try expect(.For, tokens.next());
         try expect(.OpenParenthesis, tokens.next());
 
@@ -562,7 +563,7 @@ pub const For = struct {
         const post: ?Expression = if (.CloseParenthesis != nextToken.type) try .parse(allocator, tokens, 0) else null;
         try expect(.CloseParenthesis, tokens.next());
 
-        const body = allocator.create(Statement) catch allocError();
+        const body = try allocator.create(Statement);
         body.* = try .parse(allocator, tokens);
 
         return .{ .init = init, .cond = cond, .post = post, .body = body };
@@ -584,7 +585,7 @@ pub const Goto = struct {
     lineIndex: usize,
     target: identifier,
 
-    pub fn parse(tokens: *TokenIterator) ParsingError!Goto {
+    pub fn parse(tokens: *TokenIterator) Parser.Error!Goto {
         try expect(.Goto, tokens.next());
 
         const token = tokens.next();
@@ -602,13 +603,13 @@ pub const If = struct {
     thenStmt: *Statement,
     elseStmt: ?*Statement,
 
-    pub fn parse(allocator: Allocator, tokens: *TokenIterator) ParsingError!If {
+    pub fn parse(allocator: Allocator, tokens: *TokenIterator) ExpectedError!If {
         try expect(.If, tokens.next());
         try expect(.OpenParenthesis, tokens.peek()); // only peek, since parentheses will be handled while parsing the expr
 
         const condition: Expression = try .parse(allocator, tokens, 0);
 
-        const thenStmt = allocator.create(Statement) catch allocError();
+        const thenStmt = try allocator.create(Statement);
         thenStmt.* = try .parse(allocator, tokens);
 
         var elseStmt: ?*Statement = null;
@@ -616,7 +617,7 @@ pub const If = struct {
         if (.Else == nextToken.type) { // if-else...
             tokens.skip(); // discard the 'else' token
 
-            elseStmt = allocator.create(Statement) catch allocError();
+            elseStmt = try allocator.create(Statement);
             elseStmt.?.* = try .parse(allocator, tokens);
         }
         // no need to check for close parenthesis, since it's handled by the expression parser
@@ -642,11 +643,11 @@ pub const Label = struct {
     tag: ?[]const u8 = null,
     body: *Statement,
 
-    pub fn parse(allocator: Allocator, name: Token, tokens: *TokenIterator) ParsingError!Label {
+    pub fn parse(allocator: Allocator, name: Token, tokens: *TokenIterator) ExpectedError!Label {
         try expect(.Identifier, name);
         try expect(.Colon, tokens.next());
 
-        const body = allocator.create(Statement) catch allocError();
+        const body = try allocator.create(Statement);
         body.* = try .parse(allocator, tokens);
 
         return .{ .name = name.symbol, .body = body, .lineIndex = name.lineIndex };
@@ -663,7 +664,7 @@ pub const Label = struct {
 pub const Return = struct {
     expr: Expression,
 
-    pub fn parse(allocator: Allocator, tokens: *TokenIterator) ParsingError!Return {
+    pub fn parse(allocator: Allocator, tokens: *TokenIterator) ExpectedError!Return {
         try expect(.Return, tokens.next());
         const expr: Expression = try .parse(allocator, tokens, 0);
         const self: Return = .{ .expr = expr };
@@ -685,28 +686,28 @@ pub const Switch = struct {
     cases: ArrayList(*Case),
     defaultTag: ?[]const u8 = null,
 
-    pub fn parse(allocator: Allocator, tokens: *TokenIterator) ParsingError!Switch {
+    pub fn parse(allocator: Allocator, tokens: *TokenIterator) ExpectedError!Switch {
         const token = tokens.next();
         try expect(.Switch, token);
         try expect(.OpenParenthesis, tokens.peek());
 
         const cond: Expression = try .parse(allocator, tokens, 0);
 
-        const body = allocator.create(Statement) catch allocError();
+        const body = try allocator.create(Statement);
         body.* = try .parse(allocator, tokens);
 
         return .{ .lineIndex = token.lineIndex, .cond = cond, .body = body, .cases = .empty };
     }
 
-    pub fn addCase(self: *Switch, allocator: Allocator, case: *Case) ParsingError!void {
+    pub fn addCase(self: *Switch, allocator: Allocator, case: *Case) ExpectedError!void {
         for (self.cases.items) |child| { // ensure this is not a duplicate case
-            if (mem.eql(u8, child.tag.?, case.tag.?)) return ParsingError.DuplicateCase;
+            if (mem.eql(u8, child.tag.?, case.tag.?)) return Parser.Error.DuplicateCase;
         }
 
         // a case with no conditional signifies a default statement
         if (case.cond == null) self.defaultTag = case.tag.?;
 
-        self.cases.append(allocator, case) catch allocError();
+        try self.cases.append(allocator, case);
     }
 
     pub fn deinit(self: *Switch, allocator: Allocator) void {
@@ -727,12 +728,12 @@ pub const While = struct {
     cond: Expression,
     body: *Statement,
 
-    pub fn parse(allocator: Allocator, tokens: *TokenIterator) ParsingError!While {
+    pub fn parse(allocator: Allocator, tokens: *TokenIterator) ExpectedError!While {
         try expect(.While, tokens.next());
         try expect(.OpenParenthesis, tokens.peek());
         const cond: Expression = try .parse(allocator, tokens, 0);
 
-        const body = allocator.create(Statement) catch allocError();
+        const body = try allocator.create(Statement);
         body.* = try .parse(allocator, tokens);
 
         return .{ .cond = cond, .body = body };

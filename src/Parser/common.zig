@@ -5,7 +5,7 @@ const Token = @import("../Lexer.zig").Token;
 
 pub const identifier = []const u8;
 
-pub const ParsingError = error{
+pub const ParserError = error{
     DefaultArgument,
     DuplicateCase,
     EOF,
@@ -40,7 +40,7 @@ pub const Type = union(TypeTag) {
             if (types[0] == null) {
                 if (signage == null) {
                     log.err("Declaration for '{s}' does not name a type", .{symbol});
-                    return ParsingError.InvalidType;
+                    return ParserError.InvalidType;
                 }
                 return if (signage.? == .Unsigned) .UInt else .Int;
             }
@@ -51,7 +51,7 @@ pub const Type = union(TypeTag) {
                 .Long => return if (signage != null and signage.? == .Unsigned) .ULong else .Long,
                 else => {
                     log.err("Invalid type specifier '{any}'", .{types[0].?});
-                    return ParsingError.InvalidType;
+                    return ParserError.InvalidType;
                 },
             }
         }
@@ -61,12 +61,12 @@ pub const Type = union(TypeTag) {
                 return .Double;
             } else {
                 log.err("Invalid type specifier '{any}' '{any}'", .{ types[0].?, types[1].? });
-                return ParsingError.InvalidType;
+                return ParserError.InvalidType;
             },
             .Int => switch (types[0].?) {
                 .Double, .Int => {
                     log.err("Invalid type specifier '{any} {any}'", .{ types[0].?, types[1].? });
-                    return ParsingError.InvalidType;
+                    return ParserError.InvalidType;
                 },
                 .Long => return if (signage != null and signage.? == .Unsigned) .ULong else .Long,
                 .FunType, .UInt, .ULong => unreachable,
@@ -75,7 +75,7 @@ pub const Type = union(TypeTag) {
                 .Int => return if (signage != null and signage.? == .Unsigned) .ULong else .Long,
                 .Long => {
                     log.err("Type 'long long' not currently supported", .{});
-                    return ParsingError.InvalidType;
+                    return ParserError.InvalidType;
                 },
                 .Double => return .Double,
                 .FunType, .UInt, .ULong => unreachable,
@@ -132,7 +132,7 @@ pub const Specifiers = struct {
     type: ?Type = null,
     storageClass: ?StorageClass = null,
 
-    pub fn parse(tokens: *Token.Iterator) ParsingError!Specifiers {
+    pub fn parse(tokens: *Token.Iterator) ParserError!Specifiers {
         var nextToken = tokens.peek();
         var specifiers: Specifiers = .{ .lineIndex = nextToken.lineIndex };
         var signage: ?Type.Signage = null;
@@ -144,7 +144,7 @@ pub const Specifiers = struct {
                 .Double, .Int, .Long => {
                     if (typeIndex >= types.len) {
                         log.err("Unvalid type specifier '{s}'", .{nextToken.symbol});
-                        return ParsingError.InvalidType;
+                        return ParserError.InvalidType;
                     }
 
                     switch (nextToken.type) {
@@ -159,7 +159,7 @@ pub const Specifiers = struct {
                 .Signed, .Unsigned => {
                     if (signage != null) {
                         log.err("Cannot combine with previous '{s}' declaration specifier", .{@tagName(signage.?)});
-                        return ParsingError.InvalidSignage;
+                        return ParserError.InvalidSignage;
                     }
                     signage = switch (nextToken.type) {
                         // note: different enums
@@ -173,7 +173,7 @@ pub const Specifiers = struct {
                 .Extern, .Static => {
                     if (specifiers.storageClass != null) {
                         log.err("Invalid or duplicate storage class '{s}'", .{nextToken.symbol});
-                        return ParsingError.InvalidStorageClass;
+                        return ParserError.InvalidStorageClass;
                     }
 
                     switch (nextToken.type) {
@@ -191,7 +191,7 @@ pub const Specifiers = struct {
         specifiers.type = try Type.parse(types, signage, nextToken.symbol);
         if (signage != null and specifiers.type.? == .Double) {
             log.err("'double' cannot be signed or unsigned", .{});
-            return ParsingError.InvalidSignage;
+            return ParserError.InvalidSignage;
         }
         return specifiers;
     }
@@ -203,9 +203,9 @@ pub fn allocError() noreturn {
     std.process.exit(1);
 }
 
-pub fn expect(expected: Token.Type, token: Token) ParsingError!void {
+pub fn expect(expected: Token.Type, token: Token) ParserError!void {
     if (expected != token.type) {
         std.log.err("Got unexpected {any} token '{s}'. Expected type {any}", .{ token.type, token.symbol, expected });
-        return ParsingError.Syntax;
+        return ParserError.Syntax;
     }
 }

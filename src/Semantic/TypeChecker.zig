@@ -208,7 +208,7 @@ fn typeCheckStatement(allocator: Allocator, symbols: *Symbol.Table, stmt: *State
             _ = typeCheckExpression(allocator, symbols, &ret.expr);
 
             const symbol = symbols.get(FunctionName.?) orelse unreachable;
-            ret.expr = Cast.to(allocator, &ret.expr, symbol.type.FunType.ret.*);
+            ret.expr = Cast.to(allocator, &ret.expr, symbol.type.FunType.ret.*) catch allocError();
         },
         .Expression => |*expr| _ = typeCheckExpression(allocator, symbols, expr),
         .If => |*ifStmt| {
@@ -262,7 +262,7 @@ fn typeCheckStatement(allocator: Allocator, symbols: *Symbol.Table, stmt: *State
                     return;
                 }
                 const parentType = case.parent.?.cond.getType();
-                case.cond = Cast.to(allocator, cond, parentType);
+                case.cond = Cast.to(allocator, cond, parentType) catch allocError();
             }
 
             case.registerToParentSwitch(allocator) catch {
@@ -282,7 +282,7 @@ fn typeCheckExpression(allocator: Allocator, symbols: *Symbol.Table, expr: *Expr
             _ = typeCheckExpression(allocator, symbols, assign.rhs);
 
             assign.type = lType;
-            assign.rhs.* = Cast.to(allocator, assign.rhs, lType);
+            assign.rhs.* = Cast.to(allocator, assign.rhs, lType) catch allocError();
 
             return assign.type.?;
         },
@@ -303,8 +303,8 @@ fn typeCheckExpression(allocator: Allocator, symbols: *Symbol.Table, expr: *Expr
             };
 
             bin.type = if (bin.operator.isComparison()) .Int else commonType;
-            bin.left.* = Cast.to(allocator, bin.left, commonType);
-            bin.right.* = Cast.to(allocator, bin.right, commonType);
+            bin.left.* = Cast.to(allocator, bin.left, commonType) catch allocError();
+            bin.right.* = Cast.to(allocator, bin.right, commonType) catch allocError();
 
             if (bin.operator == .ShiftL) {
                 bin.operator = if (commonType.isSignedInteger()) .SAL else .SHL;
@@ -342,7 +342,7 @@ fn typeCheckExpression(allocator: Allocator, symbols: *Symbol.Table, expr: *Expr
             } else {
                 for (fcall.args, funType.params) |*arg, param| {
                     _ = typeCheckExpression(allocator, symbols, arg);
-                    arg.* = Cast.to(allocator, arg, param.*);
+                    arg.* = Cast.to(allocator, arg, param.*) catch allocError();
                 }
             }
 
@@ -356,9 +356,9 @@ fn typeCheckExpression(allocator: Allocator, symbols: *Symbol.Table, expr: *Expr
             const commonType = Type.getCommon(thenType, elseType);
 
             tern.type = commonType;
-            tern.condition.* = Cast.to(allocator, tern.condition, commonType);
-            tern.thenExpr.* = Cast.to(allocator, tern.thenExpr, commonType);
-            tern.elseExpr.* = Cast.to(allocator, tern.elseExpr, commonType);
+            tern.condition.* = Cast.to(allocator, tern.condition, commonType) catch allocError();
+            tern.thenExpr.* = Cast.to(allocator, tern.thenExpr, commonType) catch allocError();
+            tern.elseExpr.* = Cast.to(allocator, tern.elseExpr, commonType) catch allocError();
 
             return tern.type.?;
         },
