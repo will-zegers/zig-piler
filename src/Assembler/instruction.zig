@@ -200,7 +200,7 @@ pub const Binary = struct {
             },
         }
         instructions.shrinkAndFree(allocator, instructions.items.len);
-        return try instructions.toOwnedSlice(allocator);
+        return instructions.toOwnedSlice(allocator);
     }
 };
 
@@ -220,7 +220,7 @@ pub const Cvtsi2sd = struct {
         const dst = try Operand.fromVal(allocator, staticConstsByValue, d2i.dst);
         const t = Type.fromVal(symbols, d2i.src);
 
-        return try allocator.dupe(Instruction, &.{.{ .Cvtsi2sd = .{ .type = t, .src = src, .dst = dst } }});
+        return allocator.dupe(Instruction, &.{.{ .Cvtsi2sd = .{ .type = t, .src = src, .dst = dst } }});
     }
 
     fn toAssemblyUnsigned(allocator: Allocator, symbols: Symbol.Table, staticConstsByValue: *AutoHashMap(u64, StaticConstant), d2i: TAC.UIntToDouble) Allocator.Error![]Instruction {
@@ -230,7 +230,7 @@ pub const Cvtsi2sd = struct {
 
         switch (t) {
             .Long => {
-                return try allocator.dupe(Instruction, &.{
+                return allocator.dupe(Instruction, &.{
                     .{ .Mov = .{ .type = t, .src = src, .dst = .{ .Reg = .ax } } },
                     .{ .Cvtsi2sd = .{ .type = .Quad, .src = .{ .Reg = .ax }, .dst = dst } },
                 });
@@ -240,7 +240,7 @@ pub const Cvtsi2sd = struct {
                 const endLabel = try allocator.print("cttsi2sd.end.{d}", .{counter});
                 counter += 1;
 
-                return try allocator.dupe(Instruction, &.{
+                return allocator.dupe(Instruction, &.{
                     .{ .Cmp = .{ .type = t, .arg1 = .{ .Imm = 0 }, .arg2 = src } },
                     .{ .JmpCC = .{ .condition = .l, .target = outOfRangeLabel } },
                     .{ .Cvtsi2sd = .{ .type = t, .src = src, .dst = dst } },
@@ -271,7 +271,7 @@ pub const Cvttsd2si = struct {
         const dst = try Operand.fromVal(allocator, staticConstsByValue, d2i.dst);
         const t = Type.fromVal(symbols, d2i.dst);
 
-        return try allocator.dupe(Instruction, &.{.{ .Cvttsd2si = .{ .type = t, .src = src, .dst = dst } }});
+        return allocator.dupe(Instruction, &.{.{ .Cvttsd2si = .{ .type = t, .src = src, .dst = dst } }});
     }
 
     fn toAssemblyUnsigned(allocator: Allocator, symbols: Symbol.Table, staticConstsByValue: *AutoHashMap(u64, StaticConstant), d2u: TAC.DoubleToUInt) Allocator.Error![]Instruction {
@@ -281,7 +281,7 @@ pub const Cvttsd2si = struct {
 
         switch (t) {
             .Long => {
-                return try allocator.dupe(Instruction, &.{
+                return allocator.dupe(Instruction, &.{
                     .{ .Cvttsd2si = .{ .type = .Quad, .src = src, .dst = .{ .Reg = .ax } } },
                     .{ .Mov = .{ .type = t, .src = .{ .Reg = .ax }, .dst = dst } },
                 });
@@ -298,7 +298,7 @@ pub const Cvttsd2si = struct {
                     .initial = .{ .double = UPPER_BOUND_Q },
                 });
 
-                return try allocator.dupe(Instruction, &.{
+                return allocator.dupe(Instruction, &.{
                     .{ .Cmp = .{ .type = .Double, .arg1 = .{ .Data = "UPPER_BOUND" }, .arg2 = src } },
                     .{ .JmpCC = .{ .condition = .ae, .target = outOfRangeLabel } },
                     .{ .Cvttsd2si = .{ .type = t, .src = src, .dst = dst } },
@@ -327,7 +327,7 @@ pub const Jmp = struct {
     target: []const u8,
 
     fn toAssembly(allocator: Allocator, jmp: TAC.Jump) Allocator.Error![]Instruction {
-        return try allocator.dupe(Instruction, &.{.{ .Jmp = .{ .target = jmp.target } }});
+        return allocator.dupe(Instruction, &.{.{ .Jmp = .{ .target = jmp.target } }});
     }
 };
 
@@ -352,7 +352,7 @@ pub const JmpCC = struct {
             else => unreachable,
         };
 
-        return try allocator.dupe(Instruction, switch (t) {
+        return allocator.dupe(Instruction, switch (t) {
             .Double => &double(arg2, t, condition, target),
             .Long, .Quad => &integer(arg2, t, condition, target),
         });
@@ -378,7 +378,7 @@ pub const Label = struct {
     id: []const u8,
 
     fn toAssembly(allocator: Allocator, label: TAC.Label) Allocator.Error![]Instruction {
-        return try allocator.dupe(Instruction, &.{.{ .Label = .{ .id = label.identifier } }});
+        return allocator.dupe(Instruction, &.{.{ .Label = .{ .id = label.identifier } }});
     }
 };
 
@@ -392,7 +392,7 @@ pub const Mov = struct {
         const dst: Operand = try .fromVal(allocator, staticConstsByValue, copy.dst);
         const t: Type = dst.getType(symbols).?;
 
-        return try allocator.dupe(Instruction, &.{.{ .Mov = .{ .type = t, .src = src, .dst = dst } }});
+        return allocator.dupe(Instruction, &.{.{ .Mov = .{ .type = t, .src = src, .dst = dst } }});
     }
 };
 
@@ -415,7 +415,7 @@ pub const Ret = struct {
             .Double => .{ .Reg = .xmm0 },
         };
 
-        return try allocator.dupe(Instruction, &.{
+        return allocator.dupe(Instruction, &.{
             .{ .Mov = .{ .type = t, .src = val, .dst = dst } },
             .{ .Ret = .{ .type = t } },
         });
@@ -510,7 +510,7 @@ pub const Unary = struct {
             },
         }
         instructions.shrinkAndFree(allocator, instructions.items.len);
-        return try instructions.toOwnedSlice(allocator);
+        return instructions.toOwnedSlice(allocator);
     }
 };
 
@@ -625,7 +625,7 @@ fn funCallToAssembly(allocator: Allocator, symbols: Symbol.Table, staticConstsBy
     try assembly.append(allocator, .{ .Mov = .{ .type = t, .src = src, .dst = .{ .Pseudo = dst } } });
 
 
-    return try assembly.toOwnedSlice(allocator);
+    return assembly.toOwnedSlice(allocator);
 }
 
 fn alignStack(stackArgs: []const TypedOperand) ?Instruction {
@@ -699,14 +699,14 @@ fn signExtend(allocator: Allocator, symbols: Symbol.Table, staticConstsByValue: 
     const dst = try Operand.fromVal(allocator, staticConstsByValue, se.dst);
     const t = Type.fromVal(symbols, se.dst);
 
-    return try allocator.dupe(Instruction, &.{.{ .Movsx = .{ .type = t, .src = src, .dst = dst } }});
+    return allocator.dupe(Instruction, &.{.{ .Movsx = .{ .type = t, .src = src, .dst = dst } }});
 }
 
 fn truncate(allocator: Allocator, staticConstsByValue: *AutoHashMap(u64, StaticConstant), tr: TAC.Truncate) Allocator.Error![]Instruction {
     const src = try Operand.fromVal(allocator, staticConstsByValue, tr.src);
     const dst = try Operand.fromVal(allocator, staticConstsByValue, tr.dst);
 
-    return try allocator.dupe(Instruction, &.{.{ .Mov = .{ .type = .Long, .src = src, .dst = dst } }});
+    return allocator.dupe(Instruction, &.{.{ .Mov = .{ .type = .Long, .src = src, .dst = dst } }});
 }
 
 fn zeroExtend(allocator: Allocator, staticConstsByValue: *AutoHashMap(u64, StaticConstant), ze: TAC.ZeroExtend) Allocator.Error![]Instruction {
@@ -714,11 +714,11 @@ fn zeroExtend(allocator: Allocator, staticConstsByValue: *AutoHashMap(u64, Stati
     const dst = try Operand.fromVal(allocator, staticConstsByValue, ze.dst);
 
     if (dst == .Reg) {
-        return try allocator.dupe(Instruction, &.{
+        return allocator.dupe(Instruction, &.{
             .{ .Mov = .{ .type = .Long, .src = src, .dst = dst } },
         });
     } else {
-        return try allocator.dupe(Instruction, &.{
+        return allocator.dupe(Instruction, &.{
             .{ .Mov = .{ .type = .Long, .src = src, .dst = .{ .Reg = .r11 } } },
             .{ .Mov = .{ .type = .Quad, .src = .{ .Reg = .r11 }, .dst = dst } },
         });

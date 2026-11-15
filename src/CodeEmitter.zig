@@ -119,7 +119,7 @@ pub fn  emitStaticVar(allocator: Allocator, staticVar: Assembler.StaticVariable)
     }
     try instructions.append(allocator, code);
 
-    return try instructions.toOwnedSlice(allocator);
+    return instructions.toOwnedSlice(allocator);
 }
 
 fn emitStaticConstant(allocator: Allocator, staticConst: Assembler.StaticConstant) ![]const u8 {

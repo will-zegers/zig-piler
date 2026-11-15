@@ -33,14 +33,19 @@ const ExpectedErrors = Allocator.Error || Parser.Error;
 
 pub const AST = Program;
 
-pub fn parse(allocator: Allocator, tokens: *TokenIterator, textLines: [][]const u8) AST {
-    const program = Program.parse(allocator, tokens) catch {
-        // TODO: can only catch and log one error at a time. Maybe try to
-        // make this more granular at the function/declaration level to
-        // catch more errors at once
-        const index = tokens.lineIndex;
-        log.err(" {d} | {s}\n", .{ index + 1, textLines[index] });
-        process.exit(1);
+pub fn parse(allocator: Allocator, tokens: *TokenIterator, textLines: [][]const u8) ExpectedErrors!AST {
+    const program = Program.parse(allocator, tokens) catch |err| {
+        switch (err) {
+            error.OutOfMemory => return err,
+            else => {
+                // TODO: can only catch and log one error at a time. Maybe try to
+                // make this more granular at the function/declaration level to
+                // catch more errors at once
+                const index = tokens.lineIndex;
+                log.err(" {d} | {s}\n", .{ index + 1, textLines[index] });
+                process.exit(1);
+            },
+        }
     };
     if (!tokens.eofReached()) {
         const token = tokens.next();
@@ -419,11 +424,11 @@ pub const Case = struct {
                 .Constant => switch (parentType) {
                     .Int, .UInt => {
                         const value = cond.Constant.as(.UInt);
-                        return try allocator.print("{s}.{d}", .{ self.parent.?.tag.?, value.uint });
+                        return allocator.print("{s}.{d}", .{ self.parent.?.tag.?, value.uint });
                     },
                     .Long, .ULong => {
                         const value = cond.Constant.as(.ULong);
-                        return try allocator.print("{s}.{d}", .{ self.parent.?.tag.?, value.ulong });
+                        return allocator.print("{s}.{d}", .{ self.parent.?.tag.?, value.ulong });
                     },
                     .Double => unreachable,
                     .FunType => unreachable,
@@ -431,11 +436,11 @@ pub const Case = struct {
                 .Cast => switch (parentType) {
                     .Int, .UInt => {
                         const value = cond.Cast.exp.Constant.as(.UInt);
-                        return try allocator.print("{s}.{d}", .{ self.parent.?.tag.?, value.uint });
+                        return allocator.print("{s}.{d}", .{ self.parent.?.tag.?, value.uint });
                     },
                     .Long, .ULong => {
                         const value = cond.Cast.exp.Constant.as(.ULong);
-                        return try allocator.print("{s}.{d}", .{ self.parent.?.tag.?, value.ulong });
+                        return allocator.print("{s}.{d}", .{ self.parent.?.tag.?, value.ulong });
                     },
                     .Double => unreachable,
                     .FunType => unreachable,

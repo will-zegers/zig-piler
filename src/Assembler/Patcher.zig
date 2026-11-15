@@ -118,7 +118,7 @@ pub fn patchInstructions(allocator: Allocator, unpatched: []Instruction) Allocat
     }
     allocator.free(unpatched);
 
-    return try patched.toOwnedSlice(allocator);
+    return patched.toOwnedSlice(allocator);
 }
 
 const IllegalInstruction = enum {
