@@ -49,18 +49,6 @@ pub fn main(init: process.Init) !void {
         try sourceList.append(allocator, try allocator.dupe(u8, file.outputSrc));
 
         var tokens: Lexer.Token.Iterator = undefined;
-        var tree: Parser.AST = undefined;
-        var symbolTable: Symbol.Table = undefined;
-        var tac: TAC.Program = undefined;
-        var assembly: Assembler.Assembly = undefined;
-        defer { // FIFO deinit
-            if (stage.includes(.CodeGen)) assembly.deinit();
-            if (stage.includes(.TACky)) tac.deinit();
-            if (stage.includes(.Validate)) symbolTable.deinit();
-            if (stage.includes(.Parse)) tree.deinit(allocator);
-            if (stage.includes(.Lex)) tokens.deinit();
-        }
-
         if (stage.includes(.Lex)) {
             log.info("Running lexer...", .{});
             var lexer = try Lexer.init(allocator);
@@ -74,17 +62,21 @@ pub fn main(init: process.Init) !void {
                 tokens.reset();
             }
         } else return;
+        defer tokens.deinit();
 
+        var tree: Parser.AST = undefined;
         if (stage.includes(.Parse)) {
             log.info("Running parser...", .{});
-            tree = Parser.parse(allocator, &tokens, file.lines);
+            tree = try Parser.parse(allocator, &tokens, file.lines);
 
             if (debug) {
                 std.debug.print("-------parsed-------\n", .{});
                 Debugger.printParserAST(tree, null);
             }
         } else return;
+        defer tree.deinit(allocator);
 
+        var symbolTable: Symbol.Table = undefined;
         if (stage.includes(.Validate)) {
             log.info("Running semantic analysis...", .{});
             symbolTable = Semantic.run(allocator, &tree, file.lines);
@@ -94,7 +86,9 @@ pub fn main(init: process.Init) !void {
                 Debugger.printParserAST(tree, symbolTable);
             }
         } else return;
+        defer symbolTable.deinit();
 
+        var tac: TAC.Program = undefined;
         if (stage.includes(.TACky)) {
             log.info("Generating Tacky...", .{});
             tac = TAC.emit(allocator, &symbolTable, tree);
@@ -104,16 +98,19 @@ pub fn main(init: process.Init) !void {
                 Debugger.printTAC(tac, symbolTable);
             }
         } else return;
+        defer tac.deinit();
 
+        var assembly: Assembler.Assembly = undefined;
         if (stage.includes(.CodeGen)) {
             log.info("Running assembler...", .{});
-            assembly = Assembler.assemble(allocator, symbolTable, tac);
+            assembly = try Assembler.assemble(allocator, symbolTable, tac);
 
             if (debug) {
                 std.debug.print("------generated-------\n", .{});
                 Debugger.printAssemblerAST(assembly);
             }
         } else return;
+        defer assembly.deinit();
 
         if (stage.includes(.ToSource)) {
             log.info("Writing source to '{s}'", .{file.outputSrc});
