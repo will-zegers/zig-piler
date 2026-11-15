@@ -197,12 +197,6 @@ pub const Specifiers = struct {
     }
 };
 
-pub fn allocError() noreturn {
-    std.log.err("Memory allocation error", .{});
-    std.debug.dumpCurrentStackTrace(.{ .first_address = @returnAddress() });
-    std.process.exit(1);
-}
-
 pub fn expect(expected: Token.Type, token: Token) ParserError!void {
     if (expected != token.type) {
         std.log.err("Got unexpected {any} token '{s}'. Expected type {any}", .{ token.type, token.symbol, expected });

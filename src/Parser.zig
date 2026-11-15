@@ -29,7 +29,7 @@ pub const Unary = expression.Unary;
 
 const Parser = @This();
 
-const ExpectedError = Allocator.Error || Parser.Error;
+const ExpectedErrors = Allocator.Error || Parser.Error;
 
 pub const AST = Program;
 
@@ -55,7 +55,7 @@ pub const Program = struct {
     allocator: Allocator,
     declarations: []Declaration,
 
-    pub fn parse(allocator: Allocator, tokens: *TokenIterator) ExpectedError!Program {
+    pub fn parse(allocator: Allocator, tokens: *TokenIterator) ExpectedErrors!Program {
         var declarations: ArrayList(Declaration) = .empty;
         while (!tokens.eofReached()) {
             try declarations.append(allocator, try .parse(allocator, tokens));
@@ -76,7 +76,7 @@ pub const Declaration = union(DeclarationTag) {
     FunDecl: FunDecl,
     VarDecl: VarDecl,
 
-    pub fn parse(allocator: Allocator, tokens: *TokenIterator) ExpectedError!Declaration {
+    pub fn parse(allocator: Allocator, tokens: *TokenIterator) ExpectedErrors!Declaration {
         // We need to look a couple tokens ahead to determine if this is a function declaration,
         // which be of the form "int" <identifier> "(" (i.e., the 'marker' be an open paranthesis).
         // If not, assume it a variable declaration of the form "int" <identifier> (";" | "=") and
@@ -123,7 +123,7 @@ pub const FunDecl = struct {
     body: ?Block,
     storageClass: ?StorageClass,
 
-    pub fn parse(allocator: Allocator, tokens: *TokenIterator) ExpectedError!FunDecl {
+    pub fn parse(allocator: Allocator, tokens: *TokenIterator) ExpectedErrors!FunDecl {
         const specifiers = try Specifiers.parse(tokens);
 
         const name = tokens.next();
@@ -173,7 +173,7 @@ pub const FunDecl = struct {
         allocator.destroy(self.type.FunType.ret);
     }
 
-    fn parseParamsList(allocator: Allocator, tokens: *TokenIterator) ExpectedError![]VarDecl {
+    fn parseParamsList(allocator: Allocator, tokens: *TokenIterator) ExpectedErrors![]VarDecl {
         var params: ArrayList(VarDecl) = .empty;
 
         var nextToken = tokens.peek();
@@ -211,7 +211,7 @@ pub const VarDecl = struct {
     init: ?Expression = null,
     storageClass: ?StorageClass = null,
 
-    pub fn parse(allocator: Allocator, tokens: *TokenIterator) ExpectedError!VarDecl {
+    pub fn parse(allocator: Allocator, tokens: *TokenIterator) ExpectedErrors!VarDecl {
         const specifiers = try Specifiers.parse(tokens);
 
         var token = tokens.next();
@@ -246,7 +246,7 @@ pub const BlockItem = union(BlockItemTag) {
     Declaration: Declaration,
     Statement: Statement,
 
-    pub fn parse(allocator: Allocator, tokens: *TokenIterator) ExpectedError!BlockItem {
+    pub fn parse(allocator: Allocator, tokens: *TokenIterator) ExpectedErrors!BlockItem {
         const nextToken = tokens.peek();
         return switch (nextToken.type) {
             .Double, .Extern, .Int, .Long, .Signed, .Static, .Unsigned => .{ .Declaration = try .parse(allocator, tokens) },
@@ -266,7 +266,7 @@ pub const Block = struct {
     tag: ?[]const u8 = null,
     items: []BlockItem,
 
-    pub fn parse(allocator: Allocator, tokens: *TokenIterator) ExpectedError!Block {
+    pub fn parse(allocator: Allocator, tokens: *TokenIterator) ExpectedErrors!Block {
         var blockList: ArrayList(BlockItem) = .empty;
 
         try expect(.OpenBrace, tokens.next());
@@ -307,7 +307,7 @@ pub const Statement = union(StatementTag) {
     While: While,
     Null: void, // needed to represent empty semicolon-delimited statements
 
-    pub fn parse(allocator: Allocator, tokens: *TokenIterator) ExpectedError!Statement {
+    pub fn parse(allocator: Allocator, tokens: *TokenIterator) ExpectedErrors!Statement {
         const nextToken = tokens.peek();
         return switch (nextToken.type) {
             .Break => .{ .Break = try .parse(tokens) },
@@ -381,7 +381,7 @@ pub const Case = struct {
     body: ?*Statement,
     parent: ?*Switch = null,
 
-    pub fn parse(allocator: Allocator, tokens: *TokenIterator) ExpectedError!Case {
+    pub fn parse(allocator: Allocator, tokens: *TokenIterator) ExpectedErrors!Case {
         var nextToken = tokens.next();
         const cond: ?Expression = switch (nextToken.type) {
             .Case => try .parse(allocator, tokens, 0),
@@ -402,7 +402,7 @@ pub const Case = struct {
         return .{ .lineIndex = lineIndex, .cond = cond, .body = body };
     }
 
-    pub fn registerToParentSwitch(self: *Case, allocator: Allocator) ExpectedError!void {
+    pub fn registerToParentSwitch(self: *Case, allocator: Allocator) ExpectedErrors!void {
         self.tag = try self.generateTag(allocator);
         return self.parent.?.addCase(allocator, self);
     }
@@ -481,7 +481,7 @@ pub const DoWhile = struct {
     body: *Statement,
     cond: Expression,
 
-    pub fn parse(allocator: Allocator, tokens: *TokenIterator) ExpectedError!DoWhile {
+    pub fn parse(allocator: Allocator, tokens: *TokenIterator) ExpectedErrors!DoWhile {
         try expect(.Do, tokens.next());
 
         const body = try allocator.create(Statement);
@@ -510,7 +510,7 @@ const ForInit = union(ForInitTag) {
     Declaration: Declaration,
     Expression: ?Expression,
 
-    pub fn parse(allocator: Allocator, tokens: *TokenIterator) ExpectedError!ForInit {
+    pub fn parse(allocator: Allocator, tokens: *TokenIterator) ExpectedErrors!ForInit {
         const nextToken = tokens.peek();
         switch (nextToken.type) {
             .Double, .Int, .Long, .Extern, .Signed, .Static, .Unsigned => {
@@ -549,7 +549,7 @@ pub const For = struct {
     post: ?Expression,
     body: *Statement,
 
-    pub fn parse(allocator: Allocator, tokens: *TokenIterator) ExpectedError!For {
+    pub fn parse(allocator: Allocator, tokens: *TokenIterator) ExpectedErrors!For {
         try expect(.For, tokens.next());
         try expect(.OpenParenthesis, tokens.next());
 
@@ -603,7 +603,7 @@ pub const If = struct {
     thenStmt: *Statement,
     elseStmt: ?*Statement,
 
-    pub fn parse(allocator: Allocator, tokens: *TokenIterator) ExpectedError!If {
+    pub fn parse(allocator: Allocator, tokens: *TokenIterator) ExpectedErrors!If {
         try expect(.If, tokens.next());
         try expect(.OpenParenthesis, tokens.peek()); // only peek, since parentheses will be handled while parsing the expr
 
@@ -643,7 +643,7 @@ pub const Label = struct {
     tag: ?[]const u8 = null,
     body: *Statement,
 
-    pub fn parse(allocator: Allocator, name: Token, tokens: *TokenIterator) ExpectedError!Label {
+    pub fn parse(allocator: Allocator, name: Token, tokens: *TokenIterator) ExpectedErrors!Label {
         try expect(.Identifier, name);
         try expect(.Colon, tokens.next());
 
@@ -664,7 +664,7 @@ pub const Label = struct {
 pub const Return = struct {
     expr: Expression,
 
-    pub fn parse(allocator: Allocator, tokens: *TokenIterator) ExpectedError!Return {
+    pub fn parse(allocator: Allocator, tokens: *TokenIterator) ExpectedErrors!Return {
         try expect(.Return, tokens.next());
         const expr: Expression = try .parse(allocator, tokens, 0);
         const self: Return = .{ .expr = expr };
@@ -686,7 +686,7 @@ pub const Switch = struct {
     cases: ArrayList(*Case),
     defaultTag: ?[]const u8 = null,
 
-    pub fn parse(allocator: Allocator, tokens: *TokenIterator) ExpectedError!Switch {
+    pub fn parse(allocator: Allocator, tokens: *TokenIterator) ExpectedErrors!Switch {
         const token = tokens.next();
         try expect(.Switch, token);
         try expect(.OpenParenthesis, tokens.peek());
@@ -699,7 +699,7 @@ pub const Switch = struct {
         return .{ .lineIndex = token.lineIndex, .cond = cond, .body = body, .cases = .empty };
     }
 
-    pub fn addCase(self: *Switch, allocator: Allocator, case: *Case) ExpectedError!void {
+    pub fn addCase(self: *Switch, allocator: Allocator, case: *Case) ExpectedErrors!void {
         for (self.cases.items) |child| { // ensure this is not a duplicate case
             if (mem.eql(u8, child.tag.?, case.tag.?)) return Parser.Error.DuplicateCase;
         }
@@ -728,7 +728,7 @@ pub const While = struct {
     cond: Expression,
     body: *Statement,
 
-    pub fn parse(allocator: Allocator, tokens: *TokenIterator) ExpectedError!While {
+    pub fn parse(allocator: Allocator, tokens: *TokenIterator) ExpectedErrors!While {
         try expect(.While, tokens.next());
         try expect(.OpenParenthesis, tokens.peek());
         const cond: Expression = try .parse(allocator, tokens, 0);

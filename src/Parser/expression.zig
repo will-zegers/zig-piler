@@ -16,7 +16,7 @@ const allocError = common.allocError;
 const expect = common.expect;
 const identifier = common.identifier;
 
-const ExpectedError = Allocator.Error || ParserError;
+const ExpectedErrors = Allocator.Error || ParserError;
 
 pub const ExpressionTag = enum {
     Assignment,
@@ -40,7 +40,7 @@ pub const Expression = union(ExpressionTag) {
 
     /// Evaluates expression from left-to-right for arithmetic, or right-to-left for assignment operators.
     /// This is a recursive descent parser that uses the precedence climbing algorithm.
-    pub fn parse(allocator: Allocator, tokens: *TokenIterator, minPrecedence: usize) ExpectedError!Expression {
+    pub fn parse(allocator: Allocator, tokens: *TokenIterator, minPrecedence: usize) ExpectedErrors!Expression {
         var left = try parseFactor(allocator, tokens);
 
         var nextToken = tokens.peek();
@@ -136,7 +136,7 @@ pub const Assignment = struct {
     rhs: *Expression,
     isCompound: bool,
 
-    pub fn parse(allocator: Allocator, token: Token, lhs: Expression, rhs: Expression) ExpectedError!Assignment {
+    pub fn parse(allocator: Allocator, token: Token, lhs: Expression, rhs: Expression) ExpectedErrors!Assignment {
         const lhsPtr = try allocator.create(Expression);
         lhsPtr.* = lhs;
 
@@ -228,7 +228,7 @@ pub const Binary = struct {
     left: *Expression,
     right: *Expression,
 
-    pub fn parse(allocator: Allocator, lineIndex: usize, symbol: []const u8, left: Expression, right: Expression) ExpectedError!Binary {
+    pub fn parse(allocator: Allocator, lineIndex: usize, symbol: []const u8, left: Expression, right: Expression) ExpectedErrors!Binary {
         const operator = OperatorMap.get(symbol) orelse {
             log.err("Got unexpected binary operator: {s}", .{symbol});
             return ParserError.Token;
@@ -257,7 +257,7 @@ pub const Cast = struct {
     target: Specifiers, // This will get type-checked during semantic analysis, which will forbid storage classes
     exp: *Expression,
 
-    pub fn parse(allocator: Allocator, tokens: *Token.Iterator) ExpectedError!Cast {
+    pub fn parse(allocator: Allocator, tokens: *Token.Iterator) ExpectedErrors!Cast {
         try expect(.OpenParenthesis, tokens.next());
         const target = try Specifiers.parse(tokens);
         if (target.storageClass != null) {
@@ -421,7 +421,7 @@ pub const FunctionCall = struct {
     name: identifier,
     args: []Expression,
 
-    pub fn parse(allocator: Allocator, tokens: *TokenIterator) ExpectedError!FunctionCall {
+    pub fn parse(allocator: Allocator, tokens: *TokenIterator) ExpectedErrors!FunctionCall {
         const name = tokens.next();
         try expect(.Identifier, name);
         try expect(.OpenParenthesis, tokens.next());
@@ -438,7 +438,7 @@ pub const FunctionCall = struct {
         allocator.free(self.args);
     }
 
-    fn parseArgumentList(allocator: Allocator, tokens: *TokenIterator) ExpectedError![]Expression {
+    fn parseArgumentList(allocator: Allocator, tokens: *TokenIterator) ExpectedErrors![]Expression {
         var args: ArrayList(Expression) = .empty;
 
         var nextToken = tokens.peek();
@@ -463,7 +463,7 @@ pub const Ternary = struct {
     thenExpr: *Expression,
     elseExpr: *Expression,
 
-    pub fn parse(allocator: Allocator, left: Expression, middle: Expression, right: Expression) ExpectedError!Ternary {
+    pub fn parse(allocator: Allocator, left: Expression, middle: Expression, right: Expression) ExpectedErrors!Ternary {
         const condition = try allocator.create(Expression);
         condition.* = left;
 
@@ -510,7 +510,7 @@ pub const Unary = struct {
     operand: *Expression,
     order: enum { Pre, Post },
 
-    pub fn pre(allocator: Allocator, token: Token, rhs: Expression) ExpectedError!Expression {
+    pub fn pre(allocator: Allocator, token: Token, rhs: Expression) ExpectedErrors!Expression {
         const operator: Operator = OperatorMap.get(token.symbol) orelse return unexpectedToken(token);
 
         const operand = try allocator.create(Expression);
@@ -523,7 +523,7 @@ pub const Unary = struct {
         } };
     }
 
-    pub fn post(allocator: Allocator, token: Token, lhs: Expression) ExpectedError!Expression {
+    pub fn post(allocator: Allocator, token: Token, lhs: Expression) ExpectedErrors!Expression {
         const operator: Operator = OperatorMap.get(token.symbol) orelse return unexpectedToken(token);
         if (operator != .Dec and operator != .Inc) {
             log.err("'{s}' cannot be used as a post-fix operator", .{token.symbol});
@@ -553,7 +553,7 @@ pub const Var = struct {
     lineIndex: usize,
 };
 
-fn parseFactor(allocator: Allocator, tokens: *TokenIterator) ExpectedError!Expression {
+fn parseFactor(allocator: Allocator, tokens: *TokenIterator) ExpectedErrors!Expression {
     const token = tokens.next();
     var expr: Expression = blk: switch (token.type) {
         .Constant => .{ .Constant = try .parse(token) },
