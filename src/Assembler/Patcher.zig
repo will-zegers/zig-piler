@@ -21,7 +21,7 @@ const Push = instructions.Push;
 const operands = @import("operands.zig");
 const Operand = operands.Operand;
 
-pub fn patchInstructions(allocator: Allocator, unpatched: []Instruction) []Instruction {
+pub fn patchInstructions(allocator: Allocator, unpatched: []Instruction) Allocator.Error![]Instruction {
     var patched: ArrayList(Instruction) = .empty;
 
     for (unpatched) |instr| {
@@ -32,7 +32,7 @@ pub fn patchInstructions(allocator: Allocator, unpatched: []Instruction) []Instr
             // the instruction, and then move the contents of r11 back into the original second operand
             //
             const t = instr.getType().?;
-            patched.appendSlice(allocator, switch (illegal) {
+            try patched.appendSlice(allocator, switch (illegal) {
                 // Binary operations must not have memory as both its source and destination, or
                 // an immediate operand that cannot be represented in 4-bytes.
                 .Ill_Binary_Double => &.{
@@ -111,14 +111,14 @@ pub fn patchInstructions(allocator: Allocator, unpatched: []Instruction) []Instr
                     .{ .Mov = .{ .type = t, .src = instr.Binary.src, .dst = .{ .Reg = .cx } } },
                     .{ .Binary = .{ .type = t, .operator = instr.Binary.operator, .src = .{ .Reg = .cl }, .dst = instr.Binary.dst } },
                 },
-            }) catch allocError();
+            });
         } else {
-            patched.append(allocator, instr) catch allocError();
+            try patched.append(allocator, instr);
         }
     }
     allocator.free(unpatched);
 
-    return patched.toOwnedSlice(allocator) catch allocError();
+    return try patched.toOwnedSlice(allocator);
 }
 
 const IllegalInstruction = enum {
@@ -294,10 +294,4 @@ fn isIllegalCvtsi2sd(cvt: Cvtsi2sd) bool {
 
 fn isIllegalCvttsd2si(cvt: Cvttsd2si) bool {
     return isMemoryAddress(cvt.dst);
-}
-
-pub fn allocError() noreturn {
-    std.log.err("Memory allocation error", .{});
-    std.debug.dumpCurrentStackTrace(.{ .first_address = @returnAddress() });
-    std.process.exit(1);
 }

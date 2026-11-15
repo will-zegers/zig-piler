@@ -11,6 +11,7 @@ const Symbol = @import("Semantic/Symbols.zig");
 const TAC = @import("TAC.zig");
 
 const Patcher = @import("Assembler/Patcher.zig");
+
 const instruction = @import("Assembler/instruction.zig");
 pub const Instruction = instruction.Instruction;
 const ARG_FP_REGISTERS = instruction.ARG_FP_REGISTERS;
@@ -62,7 +63,7 @@ pub const Function = struct {
     instructions: []Instruction,
 };
 
-pub fn assemble(allocator: Allocator, frontendSymbols: Symbol.Table, tree: TAC.Program) Assembly {
+pub fn assemble(allocator: Allocator, frontendSymbols: Symbol.Table, tree: TAC.Program) Allocator.Error!Assembly {
     var arena: ArenaAllocator = .init(allocator);
     const arenaAllocator = arena.allocator();
 
@@ -77,16 +78,16 @@ pub fn assemble(allocator: Allocator, frontendSymbols: Symbol.Table, tree: TAC.P
     for (tree.topLevel) |topLevel| {
         switch (topLevel) {
             .Function => |fun| {
-                const assembly = assembleFunction(arenaAllocator, frontendSymbols, &staticConstsByValue, topLevel.Function);
-                topLevelList.append(arenaAllocator, assembly) catch allocError();
+                const assembly = try assembleFunction(arenaAllocator, frontendSymbols, &staticConstsByValue, topLevel.Function);
+                try topLevelList.append(arenaAllocator, assembly);
 
                 // Function has been defined here, add an entry to the backend table
-                backendSymbols.put(fun.name, .{ .Fun = .{ .defined = true } }) catch allocError();
+                try backendSymbols.put(fun.name, .{ .Fun = .{ .defined = true } });
             },
             .StaticVariable => |staticVar| {
                 // Static variables will be added to the end after .text. For now, just keep track of them
                 const entry = frontendSymbols.get(staticVar.identifier).?;
-                staticVars.put(staticVar.identifier, .init(entry.type, staticVar)) catch allocError();
+                try staticVars.put(staticVar.identifier, .init(entry.type, staticVar));
             },
         }
     }
@@ -95,40 +96,40 @@ pub fn assemble(allocator: Allocator, frontendSymbols: Symbol.Table, tree: TAC.P
 
     var valueIt = staticConstsByValue.valueIterator();
     while (valueIt.next()) |value_ptr| {
-        staticConstsByName.put(value_ptr.*.name, value_ptr.*) catch allocError();
+        try staticConstsByName.put(value_ptr.*.name, value_ptr.*);
     }
 
-    populateBackendSymbols(&backendSymbols, frontendSymbols, staticConstsByValue);
+    try populateBackendSymbols(&backendSymbols, frontendSymbols, staticConstsByValue);
 
     return .{
         .arena = arena,
-        .topLevel = topLevelList.toOwnedSlice(arenaAllocator) catch allocError(),
+        .topLevel = try topLevelList.toOwnedSlice(arenaAllocator),
         .symbols = backendSymbols,
         .staticVars = staticVars,
         .staticConsts = staticConstsByName,
     };
 }
 
-pub fn assembleFunction(allocator: Allocator, symbols: Symbol.Table, staticConstsByValue: *AutoHashMap(u64, StaticConstant), function: TAC.Function) Function {
+pub fn assembleFunction(allocator: Allocator, symbols: Symbol.Table, staticConstsByValue: *AutoHashMap(u64, StaticConstant), function: TAC.Function) Allocator.Error!Function {
     var instructionList: ArrayList(Instruction) = .empty;
 
-    var pseudoMap = initStack(allocator, symbols, &instructionList, function.params) catch allocError();
+    var pseudoMap = try initStack(allocator, symbols, &instructionList, function.params);
     defer pseudoMap.deinit();
 
     // First pass to build Assembly AST
     for (function.body) |instr| {
-        const assembly = Instruction.assemble(allocator, symbols, staticConstsByValue, instr);
+        const assembly = try Instruction.assemble(allocator, symbols, staticConstsByValue, instr);
         defer allocator.free(assembly);
 
-        instructionList.appendSlice(allocator, assembly) catch allocError();
+        try instructionList.appendSlice(allocator, assembly);
     }
 
     // Second pass, replace Pseudo registers with stack locations and prepend the stack allocation calculus
-    convertPseudoToMemory(allocator, symbols, &instructionList, &pseudoMap) catch allocError();
+    try convertPseudoToMemory(allocator, symbols, &instructionList, &pseudoMap);
 
     // Find illegal instructions (see specifications in the Patcher module)
-    var instructions = instructionList.toOwnedSlice(allocator) catch allocError();
-    instructions = Patcher.patchInstructions(allocator, instructions);
+    var instructions = try instructionList.toOwnedSlice(allocator);
+    instructions = try Patcher.patchInstructions(allocator, instructions);
 
 
     return .{
@@ -238,12 +239,12 @@ fn convertPseudoToMemory(
 
     // Prepend the instructions with stack space allocation based on the number of
     // pseudo registers (i.e. local variables) replaced with memory
-    instructions.insert(allocator, 0, .{ .Binary = .{
+    try instructions.insert(allocator, 0, .{ .Binary = .{
         .type = .Quad,
         .operator = .Sub,
         .src = .{ .Imm = stackSpace },
         .dst = .{ .Reg = .sp },
-    } }) catch allocError();
+    } });
 }
 
 /// Replace 'Psuedo' registers generated in the first pass with memory locations
@@ -284,7 +285,7 @@ fn replaceIfPseudo(
     }
 }
 
-fn populateBackendSymbols(beSymbols: *StringHashMap(Entry), feSymbols: Symbol.Table, constants: AutoHashMap(u64, StaticConstant)) void {
+fn populateBackendSymbols(beSymbols: *StringHashMap(Entry), feSymbols: Symbol.Table, constants: AutoHashMap(u64, StaticConstant)) Allocator.Error!void {
     var symbolIt = feSymbols.iterator();
     while (symbolIt.next()) |entry| {
         const key = entry.key_ptr.*;
@@ -293,7 +294,7 @@ fn populateBackendSymbols(beSymbols: *StringHashMap(Entry), feSymbols: Symbol.Ta
         // Skip backend symbols function entries that were defined in assembly
         if (beSymbols.contains(key)) continue;
 
-        beSymbols.put(key, switch (value.type) {
+        try beSymbols.put(key, switch (value.type) {
             .Int, .UInt => switch (value.attrs) {
                 .Static => .{ .Obj = .{ .type = .Long, .isStatic = true, .isConstant = false } },
                 .Local => .{ .Obj = .{ .type = .Long, .isStatic = false, .isConstant = false } },
@@ -305,7 +306,7 @@ fn populateBackendSymbols(beSymbols: *StringHashMap(Entry), feSymbols: Symbol.Ta
                 .Fun => unreachable,
             },
             .FunType => .{ .Fun = .{ .defined = false } },
-        }) catch allocError();
+        });
     }
 
     var constIt = constants.valueIterator();
@@ -313,15 +314,9 @@ fn populateBackendSymbols(beSymbols: *StringHashMap(Entry), feSymbols: Symbol.Ta
         const value = value_ptr.*;
         const key = value.name;
 
-        beSymbols.put(key, switch (value.type) {
+        try beSymbols.put(key, switch (value.type) {
             .Long => .{ .Obj = .{ .type = .Long, .isStatic = true, .isConstant = true } },
             .Double, .Quad => .{ .Obj = .{ .type = .Quad, .isStatic = false, .isConstant = true } },
-        }) catch allocError();
+        });
     }
-}
-
-pub fn allocError() noreturn {
-    std.log.err("Memory allocation error", .{});
-    std.debug.dumpCurrentStackTrace(.{ .first_address = @returnAddress() });
-    std.process.exit(1);
 }
