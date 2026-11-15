@@ -1,11 +1,11 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
+const ArrayList = std.ArrayList;
 const math = std.math;
 
 const Patcher = @This();
 
 const instructions = @import("instruction.zig");
-const InstructionList = instructions.InstructionList;
 const Binary = instructions.Binary;
 const Cmp = instructions.Cmp;
 const Cvttsd2si = instructions.Cvttsd2si;
@@ -17,10 +17,12 @@ const Mov = instructions.Mov;
 const Movsx = instructions.Movsx;
 const Movzx = instructions.Movzx;
 const Push = instructions.Push;
-const Operand = instructions.Operand;
+
+const operands = @import("operands.zig");
+const Operand = operands.Operand;
 
 pub fn patchInstructions(allocator: Allocator, unpatched: []Instruction) []Instruction {
-    var patched: InstructionList = .empty;
+    var patched: ArrayList(Instruction) = .empty;
 
     for (unpatched) |instr| {
         if (Patcher.detectIllegal(instr)) |illegal| {

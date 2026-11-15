@@ -13,11 +13,6 @@ const TAC = @import("TAC.zig");
 const Patcher = @import("Assembler/Patcher.zig");
 const instruction = @import("Assembler/instruction.zig");
 pub const Instruction = instruction.Instruction;
-pub const Operand = instruction.Operand;
-pub const Reg = instruction.Reg;
-pub const StaticConstant = instruction.StaticConstant;
-pub const StaticVariable = instruction.StaticVariable;
-pub const Type = instruction.Type;
 const ARG_FP_REGISTERS = instruction.ARG_FP_REGISTERS;
 const ARG_INT_REGISTERS = instruction.ARG_INT_REGISTERS;
 const LONGWORD_BYTES = instruction.LONGWORD_BYTES;
@@ -30,6 +25,13 @@ const Label = instruction.Label;
 const Mov = instruction.Mov;
 const Ret = instruction.Ret;
 const Unary = instruction.Unary;
+
+const operands = @import("Assembler/operands.zig");
+pub const Operand = operands.Operand;
+pub const Reg = operands.Reg;
+pub const StaticConstant = operands.StaticConstant;
+pub const StaticVariable = operands.StaticVariable;
+pub const Type = operands.Type;
 
 const Assembler = @This();
 
