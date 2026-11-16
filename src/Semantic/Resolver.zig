@@ -13,27 +13,27 @@ const Expression = Parser.Expression;
 
 const Context = @import("Context.zig");
 
-pub fn run(allocator: Allocator, context: *Context, tree: *Parser.AST) void {
-    resolveProgram(allocator, context, tree);
+pub fn run(allocator: Allocator, context: *Context, tree: *Parser.AST) Allocator.Error!void {
+    try resolveProgram(allocator, context, tree);
 }
 
-fn resolveProgram(allocator: Allocator, context: *Context, tree: *Parser.AST) void {
+fn resolveProgram(allocator: Allocator, context: *Context, tree: *Parser.AST) Allocator.Error!void {
     for (tree.declarations) |*decl| {
         switch (decl.*) {
-            .FunDecl => |*funDecl| resolveFunDecl(allocator, context, funDecl),
-            .VarDecl => |*varDecl| resolveFileScopeVarDecl(context, varDecl),
+            .FunDecl => |*funDecl| try resolveFunDecl(allocator, context, funDecl),
+            .VarDecl => |*varDecl| try resolveFileScopeVarDecl(context, varDecl),
         }
     }
 }
 
-fn resolveDeclaration(allocator: Allocator, context: *Context, decl: *Declaration) void {
+fn resolveDeclaration(allocator: Allocator, context: *Context, decl: *Declaration) Allocator.Error!void {
     switch (decl.*) {
-        .FunDecl => |*funDecl| resolveFunDecl(allocator, context, funDecl),
-        .VarDecl => |*varDecl| resolveLocalVarDecl(allocator, context, varDecl),
+        .FunDecl => |*funDecl| try resolveFunDecl(allocator, context, funDecl),
+        .VarDecl => |*varDecl| try resolveLocalVarDecl(allocator, context, varDecl),
     }
 }
 
-fn resolveFunDecl(allocator: Allocator, context: *Context, decl: *FunDecl) void {
+fn resolveFunDecl(allocator: Allocator, context: *Context, decl: *FunDecl) Allocator.Error!void {
     const scope = context.getScope();
     // Static storage class only allowed for function at file-scope
     if (context.getScope().type != .File and decl.storageClass == .Static) {
@@ -48,16 +48,16 @@ fn resolveFunDecl(allocator: Allocator, context: *Context, decl: *FunDecl) void 
         }
     }
 
-    scope.identifiers.put(decl.name, .{ .unique = decl.name, .fromCurrentScope = true, .hasLinkage = true }) catch allocError();
+    try scope.identifiers.put(decl.name, .{ .unique = decl.name, .fromCurrentScope = true, .hasLinkage = true });
 
     context.function = decl.name;
     defer context.function = null;
 
-    context.pushScope(.Function, decl.name);
+    try context.pushScope(.Function, decl.name);
     defer context.popScope();
 
     for (decl.params) |*param| {
-        resolveLocalVarDecl(allocator, context, param);
+        try resolveLocalVarDecl(allocator, context, param);
     }
 
     if (decl.body) |*body| {
@@ -66,27 +66,27 @@ fn resolveFunDecl(allocator: Allocator, context: *Context, decl: *FunDecl) void 
             context.err.report(.NestedFunction, decl.lineIndex, null);
             return;
         }
-        resolveBlockIdentifiers(allocator, context, body);
+        try resolveBlockIdentifiers(allocator, context, body);
     }
 }
 
-fn resolveVarDecl(allocator: Allocator, context: *Context, decl: *VarDecl) void {
+fn resolveVarDecl(allocator: Allocator, context: *Context, decl: *VarDecl) Allocator.Error!void {
     if (context.tag == Context.FILE_SCOPE) {
         resolveFileScopeVarDecl(context, decl);
     } else {
-        resolveLocalVarDecl(allocator, context, decl);
+        try resolveLocalVarDecl(allocator, context, decl);
     }
 }
 
-fn resolveFileScopeVarDecl(context: *Context, decl: *VarDecl) void {
+fn resolveFileScopeVarDecl(context: *Context, decl: *VarDecl) Allocator.Error!void {
     // Since file-scope declaration must be initialized with constant values (and
     // 'constexpr' is not currently supported), we don't need to resolve anything
     // int the initialization if it exists
     const scope = context.getScope();
-    scope.identifiers.put(decl.name, .{ .unique = decl.name, .hasLinkage = true }) catch allocError();
+    try scope.identifiers.put(decl.name, .{ .unique = decl.name, .hasLinkage = true });
 }
 
-fn resolveLocalVarDecl(allocator: Allocator, context: *Context, decl: *VarDecl) void {
+fn resolveLocalVarDecl(allocator: Allocator, context: *Context, decl: *VarDecl) Allocator.Error!void {
     const name = decl.name; // cache the parsed name
 
     if (context.getScope().identifiers.get(name)) |entry| {
@@ -100,23 +100,23 @@ fn resolveLocalVarDecl(allocator: Allocator, context: *Context, decl: *VarDecl) 
 
     const scope = context.getScope();
     if (decl.storageClass == .Extern) {
-        scope.identifiers.put(decl.name, .{ .unique = decl.name, .hasLinkage = true }) catch allocError();
+        try scope.identifiers.put(decl.name, .{ .unique = decl.name, .hasLinkage = true });
         return;
     }
 
-    decl.unique = generateUnique(allocator, context, name);
-    scope.identifiers.put(name, .{ .unique = decl.unique.? }) catch allocError();
+    decl.unique = try generateUnique(allocator, context, name);
+    try scope.identifiers.put(name, .{ .unique = decl.unique.? });
 
     if (decl.init) |*initExpr| {
         resolveExpression(allocator, context, initExpr);
     }
 }
 
-fn resolveBlockIdentifiers(allocator: Allocator, context: *Context, block: *Block) void {
+fn resolveBlockIdentifiers(allocator: Allocator, context: *Context, block: *Block) Allocator.Error!void {
     for (block.items) |*item| {
         switch (item.*) {
-            .Statement => |*stmt| resolveStatementIdentifiers(allocator, context, stmt),
-            .Declaration => |*decl| resolveDeclaration(allocator, context, decl),
+            .Statement => |*stmt| try resolveStatementIdentifiers(allocator, context, stmt),
+            .Declaration => |*decl| try resolveDeclaration(allocator, context, decl),
         }
     }
 }
@@ -126,30 +126,30 @@ fn resolveBlockIdentifiers(allocator: Allocator, context: *Context, block: *Bloc
 ///   2) collect all declared labels into a map structure for resolution in pass 2 (since
 ///      labels may be used before they're declared, i.e. gotos)
 ///   3) collect all individual cases into their respective switch statements for use in TAC gen
-fn resolveStatementIdentifiers(allocator: Allocator, context: *Context, statement: *Statement) void {
+fn resolveStatementIdentifiers(allocator: Allocator, context: *Context, statement: *Statement) Allocator.Error!void {
     switch (statement.*) {
         .Compound => |*compound| {
-            compound.tag = generateUnique(allocator, context, "compound");
+            compound.tag = try generateUnique(allocator, context, "compound");
 
-            context.pushScope(.Block, compound.tag.?);
+            try context.pushScope(.Block, compound.tag.?);
             defer context.popScope();
 
-            resolveBlockIdentifiers(allocator, context, compound);
+            try resolveBlockIdentifiers(allocator, context, compound);
         },
         .Return => |*ret| resolveExpression(allocator, context, &ret.expr),
         .Expression => |*expr| resolveExpression(allocator, context, expr),
         .If => |*ifStmt| {
             resolveExpression(allocator, context, &ifStmt.condition);
-            resolveStatementIdentifiers(allocator, context, ifStmt.thenStmt);
+            try resolveStatementIdentifiers(allocator, context, ifStmt.thenStmt);
             if (ifStmt.elseStmt) |*elseStmt| {
-                resolveStatementIdentifiers(allocator, context, elseStmt.*);
+                try resolveStatementIdentifiers(allocator, context, elseStmt.*);
             }
         },
         .Label => |*lbl| {
-            const unique = generateUnique(allocator, context, lbl.name);
-            context.addNewLabel(lbl, unique);
+            const unique = try generateUnique(allocator, context, lbl.name);
+            try context.addNewLabel(lbl, unique);
 
-            resolveStatementIdentifiers(allocator, context, lbl.body);
+            try resolveStatementIdentifiers(allocator, context, lbl.body);
         },
         .Break => |*brk| if (context.getBreakTag()) |tag| {
             brk.tag = tag;
@@ -162,29 +162,29 @@ fn resolveStatementIdentifiers(allocator: Allocator, context: *Context, statemen
             context.err.report(.Continue, cont.lineIndex, null);
         },
         .DoWhile => |*doWhl| {
-            doWhl.tag = generateUnique(allocator, context, "doWhile");
+            doWhl.tag = try generateUnique(allocator, context, "doWhile");
 
-            context.pushScope(.Loop, doWhl.tag.?);
+            try context.pushScope(.Loop, doWhl.tag.?);
 
-            resolveStatementIdentifiers(allocator, context, doWhl.body);
+            try resolveStatementIdentifiers(allocator, context, doWhl.body);
             resolveExpression(allocator, context, &doWhl.cond);
         },
         .While => |*whl| {
             resolveExpression(allocator, context, &whl.cond);
 
-            whl.tag = generateUnique(allocator, context, "while");
+            whl.tag = try generateUnique(allocator, context, "while");
 
-            context.pushScope(.Loop, whl.tag.?);
-            resolveStatementIdentifiers(allocator, context, whl.body);
+            try context.pushScope(.Loop, whl.tag.?);
+            try resolveStatementIdentifiers(allocator, context, whl.body);
         },
         .For => |*f| {
-            f.tag = generateUnique(allocator, context, "for");
+            f.tag = try generateUnique(allocator, context, "for");
 
-            context.pushScope(.Loop, f.tag.?);
+            try context.pushScope(.Loop, f.tag.?);
             defer context.popScope();
 
             switch (f.init) {
-                .Declaration => |*decl| resolveDeclaration(allocator, context, decl),
+                .Declaration => |*decl| try resolveDeclaration(allocator, context, decl),
                 .Expression => if (f.init.Expression) |*expr| {
                     resolveExpression(allocator, context, expr);
                 },
@@ -192,27 +192,27 @@ fn resolveStatementIdentifiers(allocator: Allocator, context: *Context, statemen
             if (f.cond) |*cond| resolveExpression(allocator, context, cond);
             if (f.post) |*post| resolveExpression(allocator, context, post);
 
-            resolveStatementIdentifiers(allocator, context, f.body);
+            try resolveStatementIdentifiers(allocator, context, f.body);
         },
         .Goto, .Null => {}, // gotos are resolved on the second pass
         .Switch => |*sw| {
             resolveExpression(allocator, context, &sw.cond);
 
-            sw.tag = generateUnique(allocator, context, "switch");
+            sw.tag = try generateUnique(allocator, context, "switch");
 
-            context.switches.append(allocator, sw) catch allocError();
+            try context.switches.append(allocator, sw);
             defer _ = context.switches.pop();
 
-            context.pushScope(.Switch, sw.tag.?);
+            try context.pushScope(.Switch, sw.tag.?);
             defer context.popScope();
 
-            resolveStatementIdentifiers(allocator, context, sw.body);
+            try resolveStatementIdentifiers(allocator, context, sw.body);
         },
         .Case => |*case| {
             if (context.switches.last()) |parentSwitch| {
                 case.parent = parentSwitch;
 
-                if (case.body) |body| resolveStatementIdentifiers(allocator, context, body);
+                if (case.body) |body| try resolveStatementIdentifiers(allocator, context, body);
             } else {
                 context.err.report(.OrphanCase, case.lineIndex, null);
             }
@@ -278,16 +278,10 @@ fn resolveExpression(allocator: Allocator, context: *Context, expr: *Expression)
     }
 }
 
-fn generateUnique(allocator: Allocator, context: *Context, name: []const u8) []u8 {
+fn generateUnique(allocator: Allocator, context: *Context, name: []const u8) Allocator.Error![]u8 {
     const scope = context.getScope();
-    const unique = allocator.print("{s}.{s}.{d}", .{ scope.tag, name, context.counter }) catch allocError();
+    const unique = try allocator.print("{s}.{s}.{d}", .{ scope.tag, name, context.counter });
     context.counter += 1;
 
     return unique;
-}
-
-pub fn allocError() noreturn {
-    std.log.err("Memory allocation error", .{});
-    std.debug.dumpCurrentStackTrace(.{ .first_address = @returnAddress() });
-    std.process.exit(1);
 }

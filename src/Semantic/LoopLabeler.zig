@@ -10,7 +10,7 @@ const Statement = Parser.Statement;
 
 const Context = @import("Context.zig");
 
-pub fn run(allocator: Allocator, context: *Context, tree: *AST) void {
+pub fn run(allocator: Allocator, context: *Context, tree: *AST) Allocator.Error!void {
     for (tree.declarations) |*decl| {
         if (decl.* != .FunDecl) continue;
 
@@ -18,36 +18,36 @@ pub fn run(allocator: Allocator, context: *Context, tree: *AST) void {
             context.function = decl.FunDecl.name;
             defer context.function = null;
 
-            labelBlockLoops(allocator, context, body);
+            try labelBlockLoops(allocator, context, body);
         }
     }
 }
 
-fn labelBlockLoops(allocator: Allocator, context: *Context, block: *Block) void {
+fn labelBlockLoops(allocator: Allocator, context: *Context, block: *Block) Allocator.Error!void {
     for (block.items) |*item| {
         switch (item.*) {
-            .Statement => |*stmt| labelStatementLoops(allocator, context, stmt),
+            .Statement => |*stmt| try labelStatementLoops(allocator, context, stmt),
             else => {},
         }
     }
 }
 
-fn labelStatementLoops(allocator: Allocator, context: *Context, stmt: *Statement) void {
+fn labelStatementLoops(allocator: Allocator, context: *Context, stmt: *Statement) Allocator.Error!void {
     switch (stmt.*) {
-        .Compound => |*compound| labelBlockLoops(allocator, context, compound),
+        .Compound => |*compound| try labelBlockLoops(allocator, context, compound),
         .Goto => |*goto| {
-            goto.target = context.getGotoLabel(goto) orelse return;
+            goto.target = try context.getGotoLabel(goto) orelse return;
         },
         .If => |*ifStmt| {
-            labelStatementLoops(allocator, context, ifStmt.thenStmt);
-            if (ifStmt.elseStmt) |*elseStmt| labelStatementLoops(allocator, context, elseStmt.*);
+            try labelStatementLoops(allocator, context, ifStmt.thenStmt);
+            if (ifStmt.elseStmt) |*elseStmt| try labelStatementLoops(allocator, context, elseStmt.*);
         },
-        .Switch => |*swtch| labelStatementLoops(allocator, context, swtch.body),
-        .Case => |*case| if (case.body) |body| labelStatementLoops(allocator, context, body),
-        .Label => |*label| labelStatementLoops(allocator, context, label.body),
-        .DoWhile => |*loop| labelStatementLoops(allocator, context, loop.body),
-        .For => |*loop| labelStatementLoops(allocator, context, loop.body),
-        .While => |*loop| labelStatementLoops(allocator, context, loop.body),
+        .Switch => |*swtch| try labelStatementLoops(allocator, context, swtch.body),
+        .Case => |*case| if (case.body) |body| try labelStatementLoops(allocator, context, body),
+        .Label => |*label| try labelStatementLoops(allocator, context, label.body),
+        .DoWhile => |*loop| try labelStatementLoops(allocator, context, loop.body),
+        .For => |*loop| try labelStatementLoops(allocator, context, loop.body),
+        .While => |*loop| try labelStatementLoops(allocator, context, loop.body),
         else => {},
     }
 }

@@ -26,25 +26,25 @@ var FunctionName: ?[]const u8 = null;
 
 const TypeChecker = @This();
 
-pub fn run(allocator: Allocator, symbols: *Symbol.Table, errorReporter: *Error.Reporter, tree: *AST) void {
+pub fn run(allocator: Allocator, symbols: *Symbol.Table, errorReporter: *Error.Reporter, tree: *AST) Allocator.Error!void {
     ErrorReporter = errorReporter;
 
     for (tree.declarations) |*decl| {
         switch (decl.*) {
-            .FunDecl => |*funDecl| typeCheckFunDecl(allocator, symbols, funDecl),
-            .VarDecl => |*varDecl| typeCheckFileScopeVarDecl(allocator, symbols, varDecl),
+            .FunDecl => |*funDecl| try typeCheckFunDecl(allocator, symbols, funDecl),
+            .VarDecl => |*varDecl| try typeCheckFileScopeVarDecl(allocator, symbols, varDecl),
         }
     }
 }
 
-fn typeCheckLocalDeclaration(allocator: Allocator, symbols: *Symbol.Table, decl: *Declaration) void {
+fn typeCheckLocalDeclaration(allocator: Allocator, symbols: *Symbol.Table, decl: *Declaration) Allocator.Error!void {
     switch (decl.*) {
-        .FunDecl => |*funDecl| typeCheckFunDecl(allocator, symbols, funDecl),
-        .VarDecl => |*varDecl| typeCheckLocalVarDecl(allocator, symbols, varDecl),
+        .FunDecl => |*funDecl| try typeCheckFunDecl(allocator, symbols, funDecl),
+        .VarDecl => |*varDecl| try typeCheckLocalVarDecl(allocator, symbols, varDecl),
     }
 }
 
-fn typeCheckFunDecl(allocator: Allocator, symbols: *Symbol.Table, decl: *FunDecl) void {
+fn typeCheckFunDecl(allocator: Allocator, symbols: *Symbol.Table, decl: *FunDecl) Allocator.Error!void {
     var isDefined: bool = decl.body != null;
     var isGlobal: bool = decl.storageClass != .Static;
 
@@ -81,22 +81,22 @@ fn typeCheckFunDecl(allocator: Allocator, symbols: *Symbol.Table, decl: *FunDecl
         .defined = isDefined or decl.body != null,
         .global = isGlobal,
     } };
-    symbols.put(decl.name, .{
+    try symbols.put(decl.name, .{
         .type = decl.type,
         .attrs = attrs,
-    }) catch allocError();
+    });
 
     if (decl.body) |*body| {
         for (decl.params) |param| {
-            symbols.put(param.unique.?, .{ .type = param.type, .attrs = .Local }) catch allocError();
+            try symbols.put(param.unique.?, .{ .type = param.type, .attrs = .Local });
         }
         FunctionName = decl.name;
-        typeCheckBlock(allocator, symbols, body);
+        try typeCheckBlock(allocator, symbols, body);
         FunctionName = null;
     }
 }
 
-fn typeCheckFileScopeVarDecl(allocator: Allocator, symbols: *Symbol.Table, decl: *VarDecl) void {
+fn typeCheckFileScopeVarDecl(allocator: Allocator, symbols: *Symbol.Table, decl: *VarDecl) Allocator.Error!void {
     var initialValue: Symbol.Static.InitialValue = if (decl.storageClass == .Extern) .None else .Tentative;
     var isGlobal = decl.storageClass != .Static;
 
@@ -131,17 +131,17 @@ fn typeCheckFileScopeVarDecl(allocator: Allocator, symbols: *Symbol.Table, decl:
         }
     }
     var attrs: Symbol.Attrs = .{ .Static = .{ .initialValue = initialValue, .global = isGlobal } };
-    symbols.put(decl.name, .{ .type = decl.type, .attrs = attrs }) catch allocError();
+    try symbols.put(decl.name, .{ .type = decl.type, .attrs = attrs });
 
     // Now that we've added an entry to the symbol table, type check init (if it exists) and update
     // the entry if need be
     if (decl.init) |*init| {
         if (init.Assignment.rhs.* == .Constant) {
-            _ = typeCheckExpression(allocator, symbols, init);
+            _ = try typeCheckExpression(allocator, symbols, init);
             initialValue = .{ .Initial = init.Assignment.rhs.Constant };
             attrs = .{ .Static = .{ .initialValue = initialValue, .global = isGlobal } };
 
-            symbols.put(decl.name, .{ .type = decl.type, .attrs = attrs }) catch allocError();
+            try symbols.put(decl.name, .{ .type = decl.type, .attrs = attrs });
         } else {
             // TODO: revisit this when SemanticError becomes an error class
             // Report an error, but continue as if there's no initialization
@@ -150,7 +150,7 @@ fn typeCheckFileScopeVarDecl(allocator: Allocator, symbols: *Symbol.Table, decl:
     }
 }
 
-fn typeCheckLocalVarDecl(allocator: Allocator, symbols: *Symbol.Table, decl: *VarDecl) void {
+fn typeCheckLocalVarDecl(allocator: Allocator, symbols: *Symbol.Table, decl: *VarDecl) Allocator.Error!void {
     if (decl.storageClass == .Extern) {
         if (decl.init) |_| {
             ErrorReporter.report(.LocalExternDefined, decl.lineIndex, decl.name);
@@ -162,7 +162,7 @@ fn typeCheckLocalVarDecl(allocator: Allocator, symbols: *Symbol.Table, decl: *Va
             }
         } else {
             const attrs: Symbol.Attrs = .{ .Static = .{ .initialValue = .None, .global = true } };
-            symbols.put(decl.name, .{ .type = decl.type, .attrs = attrs }) catch allocError();
+            try symbols.put(decl.name, .{ .type = decl.type, .attrs = attrs });
         }
     } else if (decl.storageClass == .Static) {
         var initialValue: Symbol.Static.InitialValue = switch (decl.type) {
@@ -183,47 +183,47 @@ fn typeCheckLocalVarDecl(allocator: Allocator, symbols: *Symbol.Table, decl: *Va
         }
 
         const attrs: Symbol.Attrs = .{ .Static = .{ .initialValue = initialValue, .global = true } };
-        symbols.put(decl.unique.?, .{ .type = decl.type, .attrs = attrs }) catch allocError();
+        try symbols.put(decl.unique.?, .{ .type = decl.type, .attrs = attrs });
     } else { // automatic (local scope) storage class
-        symbols.put(decl.unique.?, .{ .type = decl.type, .attrs = .Local }) catch allocError();
+        try symbols.put(decl.unique.?, .{ .type = decl.type, .attrs = .Local });
         if (decl.init) |*init| {
-            _ = typeCheckExpression(allocator, symbols, init);
+            _ = try typeCheckExpression(allocator, symbols, init);
         }
     }
 }
 
-fn typeCheckBlock(allocator: Allocator, symbols: *Symbol.Table, block: *Block) void {
+fn typeCheckBlock(allocator: Allocator, symbols: *Symbol.Table, block: *Block) Allocator.Error!void {
     for (block.items) |*item| {
         switch (item.*) {
-            .Declaration => |*decl| typeCheckLocalDeclaration(allocator, symbols, decl),
-            .Statement => |*stmt| typeCheckStatement(allocator, symbols, stmt),
+            .Declaration => |*decl| try typeCheckLocalDeclaration(allocator, symbols, decl),
+            .Statement => |*stmt| try typeCheckStatement(allocator, symbols, stmt),
         }
     }
 }
 
-fn typeCheckStatement(allocator: Allocator, symbols: *Symbol.Table, stmt: *Statement) void {
+fn typeCheckStatement(allocator: Allocator, symbols: *Symbol.Table, stmt: *Statement) Allocator.Error!void {
     switch (stmt.*) {
-        .Compound => |*compound| typeCheckBlock(allocator, symbols, compound),
+        .Compound => |*compound| try typeCheckBlock(allocator, symbols, compound),
         .Return => |*ret| {
-            _ = typeCheckExpression(allocator, symbols, &ret.expr);
+            _ = try typeCheckExpression(allocator, symbols, &ret.expr);
 
             const symbol = symbols.get(FunctionName.?) orelse unreachable;
-            ret.expr = Cast.to(allocator, &ret.expr, symbol.type.FunType.ret.*) catch allocError();
+            ret.expr = try Cast.to(allocator, &ret.expr, symbol.type.FunType.ret.*);
         },
-        .Expression => |*expr| _ = typeCheckExpression(allocator, symbols, expr),
+        .Expression => |*expr| _ = try typeCheckExpression(allocator, symbols, expr),
         .If => |*ifStmt| {
-            _ = typeCheckExpression(allocator, symbols, &ifStmt.condition);
-            typeCheckStatement(allocator, symbols, ifStmt.thenStmt);
-            if (ifStmt.elseStmt) |els| typeCheckStatement(allocator, symbols, els);
+            _ = try typeCheckExpression(allocator, symbols, &ifStmt.condition);
+            try typeCheckStatement(allocator, symbols, ifStmt.thenStmt);
+            if (ifStmt.elseStmt) |els| try typeCheckStatement(allocator, symbols, els);
         },
-        .Label => |*lbl| typeCheckStatement(allocator, symbols, lbl.body),
+        .Label => |*lbl| try typeCheckStatement(allocator, symbols, lbl.body),
         .DoWhile => |*doWhl| {
-            typeCheckStatement(allocator, symbols, doWhl.body);
-            _ = typeCheckExpression(allocator, symbols, &doWhl.cond);
+            try typeCheckStatement(allocator, symbols, doWhl.body);
+            _ = try typeCheckExpression(allocator, symbols, &doWhl.cond);
         },
         .While => |*whl| {
-            _ = typeCheckExpression(allocator, symbols, &whl.cond);
-            typeCheckStatement(allocator, symbols, whl.body);
+            _ = try typeCheckExpression(allocator, symbols, &whl.cond);
+            try typeCheckStatement(allocator, symbols, whl.body);
         },
         .For => |*f| {
             switch (f.init) {
@@ -232,21 +232,21 @@ fn typeCheckStatement(allocator: Allocator, symbols: *Symbol.Table, stmt: *State
                         ErrorReporter.report(.ForLoopStorageClassDecl, decl.VarDecl.lineIndex, decl.VarDecl.name);
                         return;
                     }
-                    typeCheckLocalDeclaration(allocator, symbols, decl);
+                    try typeCheckLocalDeclaration(allocator, symbols, decl);
                 },
-                .Expression => |*expr| _ = if (expr.*) |*e| typeCheckExpression(allocator, symbols, e) else null,
+                .Expression => |*expr| _ = if (expr.*) |*e| try typeCheckExpression(allocator, symbols, e) else null,
             }
-            if (f.cond) |*cond| _ = typeCheckExpression(allocator, symbols, cond);
-            if (f.post) |*post| _ = typeCheckExpression(allocator, symbols, post);
-            typeCheckStatement(allocator, symbols, f.body);
+            if (f.cond) |*cond| _ = try typeCheckExpression(allocator, symbols, cond);
+            if (f.post) |*post| _ = try typeCheckExpression(allocator, symbols, post);
+            try typeCheckStatement(allocator, symbols, f.body);
         },
         .Switch => |*swtch| {
-            const condType = typeCheckExpression(allocator, symbols, &swtch.cond);
+            const condType = try typeCheckExpression(allocator, symbols, &swtch.cond);
             if (condType == .Double) {
                 ErrorReporter.report(.NonIntegerStatement, swtch.lineIndex, "double");
                 return;
             }
-            typeCheckStatement(allocator, symbols, swtch.body);
+            try typeCheckStatement(allocator, symbols, swtch.body);
         },
         .Case => |*case| {
             if (case.cond) |*cond| {
@@ -256,39 +256,39 @@ fn typeCheckStatement(allocator: Allocator, symbols: *Symbol.Table, stmt: *State
                     return;
                 }
 
-                const condType = typeCheckExpression(allocator, symbols, cond);
+                const condType = try typeCheckExpression(allocator, symbols, cond);
                 if (condType == .Double) {
                     ErrorReporter.report(.NonIntegerStatement, case.lineIndex, "double");
                     return;
                 }
                 const parentType = case.parent.?.cond.getType();
-                case.cond = Cast.to(allocator, cond, parentType) catch allocError();
+                case.cond = try Cast.to(allocator, cond, parentType);
             }
 
             case.registerToParentSwitch(allocator) catch {
                 ErrorReporter.report(.CaseDuplicate, case.lineIndex, null);
             };
 
-            if (case.body) |body| typeCheckStatement(allocator, symbols, body);
+            if (case.body) |body| try typeCheckStatement(allocator, symbols, body);
         },
         .Break, .Continue, .Goto, .Null => {},
     }
 }
 
-fn typeCheckExpression(allocator: Allocator, symbols: *Symbol.Table, expr: *Expression) Type {
+fn typeCheckExpression(allocator: Allocator, symbols: *Symbol.Table, expr: *Expression) Allocator.Error!Type {
     switch (expr.*) {
         .Assignment => |*assign| {
-            const lType = typeCheckExpression(allocator, symbols, assign.lhs);
-            _ = typeCheckExpression(allocator, symbols, assign.rhs);
+            const lType = try typeCheckExpression(allocator, symbols, assign.lhs);
+            _ = try typeCheckExpression(allocator, symbols, assign.rhs);
 
             assign.type = lType;
-            assign.rhs.* = Cast.to(allocator, assign.rhs, lType) catch allocError();
+            assign.rhs.* = try Cast.to(allocator, assign.rhs, lType);
 
             return assign.type.?;
         },
         .Binary => |*bin| {
-            const lType = typeCheckExpression(allocator, symbols, bin.left);
-            const rType = typeCheckExpression(allocator, symbols, bin.right);
+            const lType = try typeCheckExpression(allocator, symbols, bin.left);
+            const rType = try typeCheckExpression(allocator, symbols, bin.right);
 
             if (lType == .Double or rType == .Double) {
                 switch (bin.operator) {
@@ -303,8 +303,8 @@ fn typeCheckExpression(allocator: Allocator, symbols: *Symbol.Table, expr: *Expr
             };
 
             bin.type = if (bin.operator.isComparison()) .Int else commonType;
-            bin.left.* = Cast.to(allocator, bin.left, commonType) catch allocError();
-            bin.right.* = Cast.to(allocator, bin.right, commonType) catch allocError();
+            bin.left.* = try Cast.to(allocator, bin.left, commonType);
+            bin.right.* = try Cast.to(allocator, bin.right, commonType);
 
             if (bin.operator == .ShiftL) {
                 bin.operator = if (commonType.isSignedInteger()) .SAL else .SHL;
@@ -315,7 +315,7 @@ fn typeCheckExpression(allocator: Allocator, symbols: *Symbol.Table, expr: *Expr
             return bin.type.?;
         },
         .Cast => |*cast| {
-            _ = typeCheckExpression(allocator, symbols, cast.exp);
+            _ = try typeCheckExpression(allocator, symbols, cast.exp);
             return cast.target.type.?;
         },
         .Constant => return switch (expr.Constant) {
@@ -341,29 +341,29 @@ fn typeCheckExpression(allocator: Allocator, symbols: *Symbol.Table, expr: *Expr
                 ErrorReporter.report(.TooManyArguments, fcall.lineIndex, null);
             } else {
                 for (fcall.args, funType.params) |*arg, param| {
-                    _ = typeCheckExpression(allocator, symbols, arg);
-                    arg.* = Cast.to(allocator, arg, param.*) catch allocError();
+                    _ = try typeCheckExpression(allocator, symbols, arg);
+                    arg.* = try Cast.to(allocator, arg, param.*);
                 }
             }
 
             return fcall.type.?;
         },
         .Ternary => |*tern| {
-            _ = typeCheckExpression(allocator, symbols, tern.condition);
-            const thenType = typeCheckExpression(allocator, symbols, tern.thenExpr);
-            const elseType = typeCheckExpression(allocator, symbols, tern.elseExpr);
+            _ = try typeCheckExpression(allocator, symbols, tern.condition);
+            const thenType = try typeCheckExpression(allocator, symbols, tern.thenExpr);
+            const elseType = try typeCheckExpression(allocator, symbols, tern.elseExpr);
 
             const commonType = Type.getCommon(thenType, elseType);
 
             tern.type = commonType;
-            tern.condition.* = Cast.to(allocator, tern.condition, commonType) catch allocError();
-            tern.thenExpr.* = Cast.to(allocator, tern.thenExpr, commonType) catch allocError();
-            tern.elseExpr.* = Cast.to(allocator, tern.elseExpr, commonType) catch allocError();
+            tern.condition.* = try Cast.to(allocator, tern.condition, commonType);
+            tern.thenExpr.* = try Cast.to(allocator, tern.thenExpr, commonType);
+            tern.elseExpr.* = try Cast.to(allocator, tern.elseExpr, commonType);
 
             return tern.type.?;
         },
         .Unary => |*un| {
-            const operandType = typeCheckExpression(allocator, symbols, un.operand);
+            const operandType = try typeCheckExpression(allocator, symbols, un.operand);
             if (operandType == .Double and un.operator == .Complement) {
                 ErrorReporter.report(.UnaryDoubleOperand, un.lineIndex, null);
             }
@@ -387,10 +387,4 @@ fn typeCheckExpression(allocator: Allocator, symbols: *Symbol.Table, expr: *Expr
             return v.type.?;
         },
     }
-}
-
-pub fn allocError() noreturn {
-    std.log.err("Memory allocation error", .{});
-    std.debug.dumpCurrentStackTrace(.{ .first_address = @returnAddress() });
-    std.process.exit(1);
 }

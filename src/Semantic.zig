@@ -16,20 +16,20 @@ const IdentifierMap = Context.IdentifierMap;
 
 const Parser = @import("Parser.zig");
 
-pub fn run(allocator: Allocator, tree: *Parser.AST, textLines: [][]const u8) Symbol.Table {
+pub fn run(allocator: Allocator, tree: *Parser.AST, textLines: [][]const u8) Allocator.Error!Symbol.Table {
     var reporter = Error.Reporter.init(textLines);
 
-    var context: Context = .init(allocator, &reporter);
+    var context: Context = try .init(allocator, &reporter);
     defer context.deinit();
 
-    Resolver.run(allocator, &context, tree);
+    try Resolver.run(allocator, &context, tree);
     if (reporter.errorFlag) process.exit(1);
 
-    LoopLabeler.run(allocator, &context, tree);
+    try LoopLabeler.run(allocator, &context, tree);
     if (reporter.errorFlag) process.exit(1);
 
     var symbolTable: Symbol.Table = .init(allocator);
-    TypeChecker.run(allocator, &symbolTable, &reporter, tree);
+    try TypeChecker.run(allocator, &symbolTable, &reporter, tree);
     if (reporter.errorFlag) process.exit(1);
 
     return symbolTable;

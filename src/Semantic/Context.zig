@@ -45,13 +45,13 @@ switches: ArrayList(*Switch) = .empty,
 function: ?[]const u8 = null, // TODO: maybe move to scope
 counter: usize = 0,
 
-pub fn init(allocator: Allocator, errorReporter: *Error.Reporter) Context {
+pub fn init(allocator: Allocator, errorReporter: *Error.Reporter) Allocator.Error!Context {
     var scopeStack: ArrayList(Scope) = .empty;
-    scopeStack.append(allocator, .{
+    try scopeStack.append(allocator, .{
         .type = .File,
         .identifiers = .init(allocator),
         .tag = FILE_SCOPE,
-    }) catch allocError();
+    });
 
     return .{
         .allocator = allocator,
@@ -81,14 +81,14 @@ pub fn getScope(self: Context) *Scope {
     return scope;
 }
 
-pub fn addNewLabel(self: *Context, label: *Label, unique: []const u8) void {
+pub fn addNewLabel(self: *Context, label: *Label, unique: []const u8) !void {
     const name = label.name;
     if (self.function == null) {
         self.err.report(.OrphanLabel, label.lineIndex, name);
         return;
     }
 
-    const key = self.allocator.print("{s}.{s}", .{ self.function.?, name }) catch allocError();
+    const key = try self.allocator.print("{s}.{s}", .{ self.function.?, name });
     if (self.labels.contains(key)) {
         self.allocator.free(key);
         self.err.report(.Redeclaration, label.lineIndex, name);
@@ -96,16 +96,16 @@ pub fn addNewLabel(self: *Context, label: *Label, unique: []const u8) void {
     }
 
     label.tag = unique;
-    self.labels.put(key, .{ .unique = unique }) catch allocError();
+    try self.labels.put(key, .{ .unique = unique });
 }
 
-pub fn getGotoLabel(self: Context, goto: *Goto) ?[]const u8 {
+pub fn getGotoLabel(self: Context, goto: *Goto) Allocator.Error!?[]const u8 {
     if (self.function == null) {
         self.err.report(.OrphanGoto, goto.lineIndex, goto.target);
         return null;
     }
 
-    const key = self.allocator.print("{s}.{s}", .{ self.function.?, goto.target }) catch allocError();
+    const key = try self.allocator.print("{s}.{s}", .{ self.function.?, goto.target });
     defer self.allocator.free(key);
 
     if (self.labels.get(key)) |entry| {
@@ -152,29 +152,23 @@ pub fn getSwitchTag(self: Context) ?[]const u8 {
     return null;
 }
 
-pub fn pushScope(self: *Context, scopeType: ScopeType, tag: []const u8) void {
-    const identifiers = self.getScope().identifiers.clone() catch allocError();
+pub fn pushScope(self: *Context, scopeType: ScopeType, tag: []const u8) Allocator.Error!void {
+    const identifiers = try self.getScope().identifiers.clone();
     var it = identifiers.valueIterator();
     while (it.next()) |entry| {
         entry.fromCurrentScope = false;
     }
 
-    self.scopeStack.append(self.allocator, .{
+    try self.scopeStack.append(self.allocator, .{
         .type = scopeType,
         .identifiers = identifiers,
         .tag = tag,
-    }) catch allocError();
+    });
 }
 
 pub fn popScope(self: *Context) void {
     var scope = self.scopeStack.pop() orelse emptyScope();
     scope.identifiers.deinit();
-}
-
-pub fn allocError() noreturn {
-    std.log.err("Memory allocation error", .{});
-    std.debug.dumpCurrentStackTrace(.{ .first_address = @returnAddress() });
-    std.process.exit(1);
 }
 
 fn emptyScope() noreturn {
