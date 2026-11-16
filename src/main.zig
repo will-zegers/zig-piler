@@ -91,7 +91,7 @@ pub fn main(init: process.Init) !void {
         var tac: TAC.Program = undefined;
         if (stage.includes(.TACky)) {
             log.info("Generating Tacky...", .{});
-            tac = TAC.emit(allocator, &symbolTable, tree);
+            tac = try TAC.emit(allocator, &symbolTable, tree);
 
             if (debug) {
                 std.debug.print("-------TAC-------\n", .{});

@@ -71,7 +71,7 @@ const TopLevel = union(TopLevelTag) {
     StaticVariable: StaticVariable,
 };
 
-pub fn emit(allocator: Allocator, symbols: *Symbol.Table, tree: Parser.AST) Program {
+pub fn emit(allocator: Allocator, symbols: *Symbol.Table, tree: Parser.AST) Allocator.Error!Program {
     // This will be doing a lot of miscellaneous allocations for tags and labels,
     // so just handle clean-up with an arena instead of meticulous bookkeeping
     var arena: ArenaAllocator = .init(allocator);
@@ -83,20 +83,20 @@ pub fn emit(allocator: Allocator, symbols: *Symbol.Table, tree: Parser.AST) Prog
             .FunDecl => |funDecl| {
                 if (funDecl.body == null) continue; // discard function declaration without bodies
 
-                const func = emitFunDecl(arenaAllocator, symbols, funDecl);
-                topLevelList.append(arenaAllocator, .{ .Function = func }) catch allocError();
+                const func = try emitFunDecl(arenaAllocator, symbols, funDecl);
+                try topLevelList.append(arenaAllocator, .{ .Function = func });
             },
             .VarDecl => {},
         }
     }
-    const symbolDefs = emitStorageClassSymbols(arenaAllocator, symbols);
-    topLevelList.appendSlice(arenaAllocator, symbolDefs) catch allocError();
+    const symbolDefs = try emitStorageClassSymbols(arenaAllocator, symbols);
+    try topLevelList.appendSlice(arenaAllocator, symbolDefs);
 
-    const topLevel = topLevelList.toOwnedSlice(arenaAllocator) catch allocError();
+    const topLevel = try topLevelList.toOwnedSlice(arenaAllocator);
     return .{ .arena = arena, .topLevel = topLevel };
 }
 
-fn emitDeclaration(allocator: Allocator, context: *Context, body: *Instructions, decl: Parser.Declaration) !void {
+fn emitDeclaration(allocator: Allocator, context: *Context, body: *Instructions, decl: Parser.Declaration) Allocator.Error!void {
     switch (decl) {
         .VarDecl => |varDecl| {
             if (varDecl.storageClass != null) return;
@@ -105,20 +105,20 @@ fn emitDeclaration(allocator: Allocator, context: *Context, body: *Instructions,
                 _ = emitExpression(allocator, context, body, initExpr);
             }
         },
-        .FunDecl => |funDecl| _ = emitFunDecl(allocator, context.symbols, funDecl),
+        .FunDecl => |funDecl| _ = try emitFunDecl(allocator, context.symbols, funDecl),
     }
 }
 
-fn emitFunDecl(allocator: Allocator, symbols: *Symbol.Table, funDecl: Parser.FunDecl) Function {
+fn emitFunDecl(allocator: Allocator, symbols: *Symbol.Table, funDecl: Parser.FunDecl) Allocator.Error!Function {
     var instructions: Instructions = .empty;
 
     if (funDecl.body) |body| {
         var context: Context = .{ .name = funDecl.name, .symbols = symbols, .counter = 0 };
-        emitBlock(allocator, &context, &instructions, body) catch allocError();
+        try emitBlock(allocator, &context, &instructions, body);
     }
-    instructions.append(allocator, .{ .Return = .{ .val = .{ .Constant = .{ .int = 0 } } } }) catch allocError();
+    try instructions.append(allocator, .{ .Return = .{ .val = .{ .Constant = .{ .int = 0 } } } });
 
-    const body = instructions.toOwnedSlice(allocator) catch allocError();
+    const body = try instructions.toOwnedSlice(allocator);
     const entry = symbols.get(funDecl.name) orelse {
         // Should never hit this if semantic analysis is doing its job
         log.err("Symbol '{s}' not found", .{funDecl.name});
@@ -128,7 +128,7 @@ fn emitFunDecl(allocator: Allocator, symbols: *Symbol.Table, funDecl: Parser.Fun
     return .{ .name = funDecl.name, .global = entry.attrs.Fun.global, .params = funDecl.params, .body = body };
 }
 
-fn emitBlock(allocator: Allocator, context: *Context, instructions: *Instructions, block: Parser.Block) !void {
+fn emitBlock(allocator: Allocator, context: *Context, instructions: *Instructions, block: Parser.Block) Allocator.Error!void {
     for (block.items) |item| {
         switch (item) {
             .Declaration => |decl| try emitDeclaration(allocator, context, instructions, decl),
@@ -137,7 +137,7 @@ fn emitBlock(allocator: Allocator, context: *Context, instructions: *Instruction
     }
 }
 
-fn emitStatement(allocator: Allocator, context: *Context, instructions: *Instructions, stmt: Parser.Statement) !void {
+fn emitStatement(allocator: Allocator, context: *Context, instructions: *Instructions, stmt: Parser.Statement) Allocator.Error!void {
     switch (stmt) {
         .Compound => |compound| {
             for (compound.items) |item| {
@@ -274,20 +274,29 @@ fn emitStatement(allocator: Allocator, context: *Context, instructions: *Instruc
 }
 
 fn emitExpression(allocator: Allocator, context: *Context, instructions: *Instructions, expr: Parser.Expression) Val {
-    // We need to catch any allocation errors here to prevent a dependency loop on error set of function
-    return switch (expr) {
-        .Assignment => |assign| emitAssignment(allocator, context, instructions, assign) catch allocError(),
-        .Binary => |binary| emitBinary(allocator, context, instructions, binary) catch allocError(),
-        .Cast => |cast| emitCast(allocator, context, instructions, cast) catch allocError(),
-        .Constant => .{ .Constant = expr.Constant },
-        .FunctionCall => |funCall| emitFunCall(allocator, context, instructions, funCall) catch allocError(),
-        .Ternary => |ternary| emitTernary(allocator, context, instructions, ternary) catch allocError(),
-        .Unary => |unary| emitUnary(allocator, context, instructions, unary) catch allocError(),
-        .Var => .{ .Var = expr.Var.name },
-    };
+    switch (expr) {
+        .Constant => return .{ .Constant = expr.Constant },
+        .Var => return .{ .Var = expr.Var.name },
+        else => return switch (expr) { // separate prong to catch potential error returns
+            .Assignment => |assign| emitAssignment(allocator, context, instructions, assign),
+            .Binary => |binary| emitBinary(allocator, context, instructions, binary),
+            .Cast => |cast| emitCast(allocator, context, instructions, cast),
+            .FunctionCall => |funCall| emitFunCall(allocator, context, instructions, funCall),
+            .Ternary => |ternary| emitTernary(allocator, context, instructions, ternary),
+            .Unary => |unary| emitUnary(allocator, context, instructions, unary),
+            else => unreachable,
+        } catch |err| {
+            // Since expressions can be nested, we need to catch any errors in the general dispatch
+            // function to prevent an inferred dependency loop on returned error unions. We handle
+            // this by just replicating how a debug/safe build reports the error
+            std.log.err("{s}", .{@errorName(err)});
+            std.debug.dumpCurrentStackTrace(.{ .first_address = @returnAddress() });
+            std.process.exit(1);
+        },
+    }
 }
 
-fn emitAssignment(allocator: Allocator, context: *Context, instructions: *Instructions, assign: Parser.Assignment) !Val {
+fn emitAssignment(allocator: Allocator, context: *Context, instructions: *Instructions, assign: Parser.Assignment) Allocator.Error!Val {
     const result = emitExpression(allocator, context, instructions, assign.rhs.*);
     const dst = emitExpression(allocator, context, instructions, assign.lhs.*);
 
@@ -297,7 +306,7 @@ fn emitAssignment(allocator: Allocator, context: *Context, instructions: *Instru
     return dst;
 }
 
-fn emitBinary(allocator: Allocator, context: *Context, instructions: *Instructions, binary: Parser.Binary) !Val {
+fn emitBinary(allocator: Allocator, context: *Context, instructions: *Instructions, binary: Parser.Binary) Allocator.Error!Val {
     switch (binary.operator) {
         .AndL => {
             const falseLabel = try newLabel(allocator, context.name, "andFalse");
@@ -357,7 +366,7 @@ fn emitBinary(allocator: Allocator, context: *Context, instructions: *Instructio
     }
 }
 
-fn emitCast(allocator: Allocator, context: *Context, instructions: *Instructions, cast: Parser.Cast) !Val {
+fn emitCast(allocator: Allocator, context: *Context, instructions: *Instructions, cast: Parser.Cast) Allocator.Error!Val {
     const expr = emitExpression(allocator, context, instructions, cast.exp.*);
 
     const to = cast.target.type.?;
@@ -394,7 +403,7 @@ fn emitCast(allocator: Allocator, context: *Context, instructions: *Instructions
     return dst;
 }
 
-fn emitFunCall(allocator: Allocator, context: *Context, instructions: *Instructions, funCall: Parser.FunctionCall) !Val {
+fn emitFunCall(allocator: Allocator, context: *Context, instructions: *Instructions, funCall: Parser.FunctionCall) Allocator.Error!Val {
     const tag = try newVariable(allocator, context, funCall.type.?);
     const dst: Val = .{ .Var = tag };
 
@@ -407,7 +416,7 @@ fn emitFunCall(allocator: Allocator, context: *Context, instructions: *Instructi
     return dst;
 }
 
-fn emitTernary(allocator: Allocator, context: *Context, instructions: *Instructions, tern: Parser.Ternary) !Val {
+fn emitTernary(allocator: Allocator, context: *Context, instructions: *Instructions, tern: Parser.Ternary) Allocator.Error!Val {
     const elseLabel = try newLabel(allocator, context.name, "else");
     const endLabel = try newLabel(allocator, context.name, "end");
     const tag = try newVariable(allocator, context, tern.type.?);
@@ -432,7 +441,7 @@ fn emitTernary(allocator: Allocator, context: *Context, instructions: *Instructi
     return dst;
 }
 
-fn emitUnary(allocator: Allocator, context: *Context, instructions: *Instructions, unary: Parser.Unary) !Val {
+fn emitUnary(allocator: Allocator, context: *Context, instructions: *Instructions, unary: Parser.Unary) Allocator.Error!Val {
     const unaryExpr: Parser.Expression = unary.operand.*;
     const src = emitExpression(allocator, context, instructions, unaryExpr);
     const tag = try newVariable(allocator, context, unary.type.?);
@@ -457,7 +466,7 @@ fn emitUnary(allocator: Allocator, context: *Context, instructions: *Instruction
     return dst;
 }
 
-fn emitStorageClassSymbols(allocator: Allocator, symbols: *Symbol.Table) []TopLevel {
+fn emitStorageClassSymbols(allocator: Allocator, symbols: *Symbol.Table) Allocator.Error![]TopLevel {
     var symbolDefs: ArrayList(TopLevel) = .empty;
 
     var symbolTableIt = symbols.iterator();
@@ -475,7 +484,7 @@ fn emitStorageClassSymbols(allocator: Allocator, symbols: *Symbol.Table) []TopLe
                             .global = static.global,
                             .initial = static.initialValue.Initial,
                         } };
-                        symbolDefs.append(allocator, staticVariable) catch allocError();
+                        try symbolDefs.append(allocator, staticVariable);
                     },
                     .Tentative => {
                         const staticVariable: TopLevel = .{ .StaticVariable = .{
@@ -491,7 +500,7 @@ fn emitStorageClassSymbols(allocator: Allocator, symbols: *Symbol.Table) []TopLe
                                 .FunType => unreachable,
                             },
                         } };
-                        symbolDefs.append(allocator, staticVariable) catch allocError();
+                        try symbolDefs.append(allocator, staticVariable);
                     },
                     .None => {},
                 }
@@ -499,29 +508,23 @@ fn emitStorageClassSymbols(allocator: Allocator, symbols: *Symbol.Table) []TopLe
             else => {},
         }
     }
-    return symbolDefs.toOwnedSlice(allocator) catch allocError();
+    return symbolDefs.toOwnedSlice(allocator);
 }
 
-pub fn newVariable(allocator: Allocator, context: *Context, t: Parser.Type) ![]const u8 {
+pub fn newVariable(allocator: Allocator, context: *Context, t: Parser.Type) Allocator.Error![]const u8 {
     const newName = try nextTag(allocator, context.name);
     try context.symbols.put(newName, .{ .type = t, .attrs = .Local });
     return newName;
 }
 
-pub fn newLabel(allocator: Allocator, name: []const u8, descr: []const u8) ![]const u8 {
+pub fn newLabel(allocator: Allocator, name: []const u8, descr: []const u8) Allocator.Error![]const u8 {
     const label = try allocator.print("{s}.{s}.{d}", .{ name, descr, counter });
     counter += 1;
     return label;
 }
 
-fn nextTag(allocator: Allocator, name: []const u8) ![]const u8 {
+fn nextTag(allocator: Allocator, name: []const u8) Allocator.Error![]const u8 {
     const tag = try allocator.print("{s}.{d}", .{ name, counter });
     counter += 1;
     return tag;
-}
-
-pub fn allocError() noreturn {
-    std.log.err("Memory allocation error", .{});
-    std.debug.dumpCurrentStackTrace(.{ .first_address = @returnAddress() });
-    std.process.exit(1);
 }
