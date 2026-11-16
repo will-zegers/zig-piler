@@ -1,5 +1,6 @@
 const std = @import("std");
 const print = std.debug.print;
+const Allocator = std.mem.Allocator;
 const StringHashMap = std.StringHashMap;
 
 const Parser = @import("Parser.zig");
@@ -17,11 +18,11 @@ pub fn printLexerTokens(tokens: *TokenIterator) void {
     }
 }
 
-pub fn printParserAST(tree: Parser.AST, symbolTable: ?Symbol.Table) void {
+pub fn printParserAST(tree: Parser.AST, symbolTable: ?Symbol.Table) Allocator.Error!void {
     const declarations = tree.declarations;
     print("{any}(\n", .{@TypeOf(tree)});
     for (declarations) |declaration| {
-        printDeclaration(declaration, 4);
+        try printDeclaration(declaration, 4);
     }
     print("  )\n", .{});
     print(")\n", .{});
@@ -29,21 +30,21 @@ pub fn printParserAST(tree: Parser.AST, symbolTable: ?Symbol.Table) void {
     if (symbolTable) |table| printFESymbolTable(table);
 }
 
-fn printBlockItem(blockItem: Parser.BlockItem, indent: usize) void {
-    const indentStr = std.heap.page_allocator.alloc(u8, indent) catch allocError();
+fn printBlockItem(blockItem: Parser.BlockItem, indent: usize) Allocator.Error!void {
+    const indentStr = try std.heap.page_allocator.alloc(u8, indent);
     for (indentStr, 0..) |_, i| {
         indentStr[i] = ' ';
     }
     defer std.heap.page_allocator.free(indentStr);
 
     switch (blockItem) {
-        .Statement => |statement| printStatement(statement, indent),
-        .Declaration => |decl| printDeclaration(decl, indent),
+        .Statement => |statement| try printStatement(statement, indent),
+        .Declaration => |decl| try printDeclaration(decl, indent),
     }
 }
 
-fn printDeclaration(decl: Parser.Declaration, indent: usize) void {
-    const indentStr = std.heap.page_allocator.alloc(u8, indent) catch allocError();
+fn printDeclaration(decl: Parser.Declaration, indent: usize) Allocator.Error!void {
+    const indentStr = try std.heap.page_allocator.alloc(u8, indent);
     for (indentStr, 0..) |_, i| {
         indentStr[i] = ' ';
     }
@@ -57,7 +58,7 @@ fn printDeclaration(decl: Parser.Declaration, indent: usize) void {
             print("{s} {s}", .{ @tagName(varDecl.type), varDecl.name });
             if (varDecl.init) |init| {
                 print("\n", .{});
-                printExpression(init, indent + 2);
+                try printExpression(init, indent + 2);
                 print("{s})\n", .{indentStr});
             } else {
                 print(")\n", .{});
@@ -73,15 +74,15 @@ fn printDeclaration(decl: Parser.Declaration, indent: usize) void {
             }
             print(")\n", .{});
             if (funDecl.body) |body| {
-                printStatement(.{ .Compound = body }, indent + 2);
+                try printStatement(.{ .Compound = body }, indent + 2);
             } else print(");\n", .{});
             print("{s})\n", .{indentStr});
         },
     }
 }
 
-fn printStatement(statement: Parser.Statement, indent: usize) void {
-    const indentStr = std.heap.page_allocator.alloc(u8, indent) catch allocError();
+fn printStatement(statement: Parser.Statement, indent: usize) Allocator.Error!void {
+    const indentStr = try std.heap.page_allocator.alloc(u8, indent);
     for (indentStr, 0..) |_, i| {
         indentStr[i] = ' ';
     }
@@ -91,28 +92,28 @@ fn printStatement(statement: Parser.Statement, indent: usize) void {
         .Compound => |compound| {
             print("{s}{{\n", .{indentStr});
             for (compound.items) |item| {
-                printBlockItem(item, indent + 2);
+                try printBlockItem(item, indent + 2);
             }
             print("{s}}}\n", .{indentStr});
         },
         .Expression => |expr| {
-            printExpression(expr, indent);
+            try printExpression(expr, indent);
         },
         .If => |ifStmt| {
             print("{s}{any}(\n", .{ indentStr, @TypeOf(ifStmt) });
             print("{s}  condition:\n", .{indentStr});
-            printExpression(ifStmt.condition, indent + 4);
+            try printExpression(ifStmt.condition, indent + 4);
             print("{s}  thenStmt:\n", .{indentStr});
-            printStatement(ifStmt.thenStmt.*, indent + 4);
+            try printStatement(ifStmt.thenStmt.*, indent + 4);
             if (ifStmt.elseStmt != null) {
                 print("{s}  else:\n", .{indentStr});
-                printStatement(ifStmt.elseStmt.?.*, indent + 4);
+                try printStatement(ifStmt.elseStmt.?.*, indent + 4);
             }
             print("{s})\n", .{indentStr});
         },
         .Return => |ret| {
             print("{s}{any}(\n", .{ indentStr, @TypeOf(ret) });
-            printExpression(ret.expr, indent + 2);
+            try printExpression(ret.expr, indent + 2);
             print("{s})\n", .{indentStr});
         },
         .Null => |nul| print("{s}{any}()\n", .{ indentStr, @TypeOf(nul) }),
@@ -121,7 +122,7 @@ fn printStatement(statement: Parser.Statement, indent: usize) void {
             print("{s}  name: {s}\n", .{ indentStr, lbl.name });
             print("{s}  tag: {s}\n", .{ indentStr, if (lbl.tag) |tag| tag else "null" });
             print("{s}  statement:\n", .{indentStr});
-            printStatement(lbl.body.*, indent + 4);
+            try printStatement(lbl.body.*, indent + 4);
         },
         .Goto => |goto| print("{s}{any}(label: {s})\n", .{ indentStr, @TypeOf(goto), goto.target }),
         .Break => |b| {
@@ -133,9 +134,9 @@ fn printStatement(statement: Parser.Statement, indent: usize) void {
         .DoWhile => |dw| {
             print("{s}{any}( {s}\n", .{ indentStr, @TypeOf(dw), if (dw.tag) |tag| tag else "null" });
             print("  {s}body:\n", .{indentStr});
-            printStatement(dw.body.*, indent + 2);
+            try printStatement(dw.body.*, indent + 2);
             print("  {s}cond:\n", .{indentStr});
-            printExpression(dw.cond, indent + 2);
+            try printExpression(dw.cond, indent + 2);
             print("{s})\n", .{indentStr});
         },
         .For => |f| {
@@ -144,41 +145,41 @@ fn printStatement(statement: Parser.Statement, indent: usize) void {
                 .Declaration => |decl| {
                     if (decl.VarDecl.init) |init| {
                         print("  {s}init:\n", .{indentStr});
-                        printExpression(init, 6);
+                        try printExpression(init, 6);
                     }
                 },
                 .Expression => |expr| {
                     if (expr != null) {
                         print("  {s}init:\n", .{indentStr});
-                        printExpression(expr.?, indent + 4);
+                        try printExpression(expr.?, indent + 4);
                     }
                 },
             }
             if (f.cond) |cond| {
                 print("  {s}cond:\n", .{indentStr});
-                printExpression(cond, indent + 4);
+                try printExpression(cond, indent + 4);
             }
             if (f.post) |post| {
                 print("  {s}post:\n", .{indentStr});
-                printExpression(post, indent + 4);
+                try printExpression(post, indent + 4);
             }
             print("  {s}body:\n", .{indentStr});
-            printStatement(f.body.*, indent + 4);
+            try printStatement(f.body.*, indent + 4);
         },
         .While => |w| {
             print("{s}{any}( {s}\n", .{ indentStr, @TypeOf(w), if (w.tag) |tag| tag else "null" });
             print("  {s}cond:\n", .{indentStr});
-            printExpression(w.cond, indent + 4);
+            try printExpression(w.cond, indent + 4);
             print("  {s}body:\n", .{indentStr});
-            printStatement(w.body.*, indent + 4);
+            try printStatement(w.body.*, indent + 4);
             print("{s})\n", .{indentStr});
         },
         .Switch => |swtch| {
             print("{s}{any}( {s}\n", .{ indentStr, @TypeOf(swtch), if (swtch.tag) |tag| tag else "null" });
             print("  {s}cond:\n", .{indentStr});
-            printExpression(swtch.cond, indent + 4);
+            try printExpression(swtch.cond, indent + 4);
             print("  {s}body:\n", .{indentStr});
-            printStatement(swtch.body.*, indent + 4);
+            try printStatement(swtch.body.*, indent + 4);
             print("{s})\n", .{indentStr});
         },
         .Case => |case| {
@@ -187,19 +188,19 @@ fn printStatement(statement: Parser.Statement, indent: usize) void {
             print("\n", .{});
             if (case.cond) |cond| {
                 print("  {s}cond:\n", .{indentStr});
-                printExpression(cond, indent + 4);
+                try printExpression(cond, indent + 4);
             }
             if (case.body) |body| {
                 print("  {s}body:\n", .{indentStr});
-                printStatement(body.*, indent + 4);
+                try printStatement(body.*, indent + 4);
                 print("{s})\n", .{indentStr});
             }
         },
     }
 }
 
-fn printExpression(expr: Parser.Expression, indent: usize) void {
-    const indentStr = std.heap.page_allocator.alloc(u8, indent) catch allocError();
+fn printExpression(expr: Parser.Expression, indent: usize) Allocator.Error!void {
+    const indentStr = try std.heap.page_allocator.alloc(u8, indent);
     for (indentStr, 0..) |_, i| {
         indentStr[i] = ' ';
     }
@@ -209,22 +210,22 @@ fn printExpression(expr: Parser.Expression, indent: usize) void {
     switch (expr) {
         .Assignment => |assign| {
             print("\n{s}  lhs:\n", .{indentStr});
-            printExpression(assign.lhs.*, indent + 4);
+            try printExpression(assign.lhs.*, indent + 4);
             print("{s}  rhs:\n", .{indentStr});
-            printExpression(assign.rhs.*, indent + 4);
+            try printExpression(assign.rhs.*, indent + 4);
             print("{s})\n", .{indentStr});
         },
         .Binary => |binary| {
             print("\n{s}  left:\n", .{indentStr});
-            printExpression(expr.Binary.left.*, indent + 4);
+            try printExpression(expr.Binary.left.*, indent + 4);
             print("{s}  operator: {s}\n", .{ indentStr, @tagName(binary.operator) });
             print("{s}  right:\n", .{indentStr});
-            printExpression(expr.Binary.right.*, indent + 4);
+            try printExpression(expr.Binary.right.*, indent + 4);
             print("{s})\n", .{indentStr});
         },
         .Cast => |cast| {
             print("( {s} ) ", .{@tagName(cast.target.type.?)});
-            printExpression(cast.exp.*, 0);
+            try printExpression(cast.exp.*, 0);
         },
         .Constant => |constant| switch (constant) {
             .double => |double| print("double {d})\n", .{double}),
@@ -236,24 +237,24 @@ fn printExpression(expr: Parser.Expression, indent: usize) void {
         .FunctionCall => |funCall| {
             print("\n  {s}{s}(\n", .{ indentStr, funCall.name });
             for (funCall.args) |arg| {
-                printExpression(arg, indent + 4);
+                try printExpression(arg, indent + 4);
             }
             print("  {s})\n", .{indentStr});
             print("{s})\n", .{indentStr});
         },
         .Ternary => |ternary| {
             print("\n{s}  condition:\n", .{indentStr});
-            printExpression(ternary.condition.*, indent + 4);
+            try printExpression(ternary.condition.*, indent + 4);
             print("\n{s}  thenExpr:\n", .{indentStr});
-            printExpression(ternary.thenExpr.*, indent + 4);
+            try printExpression(ternary.thenExpr.*, indent + 4);
             print("\n{s}  elseExpr:\n", .{indentStr});
-            printExpression(ternary.elseExpr.*, indent + 4);
+            try printExpression(ternary.elseExpr.*, indent + 4);
             print("\n{s})\n", .{indentStr});
         },
         .Unary => |unary| {
             print("\n{s}  operation: {s}\n", .{ indentStr, @tagName(unary.operator) });
             print("{s}  factor:\n", .{indentStr});
-            printExpression(unary.operand.*, indent + 4);
+            try printExpression(unary.operand.*, indent + 4);
             print("{s})\n", .{indentStr});
         },
         .Var => print("{s})\n", .{expr.Var.name}),
@@ -587,10 +588,4 @@ fn printBESymbolTable(symbols: StringHashMap(Assembler.Entry)) void {
             },
         }
     }
-}
-
-pub fn allocError() noreturn {
-    std.log.err("Memory allocation error", .{});
-    std.debug.dumpCurrentStackTrace(.{ .first_address = @returnAddress() });
-    std.process.exit(1);
 }

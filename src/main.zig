@@ -71,7 +71,7 @@ pub fn main(init: process.Init) !void {
 
             if (debug) {
                 std.debug.print("-------parsed-------\n", .{});
-                Debugger.printParserAST(tree, null);
+                try Debugger.printParserAST(tree, null);
             }
         } else return;
         defer tree.deinit(allocator);
@@ -79,11 +79,11 @@ pub fn main(init: process.Init) !void {
         var symbolTable: Symbol.Table = undefined;
         if (stage.includes(.Validate)) {
             log.info("Running semantic analysis...", .{});
-            symbolTable = Semantic.run(allocator, &tree, file.lines);
+            symbolTable = try Semantic.run(allocator, &tree, file.lines);
 
             if (debug) {
                 std.debug.print("-------parsed-------\n", .{});
-                Debugger.printParserAST(tree, symbolTable);
+                try Debugger.printParserAST(tree, symbolTable);
             }
         } else return;
         defer symbolTable.deinit();
