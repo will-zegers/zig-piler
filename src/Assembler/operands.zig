@@ -132,7 +132,7 @@ pub const Type = enum {
                 .Double => .Double,
                 .Int, .UInt => .Long,
                 .Long, .ULong => .Quad,
-                .FunType => unreachable,
+                .FunType, .Pointer => unreachable,
             };
         } else {
             return .Double;
@@ -150,7 +150,7 @@ pub const Type = enum {
         return switch (v) {
             .Int, .UInt => .Long,
             .Double, .Long, .ULong => .Quad,
-            .FunType => unreachable,
+            .FunType, .Pointer => unreachable,
         };
     }
 

@@ -171,7 +171,7 @@ fn typeCheckLocalVarDecl(allocator: Allocator, symbols: *Symbol.Table, decl: *Va
             .Long => .{ .Initial = .{ .long = 0 } },
             .UInt => .{ .Initial = .{ .uint = 0 } },
             .ULong => .{ .Initial = .{ .ulong = 0 } },
-            .FunType => unreachable,
+            .FunType, .Pointer => unreachable,
         };
         if (decl.init) |init| {
             if (init.Assignment.rhs.* == .Constant) {

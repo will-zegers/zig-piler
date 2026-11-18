@@ -276,7 +276,7 @@ fn replaceIfPseudo(
                     stackPointer.* += QUADWORD_BYTES;
                     stackPointer.* = 8 * @divCeil(stackPointer.*, 8);
                 },
-                .FunType => unreachable,
+                .FunType, .Pointer => unreachable,
             }
             try map.put(key, -stackPointer.*);
         }
@@ -306,6 +306,7 @@ fn populateBackendSymbols(beSymbols: *StringHashMap(Entry), feSymbols: Symbol.Ta
                 .Fun => unreachable,
             },
             .FunType => .{ .Fun = .{ .defined = false } },
+            .Pointer => unreachable,
         });
     }
 

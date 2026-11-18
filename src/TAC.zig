@@ -371,13 +371,13 @@ fn emitCast(allocator: Allocator, context: *Context, instructions: *Instructions
         instruction = switch (to) {
             .Int, .Long => .{ .DoubleToInt = .{ .src = expr, .dst = dst } },
             .UInt, .ULong => .{ .DoubleToUInt = .{ .src = expr, .dst = dst } },
-            .Double, .FunType => unreachable,
+            .Double, .FunType, .Pointer => unreachable,
         };
     } else if (exprType != .Double and to == .Double) { //int-type to double
         instruction = switch (exprType) {
             .Int, .Long => .{ .IntToDouble = .{ .src = expr, .dst = dst } },
             .UInt, .ULong => .{ .UIntToDouble = .{ .src = expr, .dst = dst } },
-            .Double, .FunType => unreachable,
+            .Double, .FunType, .Pointer => unreachable,
         };
     } else if (exprType.size() == to.size()) { // same size, so just copy bits over
         instruction = .{ .Copy = .{ .src = expr, .dst = dst } };
@@ -487,7 +487,7 @@ fn emitStorageClassSymbols(allocator: Allocator, symbols: *Symbol.Table) Allocat
                                 .Long => .{ .long = 0 },
                                 .UInt => .{ .uint = 0 },
                                 .ULong => .{ .ulong = 0 },
-                                .FunType => unreachable,
+                                .FunType, .Pointer => unreachable,
                             },
                         } };
                         try symbolDefs.append(allocator, staticVariable);

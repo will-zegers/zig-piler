@@ -322,7 +322,9 @@ pub fn emitFunction(allocator: Allocator, symbols: StringHashMap(Assembler.Entry
                     \\  {s}{s}    {s}
                 ;
                 const operator = switch (unary.operator) {
+                    .AddressOf => unreachable,
                     .Complement => "not",
+                    .Indirection => unreachable,
                     .Negate => "neg",
                     .Inc => "inc",
                     .Dec => "dec",

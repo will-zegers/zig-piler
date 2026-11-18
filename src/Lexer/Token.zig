@@ -37,6 +37,7 @@ pub const Type = enum {
     Signed,
     Static,
     Switch,
+    TBD, // need to determine how to classify '*' and '&' operators
     TernaryOp,
     UnaryOp,
     Unsigned,

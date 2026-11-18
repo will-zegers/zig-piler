@@ -25,7 +25,6 @@ pub const LONGWORD_BYTES: isize = 4;
 pub const QUADWORD_BYTES: isize = 8;
 const UPPER_BOUND_Q: f64 = 9223372036854775808.0;
 
-var counter: usize = 0;
 const InstructionTag = enum {
     Binary,
     Call,
@@ -211,6 +210,8 @@ pub const Cdq = struct { type: Type }; // nX:AX:= sign-extend of AX.
 pub const Cmp = struct { type: Type, arg1: Operand, arg2: Operand };
 
 pub const Cvtsi2sd = struct {
+    var counter: usize = 0;
+
     type: Type,
     src: Operand,
     dst: Operand,
@@ -236,8 +237,8 @@ pub const Cvtsi2sd = struct {
                 });
             },
             .Quad => {
-                const outOfRangeLabel = try allocator.print("cttsi2sd.out_of_range.{d}", .{counter});
-                const endLabel = try allocator.print("cttsi2sd.end.{d}", .{counter});
+                const outOfRangeLabel = try allocator.print("cvtsi2sd.out_of_range.{d}", .{counter});
+                const endLabel = try allocator.print("cvtsi2sd.end.{d}", .{counter});
                 counter += 1;
 
                 return allocator.dupe(Instruction, &.{
@@ -262,6 +263,8 @@ pub const Cvtsi2sd = struct {
 };
 
 pub const Cvttsd2si = struct {
+    var counter: usize = 0;
+
     type: Type,
     src: Operand,
     dst: Operand,
@@ -446,6 +449,8 @@ pub const Unary = struct {
         const t = Type.fromVal(symbols, unary.src);
 
         switch (unary.operator) {
+            .AddressOf => unreachable,
+            .Indirection => unreachable,
             .Not => {
                 switch (t) {
                     .Double => {

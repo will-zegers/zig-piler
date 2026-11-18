@@ -430,8 +430,7 @@ pub const Case = struct {
                         const value = cond.Constant.as(.ULong);
                         return allocator.print("{s}.{d}", .{ self.parent.?.tag.?, value.ulong });
                     },
-                    .Double => unreachable,
-                    .FunType => unreachable,
+                    .Double, .FunType, .Pointer => unreachable,
                 },
                 .Cast => switch (parentType) {
                     .Int, .UInt => {
@@ -442,8 +441,7 @@ pub const Case = struct {
                         const value = cond.Cast.exp.Constant.as(.ULong);
                         return allocator.print("{s}.{d}", .{ self.parent.?.tag.?, value.ulong });
                     },
-                    .Double => unreachable,
-                    .FunType => unreachable,
+                    .Double, .FunType, .Pointer => unreachable,
                 },
                 else => unreachable,
             }

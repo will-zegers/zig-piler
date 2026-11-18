@@ -547,6 +547,7 @@ fn printFESymbolTable(symbolTable: Symbol.Table) void {
                 print("    ret: {s}\n", .{@tagName(t.FunType.ret.*)});
             },
             .Double, .Int, .Long, .UInt, .ULong => {},
+            .Pointer => unreachable,
         }
         print("  attrs: {s}\n", .{@tagName(attrs)});
         switch (attrs) {

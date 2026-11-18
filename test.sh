@@ -42,8 +42,12 @@ function test_directory {
       test_directory "$file"
 
     # run zig-piler on any .c files
-    elif [[ $file =~ \.c$ ]] && ! [[ $SKIP =~ $file ]]; then
-      local basename=${file::-2} # remove the '.c' extension
+    elif [[ $file =~ \.c$ ]]; then
+
+      if [[ $SKIP =~ $file ]]; then
+        echo "  [*] skipping $file"
+        continue
+      fi
 
       local linked_libs=""
       for f in $NEEDS_LIBMATH; do
@@ -51,6 +55,8 @@ function test_directory {
           linked_libs="-lm"
         fi
       done
+
+      local basename=${file::-2} # remove the '.c' extension
 
       # ignore client files, just add them as an additional source for the base file
       if $is_library_dir; then
@@ -70,7 +76,7 @@ function test_directory {
       grep "error(SafeAllocator): leaked" results.txt &> /dev/null
       leak=$?
       if [ $leak -eq 0 ]; then
-        echo "  [!] $file shows a memory leak"
+        echo "  [!] memory leak detected when compiling $file"
       fi
 
       if [ $res -ne 0 ] && $expect_fail; then   # fail-expect-fail
@@ -78,9 +84,9 @@ function test_directory {
           passed=$((passed + 1))
         fi
       elif [ $res -eq 0 ] && $expect_fail; then # pass-expect-fail
-        echo "Error not caught in $file"
+        echo "  [-] error not caught in $file"
       elif [ $res -ne 0 ]; then                 # fail-expect-pass
-        echo "Failed to compile $file"
+        echo "  [-] failed to compile $file"
       else                                      # pass-expect-pass
         if [ $leak -ne 0 ]; then
           passed=$((passed + 1))

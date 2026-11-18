@@ -398,7 +398,7 @@ pub const Constant = union(ConstantTag) {
                 };
                 return .{ .ulong = ulong };
             },
-            .FunType => unreachable,
+            .FunType, .Pointer => unreachable,
         }
     }
 
@@ -488,7 +488,9 @@ pub const Ternary = struct {
 
 pub const Unary = struct {
     pub const Operator = enum {
+        AddressOf,
         Complement,
+        Indirection,
         Negate,
         Not,
         Inc,
@@ -496,7 +498,9 @@ pub const Unary = struct {
     };
 
     const OperatorMap = std.StaticStringMap(Operator).initComptime(.{
+        .{ "&", .AddressOf },
         .{ "~", .Complement },
+        .{ "*", .Indirection },
         .{ "-", .Negate },
         .{ "!", .Not },
         .{ "++", .Inc },
@@ -557,6 +561,13 @@ fn parseFactor(allocator: Allocator, tokens: *TokenIterator) ExpectedErrors!Expr
     var expr: Expression = blk: switch (token.type) {
         .Constant => .{ .Constant = try .parse(token) },
         .UnaryOp => { // '~'|'!'|'-'|'++'|'--' <factor>
+            const right = try parseFactor(allocator, tokens);
+            break :blk try Unary.pre(allocator, token, right);
+        },
+        .BinaryOp => { // '*' | '&' <factor>
+            // Repeats the same as the prong above, treating '*' and '&' as unary.
+            // TODO: Need to find a better classification for symbols that require more context
+            // from the parser.
             const right = try parseFactor(allocator, tokens);
             break :blk try Unary.pre(allocator, token, right);
         },

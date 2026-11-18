@@ -19,7 +19,7 @@ pub const ParserError = error{
     Token,
 };
 
-pub const TypeTag = enum { Double, Int, Long, FunType, UInt, ULong };
+pub const TypeTag = enum { Double, Int, Long, FunType, Pointer, UInt, ULong };
 pub const Type = union(TypeTag) {
     const Signage = enum { Signed, Unsigned };
 
@@ -31,6 +31,9 @@ pub const Type = union(TypeTag) {
     FunType: struct {
         params: []*const Type,
         ret: *Type,
+    },
+    Pointer: struct {
+        referenced: *Type,
     },
     UInt: void,
     ULong: void,
@@ -70,6 +73,7 @@ pub const Type = union(TypeTag) {
                 },
                 .Long => return if (signage != null and signage.? == .Unsigned) .ULong else .Long,
                 .FunType, .UInt, .ULong => unreachable,
+                .Pointer => unreachable,
             },
             .Long => switch (types[0].?) {
                 .Int => return if (signage != null and signage.? == .Unsigned) .ULong else .Long,
@@ -78,9 +82,9 @@ pub const Type = union(TypeTag) {
                     return ParserError.InvalidType;
                 },
                 .Double => return .Double,
-                .FunType, .UInt, .ULong => unreachable,
+                .FunType, .Pointer, .UInt, .ULong => unreachable,
             },
-            .FunType, .UInt, .ULong => unreachable,
+            .FunType, .Pointer, .UInt, .ULong => unreachable,
         }
     }
 
@@ -92,7 +96,7 @@ pub const Type = union(TypeTag) {
         return switch (self) {
             .Int, .UInt => 4,
             .Double, .Long, .ULong => 8,
-            .FunType => unreachable,
+            .FunType, .Pointer => unreachable,
         };
     }
 
@@ -103,6 +107,7 @@ pub const Type = union(TypeTag) {
             .Double => other == .Double,
             .Int => other == .Int,
             .Long => other == .Long,
+            .Pointer => other == .Pointer,
             .UInt => other == .UInt,
             .ULong => other == .ULong,
         };
