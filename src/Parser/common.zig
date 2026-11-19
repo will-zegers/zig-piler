@@ -29,7 +29,7 @@ pub const Type = union(TypeTag) {
     Int: void,
     Long: void,
     FunType: struct {
-        params: []*const Type,
+        params: []*Type,
         ret: *Type,
     },
     Pointer: struct {

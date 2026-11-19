@@ -124,7 +124,7 @@ pub const FunDecl = struct {
     lineIndex: usize,
     type: Type,
     name: identifier,
-    params: []VarDecl,
+    params: [][]const u8,
     body: ?Block,
     storageClass: ?StorageClass,
 
@@ -135,7 +135,11 @@ pub const FunDecl = struct {
         try expect(.Identifier, name);
 
         try expect(.OpenParenthesis, tokens.next());
-        const params = try parseParamsList(allocator, tokens);
+
+        var params: ArrayList([]const u8) = .empty;
+        var types: ArrayList(*Type) = .empty;
+        try parseParamsList(allocator, tokens, &types, &params);
+
         try expect(.CloseParenthesis, tokens.next());
 
         const token = tokens.peek();
@@ -145,21 +149,17 @@ pub const FunDecl = struct {
             break :blk null;
         };
 
-        var paramTypes = try ArrayList(*const Type).initCapacity(allocator, params.len);
-        for (params) |*param| {
-            paramTypes.appendAssumeCapacity(&param.type);
-        }
         const ret = try allocator.create(Type);
         ret.* = specifiers.type.?;
 
         return .{
             .lineIndex = token.lineIndex,
             .type = .{ .FunType = .{
-                .params = try paramTypes.toOwnedSlice(allocator),
+                .params = try types.toOwnedSlice(allocator),
                 .ret = ret,
             } },
             .name = name.symbol,
-            .params = params,
+            .params = try params.toOwnedSlice(allocator),
             .body = body,
             .storageClass = specifiers.storageClass,
         };
@@ -170,41 +170,50 @@ pub const FunDecl = struct {
             body.deinit(allocator);
         }
 
-        for (self.params) |*param| {
-            param.deinit(allocator);
+        for (self.params) |param| {
+            allocator.free(param);
         }
         allocator.free(self.params);
+
+        for (self.type.FunType.params) |param| {
+            allocator.destroy(param);
+        }
         allocator.free(self.type.FunType.params);
+
         allocator.destroy(self.type.FunType.ret);
     }
 
-    fn parseParamsList(allocator: Allocator, tokens: *TokenIterator) ExpectedErrors![]VarDecl {
-        var params: ArrayList(VarDecl) = .empty;
-
+    fn parseParamsList(
+        allocator: Allocator,
+        tokens: *TokenIterator,
+        types: *ArrayList(*Type),
+        params: *ArrayList([]const u8),
+    ) ExpectedErrors!void {
         var nextToken = tokens.peek();
         if (nextToken.type != .Void) {
             while (true) {
-                const varDecl: VarDecl = try .parse(allocator, tokens);
-                if (varDecl.storageClass != null) {
+                const specifiers = try Specifiers.parse(tokens);
+                if (specifiers.storageClass != null) {
                     log.err("Invalid storage class specifier in function declarator", .{});
                     return Parser.Error.InvalidStorageClass;
                 }
-                if (varDecl.init != null) {
-                    log.err("C does not support default arguments", .{});
-                    return Parser.Error.DefaultArgument;
-                }
-                try params.append(allocator, varDecl);
+
+                nextToken = tokens.next();
+                try expect(.Identifier, nextToken);
+
+                const t = try allocator.create(Type);
+                t.* = specifiers.type.?;
+                try types.append(allocator, t);
+
+                try params.append(allocator, nextToken.symbol);
 
                 nextToken = tokens.peek();
-
                 if (nextToken.type == .CloseParenthesis) break;
                 try expect(.Comma, tokens.next());
             }
         } else {
-            tokens.skip(); // No params, skip the void token
+            tokens.skip(); // No params, skip the 'void' token
         }
-
-        return params.toOwnedSlice(allocator);
     }
 };
 

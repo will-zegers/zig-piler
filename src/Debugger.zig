@@ -70,7 +70,7 @@ fn printDeclaration(decl: Parser.Declaration, indent: usize) Allocator.Error!voi
             }
             print("{s} {s}(", .{ @tagName(funDecl.type), funDecl.name });
             for (funDecl.params) |param| {
-                print("{s} ", .{param.name});
+                print("{s} ", .{param});
             }
             print(")\n", .{});
             if (funDecl.body) |body| {
@@ -277,9 +277,9 @@ pub fn printTAC(ir: TAC.Program, symbolTable: Symbol.Table) void {
 fn printTACFunction(function: TAC.Function) void {
     print("  {any} {s}(", .{ @TypeOf(function), function.name });
     if (function.params.len > 0) {
-        print("int {s}", .{function.params[0].name});
+        print("int {s}", .{function.params[0]});
         for (1..function.params.len) |i| {
-            print(", int {s}", .{function.params[i].name});
+            print(", int {s}", .{function.params[i]});
         }
     }
     print(")\n", .{});

@@ -54,7 +54,7 @@ const Context = struct {
 pub const Function = struct {
     name: []const u8,
     global: bool,
-    params: []Parser.VarDecl,
+    params: [][]const u8,
     body: []Instruction,
 };
 

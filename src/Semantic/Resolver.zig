@@ -34,35 +34,44 @@ fn resolveDeclaration(allocator: Allocator, context: *Context, decl: *Declaratio
 }
 
 fn resolveFunDecl(allocator: Allocator, context: *Context, decl: *FunDecl) Allocator.Error!void {
-    const scope = context.getScope();
+    var outerScope = context.getScope();
     // Static storage class only allowed for function at file-scope
-    if (context.getScope().type != .File and decl.storageClass == .Static) {
+    if (outerScope.type != .File and decl.storageClass == .Static) {
         context.err.report(.BlockScopeStaticFunDecl, decl.lineIndex, null);
         return;
     }
 
-    if (scope.identifiers.get(decl.name)) |entry| {
+    if (outerScope.identifiers.get(decl.name)) |entry| {
         if (entry.fromCurrentScope and !entry.hasLinkage) {
             context.err.report(.Redeclaration, decl.lineIndex, decl.name);
             return;
         }
     }
 
-    try scope.identifiers.put(decl.name, .{ .unique = decl.name, .fromCurrentScope = true, .hasLinkage = true });
+    try outerScope.identifiers.put(decl.name, .{ .unique = decl.name, .fromCurrentScope = true, .hasLinkage = true });
 
     context.function = decl.name;
     defer context.function = null;
 
     try context.pushScope(.Function, decl.name);
     defer context.popScope();
+    const innerScope = context.getScope();
 
     for (decl.params) |*param| {
-        try resolveLocalVarDecl(allocator, context, param);
+        if (innerScope.identifiers.get(param.*)) |entry| {
+            if (entry.fromCurrentScope) {
+                context.err.report(.Redeclaration, decl.lineIndex, decl.name);
+                return;
+            }
+        }
+        const unique = try generateUnique(allocator, context, param.*);
+        try innerScope.identifiers.put(param.*, .{ .unique = unique });
+        param.* = unique;
     }
 
     if (decl.body) |*body| {
         // Function definitions no allowed outside of file scope
-        if (!mem.eql(u8, Context.FILE_SCOPE, scope.tag)) {
+        if (!mem.eql(u8, Context.FILE_SCOPE, outerScope.tag)) {
             context.err.report(.NestedFunction, decl.lineIndex, null);
             return;
         }

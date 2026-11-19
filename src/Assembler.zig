@@ -146,31 +146,30 @@ fn initStack(
     allocator: Allocator,
     symbols: Symbol.Table,
     instructions: *ArrayList(Instruction),
-    params: []Parser.VarDecl
+    params: [][]const u8,
 ) Allocator.Error!StringHashMap(isize) {
     var pseudoMap: StringHashMap(isize) = .init(allocator);
 
     var intIdx: usize, var doubleIdx: usize = .{0, 0};
     var stackPointerOffset: isize = 2 * QUADWORD_BYTES; // return-address + caller base-pointer
     for (params) |param| {
-        const name = param.unique.?;
-        const t: Type = .fromVar(symbols, name);
+        const t: Type = .fromVar(symbols, param);
         if (doubleIdx < ARG_FP_REGISTERS.len and t == .Double) {
             const src: Operand = .{ .Reg = ARG_FP_REGISTERS[doubleIdx] };
-            const dst: Operand = .{ .Pseudo = name };
+            const dst: Operand = .{ .Pseudo = param };
 
             doubleIdx += 1;
             try instructions.append(allocator, .{ .Mov = .{ .type = t, .src = src, .dst = dst } });
         } else if (intIdx < ARG_INT_REGISTERS.len and (t == .Long or t == .Quad)) {
             const src: Operand = .{ .Reg = ARG_INT_REGISTERS[intIdx] };
-            const dst: Operand = .{ .Pseudo = name };
+            const dst: Operand = .{ .Pseudo = param };
 
             intIdx += 1;
             try instructions.append(allocator, .{ .Mov = .{ .type = t, .src = src, .dst = dst } });
         } else {
             // Since the stack args already exist in memory, add an entry to the pseudo
             // table for the already existing stack offsets
-            try pseudoMap.put(param.unique.?, stackPointerOffset);
+            try pseudoMap.put(param, stackPointerOffset);
             stackPointerOffset += QUADWORD_BYTES;
         }
     }

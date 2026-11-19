@@ -57,8 +57,8 @@ fn typeCheckFunDecl(allocator: Allocator, symbols: *Symbol.Table, decl: *FunDecl
             return;
         }
 
-        for (decl.params, entry.type.FunType.params) |p, t| {
-            if (!p.type.equals(t.*)) { // all params align on types
+        for (decl.type.FunType.params, entry.type.FunType.params) |t1, t2| {
+            if (!t1.equals(t2.*)) { // all params align on types
                 ErrorReporter.report(.ConflictingFunctions, decl.lineIndex, decl.name);
                 return;
             }
@@ -87,8 +87,8 @@ fn typeCheckFunDecl(allocator: Allocator, symbols: *Symbol.Table, decl: *FunDecl
     });
 
     if (decl.body) |*body| {
-        for (decl.params) |param| {
-            try symbols.put(param.unique.?, .{ .type = param.type, .attrs = .Local });
+        for (decl.type.FunType.params, decl.params) |t, param| {
+            try symbols.put(param, .{ .type = t.*, .attrs = .Local });
         }
         FunctionName = decl.name;
         try typeCheckBlock(allocator, symbols, body);
