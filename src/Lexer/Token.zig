@@ -59,6 +59,10 @@ pub const Iterator = struct {
         self.allocator.free(self.items);
     }
 
+    pub fn clone(self: Iterator) Iterator {
+        return .{ .allocator = self.allocator, .items = self.items, .index = self.index };
+    }
+
     pub fn next(self: *Iterator) Token {
         if (self.index < self.items.len) {
             const token = self.items[self.index];

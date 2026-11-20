@@ -150,8 +150,8 @@ pub fn tokenize(self: *Lexer, text: [:0]const u8) Allocator.Error!TokenIterator 
                 token = switch (remainingText[1]) {
                     '=' => .{ .type = .BinaryOp, .symbol = "-=", .precedence = 30, .associativity = .RightToLeft, .lineIndex = lineIndex }, // subtraction assignment
                     '-' => switch (prevToken.type) {
-                        .Identifier, .CloseParenthesis, .UnaryOp => .{ .type = .UnaryOp, .symbol = "--", .precedence = 160, .associativity = .LeftToRight, .lineIndex = lineIndex },
-                        else => .{ .type = .UnaryOp, .symbol = "--", .precedence = 150, .associativity = .RightToLeft, .lineIndex = lineIndex },
+                        .Identifier, .CloseParenthesis, .UnaryOp => .{ .type = .UnaryOp, .symbol = "--", .precedence = 160, .associativity = .LeftToRight, .lineIndex = lineIndex }, // post-fix decrement
+                        else => .{ .type = .UnaryOp, .symbol = "--", .precedence = 150, .associativity = .RightToLeft, .lineIndex = lineIndex }, // pre-fix decrement
                     },
                     else => switch (prevToken.type) {
                         .Constant, .Identifier, .CloseParenthesis => .{ .type = .BinaryOp, .symbol = "-", .precedence = 130, .associativity = .LeftToRight, .lineIndex = lineIndex }, // subtract
@@ -168,7 +168,10 @@ pub fn tokenize(self: *Lexer, text: [:0]const u8) Allocator.Error!TokenIterator 
             '*' => { // multiplication operator
                 token = switch (remainingText[1]) {
                     '=' => .{ .type = .BinaryOp, .symbol = "*=", .precedence = 30, .associativity = .RightToLeft, .lineIndex = lineIndex }, // multiplication assignment
-                    else => .{ .type = .BinaryOp, .symbol = "*", .precedence = 140, .associativity = .LeftToRight, .lineIndex = lineIndex }, // multiplication
+                    else => switch (prevToken.type) {
+                        .Int, .Long, .Unsigned, .Double, .UnaryOp => .{ .type = .UnaryOp, .symbol = "*", .precedence = 150, .associativity = .RightToLeft, .lineIndex = lineIndex }, // dereference
+                        else => .{ .type = .BinaryOp, .symbol = "*", .precedence = 140, .associativity = .LeftToRight, .lineIndex = lineIndex }, // multiplication
+                    },
                 };
             },
             '+' => { // addition operator

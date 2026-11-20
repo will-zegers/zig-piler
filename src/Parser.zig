@@ -76,40 +76,207 @@ pub const Program = struct {
     }
 };
 
+const Param = struct {
+    type: Type,
+    decl: Declarator,
+};
+
+const Ident = struct { name: []const u8 };
+const PointerDeclarator = struct {
+    decl: *Declarator,
+
+    fn init(allocator: Allocator, declarator: Declarator) Allocator.Error!PointerDeclarator {
+        const decl = try allocator.create(Declarator);
+        decl.* = declarator;
+        return .{ .decl = decl };
+    }
+
+    fn deinit(self: PointerDeclarator, allocator: Allocator) void {
+        allocator.destroy(self.decl);
+    }
+};
+const FunDeclarator = struct {
+    decl: *Declarator,
+    paramInfo: []Param,
+
+    fn init(allocator: Allocator, declarator: Declarator) Allocator.Error!FunDeclarator {
+        const decl = try allocator.create(Declarator);
+        decl.* = declarator;
+        return .{ .decl = decl };
+    }
+
+    fn deinit(self: FunDeclarator, allocator: Allocator) void {
+        allocator.destroy(self.decl);
+        allocator.free(self.paramInfo);
+    }
+};
+
+const DeclaratorTag = enum { Ident, PointerDeclarator, FunDeclarator };
+const Declarator = union(DeclaratorTag) {
+    Ident: Ident,
+    PointerDeclarator: PointerDeclarator,
+    FunDeclarator: FunDeclarator,
+
+    const Simple = union {
+        identifier: []const u8,
+        declarator: Declarator,
+    };
+
+    fn parse(allocator: Allocator, tokens: *TokenIterator) ExpectedErrors!Declarator {
+        const token = tokens.next();
+        if (mem.eql(u8, "*", token.symbol)) {
+            const decl = try allocator.create(Declarator);
+            decl.* = try Declarator.parse(allocator, tokens);
+            return .{ .PointerDeclarator = .{ .decl = decl } };
+        }
+
+        var simple: Declarator = undefined;
+        if (token.type == .OpenParenthesis) {
+            simple = try Declarator.parse(allocator, tokens);
+            try expect(.CloseParenthesis, tokens.next());
+        } else {
+            try expect(.Identifier, token);
+            simple = .{ .Ident = .{ .name = token.symbol } };
+        }
+
+        if (isFunDecl(tokens)) {
+            const paramList = try parseParamList(allocator, tokens);
+            const decl = try allocator.create(Declarator);
+            decl.* = simple;
+            return .{ .FunDeclarator = .{ .decl = decl, .paramInfo = paramList } };
+        }
+
+        return simple;
+    }
+
+    fn isFunDecl(tokens: *const Token.Iterator) bool {
+        return tokens.peek().type == .OpenParenthesis;
+    }
+
+    fn parseParamList(allocator: Allocator, tokens: *TokenIterator) ExpectedErrors![]Param {
+        var paramList: ArrayList(Param) = .empty;
+
+        try expect(.OpenParenthesis, tokens.next());
+
+        var nextToken = tokens.peek();
+        if (nextToken.type != .Void) {
+            while (true) {
+                const specifiers = try Specifiers.parse(tokens);
+                if (specifiers.storageClass != null) {
+                    log.err("Invalid storage class specifier in function declarator", .{});
+                    return Parser.Error.InvalidStorageClass;
+                }
+
+                const decl = try Declarator.parse(allocator, tokens);
+                try paramList.append(allocator, .{ .type = specifiers.type.?, .decl = decl });
+
+                nextToken = tokens.peek();
+                if (nextToken.type == .CloseParenthesis) break;
+                try expect(.Comma, tokens.next());
+            }
+        } else {
+            tokens.skip(); // No params, discard the 'void' token
+        }
+
+        try expect(.CloseParenthesis, tokens.next());
+
+        return paramList.toOwnedSlice(allocator);
+    }
+
+    pub fn deinit(self: Declarator, allocator: Allocator) void {
+        switch (self) {
+            .Ident => {},
+            .FunDeclarator => self.FunDeclarator.deinit(allocator),
+            .PointerDeclarator => self.PointerDeclarator.deinit(allocator),
+        }
+    }
+};
+
 pub const DeclarationTag = enum { FunDecl, VarDecl };
 pub const Declaration = union(DeclarationTag) {
     FunDecl: FunDecl,
     VarDecl: VarDecl,
+
+    const Processed = struct {
+        name: []const u8,
+        type: Type,
+        params: [][]const u8,
+    };
 
     pub fn parse(allocator: Allocator, tokens: *TokenIterator) ExpectedErrors!Declaration {
         // We need to look a couple tokens ahead to determine if this is a function declaration,
         // which be of the form "int" <identifier> "(" (i.e., the 'marker' be an open paranthesis).
         // If not, assume it a variable declaration of the form "int" <identifier> (";" | "=") and
         // try to parse it as such;
-        const decl: Declaration = if (try isFunDecl(tokens.*))
-            .{ .FunDecl = try .parse(allocator, tokens) }
-        else
-            .{ .VarDecl = try .parse(allocator, tokens) };
+        const lineIndex = tokens.peek().lineIndex;
+        const specifiers = try Specifiers.parse(tokens);
+        var tokensClone = tokens.clone();
+        const declarator = try Declarator.parse(allocator, &tokensClone);
+        defer declarator.deinit(allocator);
+        const processed = try processDeclarator(allocator, declarator, specifiers.type.?);
 
-        if (decl == .VarDecl or decl.FunDecl.body == null) {
-            try expect(.Semicolon, tokens.next());
+        var decl: Declaration = undefined;
+        if (try isFunDecl(tokens.*)) {
+            tokens.index = tokensClone.index;
+            decl = .{ .FunDecl = try .parse(allocator, specifiers.storageClass, processed.type, processed.name, processed.params, tokens) };
+        } else {
+            tokens.index = tokensClone.index;
+            decl = .{ .VarDecl = try .parse(allocator, specifiers.storageClass, processed.type, processed.name, lineIndex, tokens) };
         }
 
         return decl;
     }
 
+    fn processDeclarator(allocator: Allocator, declarator: Declarator, baseType: Type) ExpectedErrors!Processed {
+        var paramNames: ArrayList([]const u8) = .empty;
+        switch (declarator) {
+            .Ident => |i| return .{ .name = i.name, .type = baseType, .params = try paramNames.toOwnedSlice(allocator) },
+            .PointerDeclarator => |d| {
+                const ref = try allocator.create(Type);
+                ref.* = baseType;
+                const derivedType: Type = .{ .Pointer = .{ .referenced = ref } };
+
+                return processDeclarator(allocator, d.decl.*, derivedType);
+            },
+            .FunDeclarator => |f| {
+                if (f.decl.* == .Ident) {
+                    var paramTypes: ArrayList(*Type) = .empty;
+                    for (f.paramInfo) |param| {
+                        const processed = try processDeclarator(allocator, param.decl, param.type);
+                        if (processed.type == .FunType) {
+                            log.err("Function pointers in params are not supported", .{});
+                            return Parser.Error.FunctionPointerInParams;
+                        }
+                        try paramNames.append(allocator, processed.name);
+
+                        const t = try allocator.create(Type);
+                        t.* = processed.type;
+                        try paramTypes.append(allocator, t);
+                    }
+                    const ret = try allocator.create(Type);
+                    ret.* = baseType;
+
+                    const derivedType: Type = .{ .FunType = .{ .params = try paramTypes.toOwnedSlice(allocator), .ret = ret } };
+                    return .{ .name = f.decl.Ident.name, .type = derivedType, .params = try paramNames.toOwnedSlice(allocator) };
+                } else {
+                    log.err("Can't apply additional type derivations to a function type", .{});
+                    return Parser.Error.AdditionalFunctionDerivation;
+                }
+            },
+        }
+    }
+
     /// Look ahead a few tokens to see if a '(' follows the identifier token, indicating this is
     /// a function rather than variable declarator
     fn isFunDecl(tokens: Token.Iterator) !bool {
-        var tokenIndex: usize = 0;
-        while (true) {
-            switch (tokens.lookAhead(tokenIndex).type) {
-                .Double, .Extern, .Int, .Long, .Signed, .Static, .Unsigned => tokenIndex += 1,
-                else => break,
-            }
+        var tokenIndex: usize = 1;
+        var nextSymbol = tokens.lookAhead(tokenIndex).symbol;
+        while (mem.eql(u8, "*", nextSymbol)) {
+            tokenIndex += 1;
+            nextSymbol = tokens.lookAhead(tokenIndex).symbol;
         }
-        try expect(.Identifier, tokens.lookAhead(tokenIndex));
-        return tokens.lookAhead(tokenIndex + 1).type == .OpenParenthesis;
+
+        return tokens.lookAhead(tokenIndex).type == .OpenParenthesis;
     }
 
     pub fn deinit(self: *Declaration, allocator: Allocator) void {
@@ -122,46 +289,36 @@ pub const Declaration = union(DeclarationTag) {
 
 pub const FunDecl = struct {
     lineIndex: usize,
+    storageClass: ?StorageClass,
     type: Type,
     name: identifier,
     params: [][]const u8,
     body: ?Block,
-    storageClass: ?StorageClass,
+    resolved: bool = false, // Semantic analysis will allocate unique names for parameters that need deinit
 
-    pub fn parse(allocator: Allocator, tokens: *TokenIterator) ExpectedErrors!FunDecl {
-        const specifiers = try Specifiers.parse(tokens);
-
-        const name = tokens.next();
-        try expect(.Identifier, name);
-
-        try expect(.OpenParenthesis, tokens.next());
-
-        var params: ArrayList([]const u8) = .empty;
-        var types: ArrayList(*Type) = .empty;
-        try parseParamsList(allocator, tokens, &types, &params);
-
-        try expect(.CloseParenthesis, tokens.next());
-
+    pub fn parse(
+        allocator: Allocator,
+        storageClass: ?StorageClass,
+        t: Type,
+        name: []const u8,
+        params: [][]const u8,
+        tokens: *TokenIterator,
+    ) ExpectedErrors!FunDecl {
         const token = tokens.peek();
         const body: ?Block = if (token.type == .OpenBrace)
             try Block.parse(allocator, tokens)
         else blk: {
+            try expect(.Semicolon, tokens.next());
             break :blk null;
         };
 
-        const ret = try allocator.create(Type);
-        ret.* = specifiers.type.?;
-
         return .{
             .lineIndex = token.lineIndex,
-            .type = .{ .FunType = .{
-                .params = try types.toOwnedSlice(allocator),
-                .ret = ret,
-            } },
-            .name = name.symbol,
-            .params = try params.toOwnedSlice(allocator),
+            .storageClass = storageClass,
+            .type = t,
+            .name = name,
+            .params = params,
             .body = body,
-            .storageClass = specifiers.storageClass,
         };
     }
 
@@ -170,8 +327,10 @@ pub const FunDecl = struct {
             body.deinit(allocator);
         }
 
-        for (self.params) |param| {
-            allocator.free(param);
+        if (self.resolved) {
+            for (self.params) |param| {
+                allocator.free(param);
+            }
         }
         allocator.free(self.params);
 
@@ -219,33 +378,35 @@ pub const FunDecl = struct {
 
 pub const VarDecl = struct {
     lineIndex: usize,
-    type: Type,
-    name: identifier,
-    unique: ?identifier = null,
-    init: ?Expression = null,
     storageClass: ?StorageClass = null,
+    type: Type,
+    name: []const u8,
+    unique: ?[]const u8 = null,
+    init: ?Expression = null,
 
-    pub fn parse(allocator: Allocator, tokens: *TokenIterator) ExpectedErrors!VarDecl {
-        const specifiers = try Specifiers.parse(tokens);
-
-        var token = tokens.next();
-        try expect(.Identifier, token);
-        const name = token.symbol;
-
+    pub fn parse(
+        allocator: Allocator,
+        storageClass: ?StorageClass,
+        t: Type,
+        name: []const u8,
+        lineIndex: usize,
+        tokens: *TokenIterator,
+    ) ExpectedErrors!VarDecl {
         var init: ?Expression = null;
         if (mem.eql(u8, "=", tokens.peek().symbol)) {
-            const lhs: Expression = .{ .Var = .{ .type = specifiers.type, .name = name, .lineIndex = token.lineIndex } };
-            token = tokens.next();
+            const lhs: Expression = .{ .Var = .{ .type = t, .name = name, .lineIndex = lineIndex } };
+            const token = tokens.next();
             const rhs: Expression = try .parse(allocator, tokens, 0);
             init = .{ .Assignment = try Assignment.parse(allocator, token, lhs, rhs) };
         }
+        try expect(.Semicolon, tokens.next());
 
         return .{
-            .lineIndex = token.lineIndex,
-            .type = specifiers.type.?,
+            .lineIndex = lineIndex,
+            .storageClass = storageClass,
+            .type = t,
             .name = name,
             .init = init,
-            .storageClass = specifiers.storageClass,
         };
     }
 

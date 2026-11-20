@@ -77,6 +77,7 @@ fn resolveFunDecl(allocator: Allocator, context: *Context, decl: *FunDecl) Alloc
         }
         try resolveBlockIdentifiers(allocator, context, body);
     }
+    decl.resolved = true;
 }
 
 fn resolveVarDecl(allocator: Allocator, context: *Context, decl: *VarDecl) Allocator.Error!void {
