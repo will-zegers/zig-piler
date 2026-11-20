@@ -43,7 +43,6 @@ function test_directory {
 
     # run zig-piler on any .c files
     elif [[ $file =~ \.c$ ]]; then
-
       if [[ $SKIP =~ $file ]]; then
         echo "  [*] skipping $file"
         continue
@@ -56,6 +55,7 @@ function test_directory {
         fi
       done
 
+      file=$(realpath $file)
       local basename=${file::-2} # remove the '.c' extension
 
       # ignore client files, just add them as an additional source for the base file
