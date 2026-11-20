@@ -7,11 +7,12 @@ const log = std.log;
 const Token = @import("../Lexer/Token.zig");
 
 const common = @import("common.zig");
-const Type = common.Type;
 const ExpectedErrors = common.ExpectedErrors;
 const ParserError = common.ParserError;
 const Specifiers = common.Specifiers;
 const expect = common.expect;
+
+const Type = @import("type.zig").Type;
 
 const DeclaratorTag = enum { Ident, PointerDeclarator, FunDeclarator };
 pub const Declarator = union(DeclaratorTag) {

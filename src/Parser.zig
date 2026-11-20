@@ -13,7 +13,6 @@ const Error = common.ParserError;
 const ExpectedErrors = common.ExpectedErrors;
 const Specifiers = common.Specifiers;
 const StorageClass = common.StorageClass;
-pub const Type = common.Type;
 const expect = common.expect;
 const identifier = common.identifier;
 
@@ -29,6 +28,8 @@ pub const Factor = expression.Factor;
 pub const FunctionCall = expression.FunctionCall;
 pub const Ternary = expression.Ternary;
 pub const Unary = expression.Unary;
+
+pub const Type = @import("Parser/type.zig").Type;
 
 const Parser = @This();
 
@@ -82,12 +83,6 @@ pub const Declaration = union(DeclarationTag) {
     FunDecl: FunDecl,
     VarDecl: VarDecl,
 
-    const Processed = struct {
-        type: Type,
-        name: []const u8,
-        params: [][]const u8,
-    };
-
     pub fn parse(allocator: Allocator, tokens: *TokenIterator) ExpectedErrors!Declaration {
         const lineIndex = tokens.peek().lineIndex;
 
@@ -96,19 +91,19 @@ pub const Declaration = union(DeclarationTag) {
         const declarator = try Declarator.parse(allocator, tokens);
         defer declarator.deinit(allocator);
 
-        const processed = try processDeclarator(allocator, declarator, specifiers.type.?);
+        const name, const t, const params = try processDeclarator(allocator, declarator, specifiers.type.?);
 
-        if (processed.type == .FunType) {
-            return .{ .FunDecl = try .parse(allocator, specifiers.storageClass, processed.type, processed.name, processed.params, lineIndex, tokens) };
+        if (t == .FunType) {
+            return .{ .FunDecl = try .parse(allocator, specifiers.storageClass, t, name, params, lineIndex, tokens) };
         } else {
-            return .{ .VarDecl = try .parse(allocator, specifiers.storageClass, processed.type, processed.name, lineIndex, tokens) };
+            return .{ .VarDecl = try .parse(allocator, specifiers.storageClass, t, name, lineIndex, tokens) };
         }
     }
 
-    fn processDeclarator(allocator: Allocator, declarator: Declarator, baseType: Type) ExpectedErrors!Processed {
+    fn processDeclarator(allocator: Allocator, declarator: Declarator, baseType: Type) ExpectedErrors!struct { []const u8, Type, [][]const u8 } {
         var paramNames: ArrayList([]const u8) = .empty;
         switch (declarator) {
-            .Ident => |i| return .{ .name = i.name, .type = baseType, .params = try paramNames.toOwnedSlice(allocator) },
+            .Ident => |i| return .{ i.name, baseType, try paramNames.toOwnedSlice(allocator) },
             .PointerDeclarator => |d| {
                 const ref = try allocator.create(Type);
                 ref.* = baseType;
@@ -117,29 +112,29 @@ pub const Declaration = union(DeclarationTag) {
                 return processDeclarator(allocator, d.decl.*, derivedType);
             },
             .FunDeclarator => |f| {
-                if (f.decl.* == .Ident) {
-                    var paramTypes: ArrayList(*Type) = .empty;
-                    for (f.paramInfo) |param| {
-                        const processed = try processDeclarator(allocator, param.decl, param.type);
-                        if (processed.type == .FunType) {
-                            log.err("Function pointers in params are not supported", .{});
-                            return Parser.Error.FunctionPointerInParams;
-                        }
-                        try paramNames.append(allocator, processed.name);
-
-                        const t = try allocator.create(Type);
-                        t.* = processed.type;
-                        try paramTypes.append(allocator, t);
-                    }
-                    const ret = try allocator.create(Type);
-                    ret.* = baseType;
-
-                    const derivedType: Type = .{ .FunType = .{ .params = try paramTypes.toOwnedSlice(allocator), .ret = ret } };
-                    return .{ .name = f.decl.Ident.name, .type = derivedType, .params = try paramNames.toOwnedSlice(allocator) };
-                } else {
+                if (f.decl.* != .Ident) {
                     log.err("Can't apply additional type derivations to a function type", .{});
                     return Parser.Error.AdditionalFunctionDerivation;
                 }
+
+                var paramTypes: ArrayList(*Type) = .empty;
+                for (f.paramInfo) |param| {
+                    const name, const ty, _ = try processDeclarator(allocator, param.decl, param.type);
+                    if (ty == .FunType) {
+                        log.err("Function pointers in params are not supported", .{});
+                        return Parser.Error.FunctionPointerInParams;
+                    }
+                    try paramNames.append(allocator, name);
+
+                    const t = try allocator.create(Type);
+                    t.* = ty;
+                    try paramTypes.append(allocator, t);
+                }
+                const ret = try allocator.create(Type);
+                ret.* = baseType;
+
+                const derivedType: Type = .{ .FunType = .{ .params = try paramTypes.toOwnedSlice(allocator), .ret = ret } };
+                return .{ f.decl.Ident.name, derivedType, try paramNames.toOwnedSlice(allocator) };
             },
         }
     }

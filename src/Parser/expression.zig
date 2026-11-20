@@ -11,9 +11,10 @@ const TokenIterator = Token.Iterator;
 const common = @import("common.zig");
 const ParserError = common.ParserError;
 const Specifiers = common.Specifiers;
-const Type = common.Type;
 const expect = common.expect;
 const identifier = common.identifier;
+
+const Type = @import("type.zig").Type;
 
 const ExpectedErrors = Allocator.Error || ParserError;
 
