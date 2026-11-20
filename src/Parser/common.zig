@@ -1,9 +1,12 @@
 const std = @import("std");
+const Allocator = std.mem.Allocator;
 const log = std.log;
 
 const Token = @import("../Lexer.zig").Token;
 
 pub const identifier = []const u8;
+
+pub const ExpectedErrors = Allocator.Error || ParserError;
 
 pub const ParserError = error{
     AdditionalFunctionDerivation,
@@ -27,7 +30,6 @@ pub const Type = union(TypeTag) {
 
     const Error = error{NonComparable};
 
-    // TODO: visit if the types need to be references
     Double: void,
     Int: void,
     Long: void,

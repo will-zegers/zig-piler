@@ -10,11 +10,14 @@ const TokenIterator = Token.Iterator;
 
 const common = @import("Parser/common.zig");
 const Error = common.ParserError;
+const ExpectedErrors = common.ExpectedErrors;
 const Specifiers = common.Specifiers;
 const StorageClass = common.StorageClass;
 pub const Type = common.Type;
 const expect = common.expect;
 const identifier = common.identifier;
+
+const Declarator = @import("Parser/declarator.zig").Declarator;
 
 const expression = @import("Parser/expression.zig");
 pub const Assignment = expression.Assignment;
@@ -28,8 +31,6 @@ pub const Ternary = expression.Ternary;
 pub const Unary = expression.Unary;
 
 const Parser = @This();
-
-const ExpectedErrors = Allocator.Error || Parser.Error;
 
 pub const AST = Program;
 
@@ -76,155 +77,32 @@ pub const Program = struct {
     }
 };
 
-const Param = struct {
-    type: Type,
-    decl: Declarator,
-};
-
-const Ident = struct { name: []const u8 };
-const PointerDeclarator = struct {
-    decl: *Declarator,
-
-    fn init(allocator: Allocator, declarator: Declarator) Allocator.Error!PointerDeclarator {
-        const decl = try allocator.create(Declarator);
-        decl.* = declarator;
-        return .{ .decl = decl };
-    }
-
-    fn deinit(self: PointerDeclarator, allocator: Allocator) void {
-        allocator.destroy(self.decl);
-    }
-};
-const FunDeclarator = struct {
-    decl: *Declarator,
-    paramInfo: []Param,
-
-    fn init(allocator: Allocator, declarator: Declarator) Allocator.Error!FunDeclarator {
-        const decl = try allocator.create(Declarator);
-        decl.* = declarator;
-        return .{ .decl = decl };
-    }
-
-    fn deinit(self: FunDeclarator, allocator: Allocator) void {
-        allocator.destroy(self.decl);
-        allocator.free(self.paramInfo);
-    }
-};
-
-const DeclaratorTag = enum { Ident, PointerDeclarator, FunDeclarator };
-const Declarator = union(DeclaratorTag) {
-    Ident: Ident,
-    PointerDeclarator: PointerDeclarator,
-    FunDeclarator: FunDeclarator,
-
-    const Simple = union {
-        identifier: []const u8,
-        declarator: Declarator,
-    };
-
-    fn parse(allocator: Allocator, tokens: *TokenIterator) ExpectedErrors!Declarator {
-        const token = tokens.next();
-        if (mem.eql(u8, "*", token.symbol)) {
-            const decl = try allocator.create(Declarator);
-            decl.* = try Declarator.parse(allocator, tokens);
-            return .{ .PointerDeclarator = .{ .decl = decl } };
-        }
-
-        var simple: Declarator = undefined;
-        if (token.type == .OpenParenthesis) {
-            simple = try Declarator.parse(allocator, tokens);
-            try expect(.CloseParenthesis, tokens.next());
-        } else {
-            try expect(.Identifier, token);
-            simple = .{ .Ident = .{ .name = token.symbol } };
-        }
-
-        if (isFunDecl(tokens)) {
-            const paramList = try parseParamList(allocator, tokens);
-            const decl = try allocator.create(Declarator);
-            decl.* = simple;
-            return .{ .FunDeclarator = .{ .decl = decl, .paramInfo = paramList } };
-        }
-
-        return simple;
-    }
-
-    fn isFunDecl(tokens: *const Token.Iterator) bool {
-        return tokens.peek().type == .OpenParenthesis;
-    }
-
-    fn parseParamList(allocator: Allocator, tokens: *TokenIterator) ExpectedErrors![]Param {
-        var paramList: ArrayList(Param) = .empty;
-
-        try expect(.OpenParenthesis, tokens.next());
-
-        var nextToken = tokens.peek();
-        if (nextToken.type != .Void) {
-            while (true) {
-                const specifiers = try Specifiers.parse(tokens);
-                if (specifiers.storageClass != null) {
-                    log.err("Invalid storage class specifier in function declarator", .{});
-                    return Parser.Error.InvalidStorageClass;
-                }
-
-                const decl = try Declarator.parse(allocator, tokens);
-                try paramList.append(allocator, .{ .type = specifiers.type.?, .decl = decl });
-
-                nextToken = tokens.peek();
-                if (nextToken.type == .CloseParenthesis) break;
-                try expect(.Comma, tokens.next());
-            }
-        } else {
-            tokens.skip(); // No params, discard the 'void' token
-        }
-
-        try expect(.CloseParenthesis, tokens.next());
-
-        return paramList.toOwnedSlice(allocator);
-    }
-
-    pub fn deinit(self: Declarator, allocator: Allocator) void {
-        switch (self) {
-            .Ident => {},
-            .FunDeclarator => self.FunDeclarator.deinit(allocator),
-            .PointerDeclarator => self.PointerDeclarator.deinit(allocator),
-        }
-    }
-};
-
 pub const DeclarationTag = enum { FunDecl, VarDecl };
 pub const Declaration = union(DeclarationTag) {
     FunDecl: FunDecl,
     VarDecl: VarDecl,
 
     const Processed = struct {
-        name: []const u8,
         type: Type,
+        name: []const u8,
         params: [][]const u8,
     };
 
     pub fn parse(allocator: Allocator, tokens: *TokenIterator) ExpectedErrors!Declaration {
-        // We need to look a couple tokens ahead to determine if this is a function declaration,
-        // which be of the form "int" <identifier> "(" (i.e., the 'marker' be an open paranthesis).
-        // If not, assume it a variable declaration of the form "int" <identifier> (";" | "=") and
-        // try to parse it as such;
         const lineIndex = tokens.peek().lineIndex;
+
         const specifiers = try Specifiers.parse(tokens);
-        var tokensClone = tokens.clone();
-        const declarator = try Declarator.parse(allocator, &tokensClone);
+
+        const declarator = try Declarator.parse(allocator, tokens);
         defer declarator.deinit(allocator);
+
         const processed = try processDeclarator(allocator, declarator, specifiers.type.?);
 
-        var decl: Declaration = undefined;
-        if (try isFunDecl(tokens.*)) {
-            tokens.index = tokensClone.index;
-            decl = .{ .FunDecl = try .parse(allocator, specifiers.storageClass, processed.type, processed.name, processed.params, tokens) };
+        if (processed.type == .FunType) {
+            return .{ .FunDecl = try .parse(allocator, specifiers.storageClass, processed.type, processed.name, processed.params, lineIndex, tokens) };
         } else {
-            tokens.index = tokensClone.index;
-            decl = .{ .VarDecl = try .parse(allocator, specifiers.storageClass, processed.type, processed.name, lineIndex, tokens) };
+            return .{ .VarDecl = try .parse(allocator, specifiers.storageClass, processed.type, processed.name, lineIndex, tokens) };
         }
-
-        return decl;
     }
 
     fn processDeclarator(allocator: Allocator, declarator: Declarator, baseType: Type) ExpectedErrors!Processed {
@@ -266,19 +144,6 @@ pub const Declaration = union(DeclarationTag) {
         }
     }
 
-    /// Look ahead a few tokens to see if a '(' follows the identifier token, indicating this is
-    /// a function rather than variable declarator
-    fn isFunDecl(tokens: Token.Iterator) !bool {
-        var tokenIndex: usize = 1;
-        var nextSymbol = tokens.lookAhead(tokenIndex).symbol;
-        while (mem.eql(u8, "*", nextSymbol)) {
-            tokenIndex += 1;
-            nextSymbol = tokens.lookAhead(tokenIndex).symbol;
-        }
-
-        return tokens.lookAhead(tokenIndex).type == .OpenParenthesis;
-    }
-
     pub fn deinit(self: *Declaration, allocator: Allocator) void {
         switch (self.*) {
             .FunDecl => self.FunDecl.deinit(allocator),
@@ -302,18 +167,18 @@ pub const FunDecl = struct {
         t: Type,
         name: []const u8,
         params: [][]const u8,
+        lineIndex: usize,
         tokens: *TokenIterator,
     ) ExpectedErrors!FunDecl {
-        const token = tokens.peek();
-        const body: ?Block = if (token.type == .OpenBrace)
-            try Block.parse(allocator, tokens)
-        else blk: {
+        var body: ?Block = null;
+        if (tokens.peek().type == .OpenBrace) {
+            body = try Block.parse(allocator, tokens);
+        } else {
             try expect(.Semicolon, tokens.next());
-            break :blk null;
-        };
+        }
 
         return .{
-            .lineIndex = token.lineIndex,
+            .lineIndex = lineIndex,
             .storageClass = storageClass,
             .type = t,
             .name = name,
@@ -338,41 +203,7 @@ pub const FunDecl = struct {
             allocator.destroy(param);
         }
         allocator.free(self.type.FunType.params);
-
         allocator.destroy(self.type.FunType.ret);
-    }
-
-    fn parseParamsList(
-        allocator: Allocator,
-        tokens: *TokenIterator,
-        types: *ArrayList(*Type),
-        params: *ArrayList([]const u8),
-    ) ExpectedErrors!void {
-        var nextToken = tokens.peek();
-        if (nextToken.type != .Void) {
-            while (true) {
-                const specifiers = try Specifiers.parse(tokens);
-                if (specifiers.storageClass != null) {
-                    log.err("Invalid storage class specifier in function declarator", .{});
-                    return Parser.Error.InvalidStorageClass;
-                }
-
-                nextToken = tokens.next();
-                try expect(.Identifier, nextToken);
-
-                const t = try allocator.create(Type);
-                t.* = specifiers.type.?;
-                try types.append(allocator, t);
-
-                try params.append(allocator, nextToken.symbol);
-
-                nextToken = tokens.peek();
-                if (nextToken.type == .CloseParenthesis) break;
-                try expect(.Comma, tokens.next());
-            }
-        } else {
-            tokens.skip(); // No params, skip the 'void' token
-        }
     }
 };
 
