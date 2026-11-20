@@ -1,24 +1,6 @@
 const Parser = @import("../Parser.zig");
 
-const InstructionTag = enum {
-    Binary,
-    Copy,
-    DoubleToInt,
-    DoubleToUInt,
-    FunCall,
-    IntToDouble,
-    Jump,
-    JumpIfNotZero,
-    JumpIfZero,
-    Label,
-    Return,
-    SignExtend,
-    Truncate,
-    UIntToDouble,
-    Unary,
-    ZeroExtend,
-};
-pub const Instruction = union(InstructionTag) {
+pub const Instruction = union(enum) {
     Binary: Binary,
     Copy: Copy,
     DoubleToInt: DoubleToInt,
@@ -84,7 +66,6 @@ pub const Unary = struct {
 
 pub const ZeroExtend = struct { src: Val, dst: Val };
 
-const ValTag = enum { Constant, Var };
-pub const Val = union(ValTag) { Constant: Constant, Var: Var };
+pub const Val = union(enum) { Constant: Constant, Var: Var };
 
 pub const Var = []const u8;

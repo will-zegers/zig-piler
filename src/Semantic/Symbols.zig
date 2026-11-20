@@ -10,8 +10,7 @@ const Type = Parser.Type;
 pub const StaticInit = Parser.Constant; // TODO: decouple this from Parser.Constant when they diverge
 
 pub const Static = struct {
-    const InitialValueTag = enum { Initial, Tentative, None };
-    pub const InitialValue = union(InitialValueTag) {
+    pub const InitialValue = union(enum) {
         Initial: StaticInit,
         Tentative: void,
         None: void,
@@ -20,8 +19,7 @@ pub const Static = struct {
     global: bool,
 };
 
-const AttrsTag = enum { Fun, Local, Static };
-pub const Attrs = union(AttrsTag) {
+pub const Attrs = union(enum) {
     Fun: struct {
         defined: bool,
         global: bool,

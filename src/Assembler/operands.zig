@@ -52,8 +52,7 @@ pub const StaticConstant = struct {
     }
 };
 
-const OperandTag = enum { Imm, Reg, Pseudo, Stack, Data };
-pub const Operand = union(OperandTag) {
+pub const Operand = union(enum) {
     Imm: usize,
     Reg: Reg,
     Pseudo: []const u8,

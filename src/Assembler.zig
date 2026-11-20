@@ -38,8 +38,7 @@ const Assembler = @This();
 
 pub const Assembly = Program;
 
-const EntryTag = enum {Obj, Fun};
-pub const Entry = union(EntryTag) {
+pub const Entry = union(enum) {
     Obj: struct { type: Type, isStatic: bool, isConstant: bool },
     Fun: struct { defined: bool },
 };

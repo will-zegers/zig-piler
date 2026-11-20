@@ -78,8 +78,7 @@ pub const Program = struct {
     }
 };
 
-pub const DeclarationTag = enum { FunDecl, VarDecl };
-pub const Declaration = union(DeclarationTag) {
+pub const Declaration = union(enum) {
     FunDecl: FunDecl,
     VarDecl: VarDecl,
 
@@ -242,8 +241,7 @@ pub const VarDecl = struct {
     }
 };
 
-pub const BlockItemTag = enum { Declaration, Statement };
-pub const BlockItem = union(BlockItemTag) {
+pub const BlockItem = union(enum) {
     Declaration: Declaration,
     Statement: Statement,
 
@@ -291,8 +289,7 @@ pub const Block = struct {
     }
 };
 
-const StatementTag = enum { Break, Case, Compound, Continue, DoWhile, Expression, For, Goto, If, Label, Return, Switch, While, Null };
-pub const Statement = union(StatementTag) {
+pub const Statement = union(enum) {
     Break: Break,
     Case: Case,
     Compound: Block,
@@ -504,8 +501,7 @@ pub const DoWhile = struct {
     }
 };
 
-const ForInitTag = enum { Declaration, Expression };
-const ForInit = union(ForInitTag) {
+const ForInit = union(enum) {
     Declaration: Declaration,
     Expression: ?Expression,
 

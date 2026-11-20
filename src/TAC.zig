@@ -65,8 +65,7 @@ pub const StaticVariable = struct {
     initial: Symbol.StaticInit,
 };
 
-const TopLevelTag = enum { Function, StaticVariable };
-const TopLevel = union(TopLevelTag) {
+const TopLevel = union(enum) {
     Function: Function,
     StaticVariable: StaticVariable,
 };

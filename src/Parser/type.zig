@@ -4,8 +4,7 @@ const log = std.log;
 const common = @import("common.zig");
 const ParserError = common.ParserError;
 
-pub const TypeTag = enum { Double, Int, Long, FunType, Pointer, UInt, ULong };
-pub const Type = union(TypeTag) {
+pub const Type = union(enum) {
     pub const Signage = enum { Signed, Unsigned };
 
     const Error = error{NonComparable};

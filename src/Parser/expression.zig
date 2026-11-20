@@ -18,17 +18,7 @@ const Type = @import("type.zig").Type;
 
 const ExpectedErrors = Allocator.Error || ParserError;
 
-pub const ExpressionTag = enum {
-    Assignment,
-    Binary,
-    Cast,
-    Constant,
-    FunctionCall,
-    Ternary,
-    Unary,
-    Var,
-};
-pub const Expression = union(ExpressionTag) {
+pub const Expression = union(enum) {
     Assignment: Assignment,
     Binary: Binary,
     Cast: Cast,
@@ -295,8 +285,7 @@ pub const Cast = struct {
     }
 };
 
-const ConstantTag = enum { double, int, uint, long, ulong };
-pub const Constant = union(ConstantTag) {
+pub const Constant = union(enum) {
     double: f64,
     int: i32,
     uint: u32,

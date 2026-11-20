@@ -25,27 +25,7 @@ pub const LONGWORD_BYTES: isize = 4;
 pub const QUADWORD_BYTES: isize = 8;
 const UPPER_BOUND_Q: f64 = 9223372036854775808.0;
 
-const InstructionTag = enum {
-    Binary,
-    Call,
-    Cdq,
-    Cmp,
-    Cvtsi2sd,
-    Cvttsd2si,
-    Div,
-    Idiv,
-    Jmp,
-    JmpCC,
-    Label,
-    Mov,
-    Movsx,
-    Movzx,
-    Push,
-    Ret,
-    SetCC,
-    Unary,
-};
-pub const Instruction = union(InstructionTag) {
+pub const Instruction = union(enum) {
     Binary: Binary,
     Call: Call,
     Cdq: Cdq,

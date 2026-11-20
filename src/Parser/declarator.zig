@@ -14,8 +14,7 @@ const expect = common.expect;
 
 const Type = @import("type.zig").Type;
 
-const DeclaratorTag = enum { Ident, PointerDeclarator, FunDeclarator };
-pub const Declarator = union(DeclaratorTag) {
+pub const Declarator = union(enum) {
     Ident: Ident,
     PointerDeclarator: PointerDeclarator,
     FunDeclarator: FunDeclarator,
