@@ -82,7 +82,7 @@ pub fn main(init: process.Init) !void {
             symbolTable = try Semantic.run(allocator, &tree, file.lines);
 
             if (debug) {
-                std.debug.print("-------parsed-------\n", .{});
+                std.debug.print("------validated-----\n", .{});
                 try Debugger.printParserAST(tree, symbolTable);
             }
         } else return;

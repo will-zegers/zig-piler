@@ -548,26 +548,27 @@ pub const Var = struct {
 
 fn parseFactor(allocator: Allocator, tokens: *TokenIterator) ExpectedErrors!Expression {
     const token = tokens.next();
-    var expr: Expression = blk: switch (token.type) {
-        .Constant => .{ .Constant = try .parse(token) },
+    var expr: Expression = undefined;
+    switch (token.type) {
+        .Constant => expr = .{ .Constant = try .parse(token) },
         .UnaryOp => { // '~'|'!'|'-'|'++'|'--' <factor>
             const right = try parseFactor(allocator, tokens);
-            break :blk try Unary.pre(allocator, token, right);
+            expr = try Unary.pre(allocator, token, right);
         },
         .BinaryOp => { // '*' | '&' <factor>
             // Repeats the same as the prong above, treating '*' and '&' as unary.
             // TODO: Need to find a better classification for symbols that require more context
             // from the parser.
             const right = try parseFactor(allocator, tokens);
-            break :blk try Unary.pre(allocator, token, right);
+            expr = try Unary.pre(allocator, token, right);
         },
         .Identifier => {
             const nextToken = tokens.peek();
             if (nextToken.type == .OpenParenthesis) { // check if this a function call
                 tokens.rewind(); // back up to process all parts of the function call
-                break :blk .{ .FunctionCall = try .parse(allocator, tokens) };
+                expr = .{ .FunctionCall = try .parse(allocator, tokens) };
             } else { // otherwise it's just a plain variable
-                break :blk .{ .Var = .{ .name = token.symbol, .lineIndex = token.lineIndex } };
+                expr = .{ .Var = .{ .name = token.symbol, .lineIndex = token.lineIndex } };
             }
         },
         .OpenParenthesis => { // '(' <expr> ')'
@@ -575,17 +576,16 @@ fn parseFactor(allocator: Allocator, tokens: *TokenIterator) ExpectedErrors!Expr
             switch (nextToken.type) {
                 .Double, .Int, .Long, .Signed, .Unsigned => {
                     tokens.rewind();
-                    break :blk .{ .Cast = try Cast.parse(allocator, tokens) };
+                    expr = .{ .Cast = try Cast.parse(allocator, tokens) };
                 },
                 else => {
-                    const expr: Expression = try .parse(allocator, tokens, 0);
+                    expr = try .parse(allocator, tokens, 0);
                     try expect(.CloseParenthesis, tokens.next());
-                    break :blk expr;
                 },
             }
         },
         else => return unexpectedToken(token),
-    };
+    }
 
     var nextToken = tokens.peek();
     while (nextToken.type == .UnaryOp) { // check for postfix operators

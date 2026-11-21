@@ -102,16 +102,16 @@ pub const Declaration = union(enum) {
     fn processDeclarator(allocator: Allocator, declarator: Declarator, baseType: Type) ExpectedErrors!struct { []const u8, Type, [][]const u8 } {
         var paramNames: ArrayList([]const u8) = .empty;
         switch (declarator) {
-            .Ident => |i| return .{ i.name, baseType, try paramNames.toOwnedSlice(allocator) },
-            .PointerDeclarator => |d| {
+            .Identifier => |i| return .{ i.name, baseType, try paramNames.toOwnedSlice(allocator) },
+            .Pointer => |d| {
                 const ref = try allocator.create(Type);
                 ref.* = baseType;
                 const derivedType: Type = .{ .Pointer = .{ .referenced = ref } };
 
                 return processDeclarator(allocator, d.decl.*, derivedType);
             },
-            .FunDeclarator => |f| {
-                if (f.decl.* != .Ident) {
+            .Function => |f| {
+                if (f.decl.* != .Identifier) {
                     log.err("Can't apply additional type derivations to a function type", .{});
                     return Parser.Error.AdditionalFunctionDerivation;
                 }
@@ -133,7 +133,7 @@ pub const Declaration = union(enum) {
                 ret.* = baseType;
 
                 const derivedType: Type = .{ .FunType = .{ .params = try paramTypes.toOwnedSlice(allocator), .ret = ret } };
-                return .{ f.decl.Ident.name, derivedType, try paramNames.toOwnedSlice(allocator) };
+                return .{ f.decl.Identifier.name, derivedType, try paramNames.toOwnedSlice(allocator) };
             },
         }
     }
@@ -192,12 +192,7 @@ pub const FunDecl = struct {
             }
         }
         allocator.free(self.params);
-
-        for (self.type.FunType.params) |param| {
-            allocator.destroy(param);
-        }
-        allocator.free(self.type.FunType.params);
-        allocator.destroy(self.type.FunType.ret);
+        self.type.deinit(allocator);
     }
 };
 
@@ -238,6 +233,7 @@ pub const VarDecl = struct {
     pub fn deinit(self: *VarDecl, allocator: Allocator) void {
         if (self.unique) |unique| allocator.free(unique);
         if (self.init) |*init| init.deinit(allocator);
+        self.type.deinit(allocator);
     }
 };
 

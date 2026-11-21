@@ -15,16 +15,16 @@ const expect = common.expect;
 const Type = @import("type.zig").Type;
 
 pub const Declarator = union(enum) {
-    Ident: Ident,
-    PointerDeclarator: PointerDeclarator,
-    FunDeclarator: FunDeclarator,
+    Identifier: Identifier,
+    Pointer: Pointer,
+    Function: Function,
 
     pub fn parse(allocator: Allocator, tokens: *Token.Iterator) ExpectedErrors!Declarator {
         const token = tokens.next();
         if (mem.eql(u8, "*", token.symbol)) {
             const decl = try allocator.create(Declarator);
             decl.* = try Declarator.parse(allocator, tokens);
-            return .{ .PointerDeclarator = .{ .decl = decl } };
+            return .{ .Pointer = .{ .decl = decl } };
         }
 
         var simple: Declarator = undefined;
@@ -33,17 +33,25 @@ pub const Declarator = union(enum) {
             try expect(.CloseParenthesis, tokens.next());
         } else {
             try expect(.Identifier, token);
-            simple = .{ .Ident = .{ .name = token.symbol } };
+            simple = .{ .Identifier = .{ .name = token.symbol } };
         }
 
         if (isFunType(tokens)) {
             const paramList = try parseParamList(allocator, tokens);
             const decl = try allocator.create(Declarator);
             decl.* = simple;
-            return .{ .FunDeclarator = .{ .decl = decl, .paramInfo = paramList } };
+            return .{ .Function = .{ .decl = decl, .paramInfo = paramList } };
         }
 
         return simple;
+    }
+
+    pub fn deinit(self: Declarator, allocator: Allocator) void {
+        switch (self) {
+            .Function => self.Function.deinit(allocator),
+            .Identifier => {},
+            .Pointer => self.Pointer.deinit(allocator),
+        }
     }
 
     fn isFunType(tokens: *const Token.Iterator) bool {
@@ -79,14 +87,6 @@ pub const Declarator = union(enum) {
 
         return paramList.toOwnedSlice(allocator);
     }
-
-    pub fn deinit(self: Declarator, allocator: Allocator) void {
-        switch (self) {
-            .Ident => {},
-            .FunDeclarator => self.FunDeclarator.deinit(allocator),
-            .PointerDeclarator => self.PointerDeclarator.deinit(allocator),
-        }
-    }
 };
 
 const Param = struct {
@@ -94,32 +94,40 @@ const Param = struct {
     decl: Declarator,
 };
 
-const Ident = struct { name: []const u8 };
-const PointerDeclarator = struct {
+const Identifier = struct { name: []const u8 };
+
+const Pointer = struct {
     decl: *Declarator,
 
-    fn init(allocator: Allocator, declarator: Declarator) Allocator.Error!PointerDeclarator {
+    fn init(allocator: Allocator, declarator: Declarator) Allocator.Error!Pointer {
         const decl = try allocator.create(Declarator);
         decl.* = declarator;
         return .{ .decl = decl };
     }
 
-    fn deinit(self: PointerDeclarator, allocator: Allocator) void {
+    fn deinit(self: Pointer, allocator: Allocator) void {
+        self.decl.deinit(allocator);
         allocator.destroy(self.decl);
     }
 };
-const FunDeclarator = struct {
+
+const Function = struct {
     decl: *Declarator,
     paramInfo: []Param,
 
-    fn init(allocator: Allocator, declarator: Declarator) Allocator.Error!FunDeclarator {
+    fn init(allocator: Allocator, declarator: Declarator) Allocator.Error!Function {
         const decl = try allocator.create(Declarator);
         decl.* = declarator;
         return .{ .decl = decl };
     }
 
-    fn deinit(self: FunDeclarator, allocator: Allocator) void {
-        allocator.destroy(self.decl);
+    fn deinit(self: Function, allocator: Allocator) void {
+        for (self.paramInfo) |param| {
+            param.decl.deinit(allocator);
+        }
         allocator.free(self.paramInfo);
+
+        self.decl.deinit(allocator);
+        allocator.destroy(self.decl);
     }
 };

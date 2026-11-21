@@ -1,4 +1,5 @@
 const std = @import("std");
+const Allocator = std.mem.Allocator;
 const log = std.log;
 
 const common = @import("common.zig");
@@ -69,6 +70,26 @@ pub const Type = union(enum) {
                 .FunType, .Pointer, .UInt, .ULong => unreachable,
             },
             .FunType, .Pointer, .UInt, .ULong => unreachable,
+        }
+    }
+
+    pub fn deinit(self: Type, allocator: Allocator) void {
+        switch (self) {
+            .FunType => {
+                for (self.FunType.params) |param| {
+                    param.deinit(allocator);
+                    allocator.destroy(param);
+                }
+                allocator.free(self.FunType.params);
+
+                self.FunType.ret.*.deinit(allocator);
+                allocator.destroy(self.FunType.ret);
+            },
+            .Pointer => {
+                self.Pointer.referenced.*.deinit(allocator);
+                allocator.destroy(self.Pointer.referenced);
+            },
+            else => {},
         }
     }
 
